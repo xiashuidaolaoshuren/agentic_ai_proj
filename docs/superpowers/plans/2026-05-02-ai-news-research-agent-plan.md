@@ -95,7 +95,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T1 - Project Scaffold And Tooling
 
-- [ ] **Do:** Create the Python package scaffold, dependency config, README, `.gitignore`, and `.env.example`. Establish the test command and local run command.
+- [X] **Do:** Create the Python package scaffold, dependency config, README, `.gitignore`, and `.env.example`. Establish the test command and local run command.
 - **Blocked by:** —
 - **Plan mode:** high
 - **Verification:** `python -m pytest --version` and `python -c "import ai_news_agent"`
