@@ -102,7 +102,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 - Domain Models And Topic Defaults
 
-- [ ] **Do:** Define typed models for source items, ranked items, digest outputs, warnings, and the initial AI topic taxonomy. Keep the models stable enough for connectors and storage to depend on.
+- [X] **Do:** Define typed models for source items, ranked items, digest outputs, warnings, and the initial AI topic taxonomy. Keep the models stable enough for connectors and storage to depend on.
 - **Blocked by:** T1
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_models.py`
