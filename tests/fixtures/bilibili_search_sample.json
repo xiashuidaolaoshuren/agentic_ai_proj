@@ -1,0 +1,23 @@
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "note": "Keyword metadata only; transcript not fetched for MVP.",
+    "result": [
+      {
+        "bvid": "BV1demo0001",
+        "title": "Multimodal RAG in 15 minutes",
+        "author": "AILabChannel",
+        "play": 15230,
+        "description": "Overview of retrieval patterns for multimodal inputs."
+      },
+      {
+        "bvid": "BV1demo0002",
+        "title": "Building agents with LangGraph",
+        "author": "DevStream",
+        "play": 8901,
+        "description": null
+      }
+    ]
+  }
+}

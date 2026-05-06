@@ -1,0 +1,48 @@
+{
+  "total_count": 2,
+  "incomplete_results": true,
+  "items": [
+    {
+      "id": 9001,
+      "node_id": "R_kgDOFAKE01",
+      "name": "awesome-agents",
+      "full_name": "demo-org/awesome-agents",
+      "private": false,
+      "owner": {
+        "login": "demo-org",
+        "id": 100
+      },
+      "html_url": "https://github.com/demo-org/awesome-agents",
+      "description": "Curated list of AI agent frameworks and tutorials.",
+      "fork": false,
+      "url": "https://api.github.com/repos/demo-org/awesome-agents",
+      "created_at": "2025-01-10T10:00:00Z",
+      "updated_at": "2026-05-01T08:30:00Z",
+      "pushed_at": "2026-05-01T08:30:00Z",
+      "stargazers_count": 1280,
+      "language": "Python",
+      "topics": ["agents", "llm"]
+    },
+    {
+      "id": 9002,
+      "node_id": "R_kgDOFAKE02",
+      "name": "rag-cookbook",
+      "full_name": "demo-org/rag-cookbook",
+      "private": false,
+      "owner": {
+        "login": "demo-org",
+        "id": 100
+      },
+      "html_url": "https://github.com/demo-org/rag-cookbook",
+      "description": null,
+      "fork": false,
+      "url": "https://api.github.com/repos/demo-org/rag-cookbook",
+      "created_at": "2025-03-02T12:00:00Z",
+      "updated_at": "2026-04-28T15:00:00Z",
+      "pushed_at": "2026-04-28T15:00:00Z",
+      "stargazers_count": 420,
+      "language": "Jupyter Notebook",
+      "topics": ["rag", "embeddings"]
+    }
+  ]
+}

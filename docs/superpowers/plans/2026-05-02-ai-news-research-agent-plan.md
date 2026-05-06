@@ -109,7 +109,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 - Connector Interfaces And Fixtures
 
-- [ ] **Do:** Define the connector protocol/result shape and create fixture data for GitHub and Bilibili-like results. This gives later connector work a test-first contract.
+- [X] **Do:** Define the connector protocol/result shape and create fixture data for GitHub and Bilibili-like results. This gives later connector work a test-first contract.
 - **Blocked by:** T2
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_connector_contracts.py`
