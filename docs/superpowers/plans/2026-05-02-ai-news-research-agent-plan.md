@@ -116,7 +116,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 - Local Storage Layer
 
-- [ ] **Do:** Implement SQLite persistence for source metadata, normalized items, ranking results, final digests, and connector warnings. Include retrieval helpers for latest digest follow-up.
+- [X] **Do:** Implement SQLite persistence for source metadata, normalized items, ranking results, final digests, and connector warnings. Include retrieval helpers for latest digest follow-up.
 - **Blocked by:** T2
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_storage.py`
