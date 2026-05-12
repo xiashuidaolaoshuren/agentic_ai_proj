@@ -16,6 +16,10 @@ class ConnectorRequest:
     timeframe: str | None = None
     max_items: int = 20
     language_hint: str | None = None
+    #: Bilibili MID (numeric string) or uploader handle (resolved via user search when possible).
+    target_channels: list[str] = field(default_factory=list)
+    #: Explicit Bilibili video page URLs for metadata lookup.
+    manual_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

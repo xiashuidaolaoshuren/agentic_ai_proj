@@ -130,7 +130,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 - Bilibili-Oriented Connector
 
-- [ ] **Do:** Implement conservative Bilibili-oriented collection using keyword metadata, optional uploader-targeted inputs (request-provided handles/UIDs), and/or manually supplied links. It must mark missing transcript/content as lower confidence rather than inventing details.
+- [X] **Do:** Implement conservative Bilibili-oriented collection using keyword metadata, optional uploader-targeted inputs (request-provided handles/UIDs), and/or manually supplied links. It must mark missing transcript/content as lower confidence rather than inventing details.
 - **Blocked by:** T3
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_connectors_bilibili.py`
@@ -200,5 +200,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | Date | Change |
 |------|--------|
 | 2026-05-02 | Initial implementation plan for Milestone 1: Local Digest MVP |
-| 2026-05-12 | Updated T6 scope to include uploader-targeted Bilibili inputs (request-provided handles/UIDs) while keeping metadata-first conservative behavior |
+| 2026-05-12 | Completed T6: `BilibiliConnector`, extended `ConnectorRequest`, tests in `test_connectors_bilibili.py` |
 

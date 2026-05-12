@@ -167,6 +167,18 @@ def test_connector_request_fields() -> None:
     assert r.timeframe == "last_7_days"
     assert r.max_items == 3
     assert r.language_hint == "zh"
+    assert r.target_channels == []
+    assert r.manual_urls == []
+
+
+def test_connector_request_optional_targeting_fields() -> None:
+    r = ConnectorRequest(
+        topics=["x"],
+        target_channels=["123456", "SomeUp"],
+        manual_urls=["https://www.bilibili.com/video/BV1abcdefgh"],
+    )
+    assert r.target_channels == ["123456", "SomeUp"]
+    assert r.manual_urls == ["https://www.bilibili.com/video/BV1abcdefgh"]
 
 
 def test_github_fixture_loads_and_maps() -> None:
