@@ -33,7 +33,7 @@ Ship a local-first Python/LangGraph AI News Research Chatbot that generates an o
 | `src/ai_news_agent/connectors/__init__.py` | create | Connector package exports | connector imports |
 | `src/ai_news_agent/connectors/base.py` | create | Connector protocol and shared result types | `SourceConnector`, `ConnectorResult` |
 | `src/ai_news_agent/connectors/github.py` | create | GitHub search/repo metadata connector | `GitHubConnector` |
-| `src/ai_news_agent/connectors/bilibili.py` | create | Conservative Bilibili keyword/manual-link metadata connector | `BilibiliConnector` |
+| `src/ai_news_agent/connectors/bilibili.py` | create | Conservative Bilibili metadata connector (keyword + uploader-targeted + manual-link inputs) | `BilibiliConnector` |
 | `src/ai_news_agent/ranking.py` | create | Score, deduplicate, and select candidate items | `rank_items()` |
 | `src/ai_news_agent/llm.py` | create | OpenAI-compatible chat client wrapper and testable protocol | `ChatModel`, `build_chat_model()` |
 | `src/ai_news_agent/summarizer.py` | create | Convert ranked source data into digest entries using LLM or test stub | `summarize_ranked_items()` |
@@ -123,14 +123,14 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 - GitHub Connector
 
-- [ ] **Do:** Implement a GitHub connector that maps API/search results into `NewsItem` objects, handles missing optional fields, and records rate-limit or request warnings.
+- [X] **Do:** Implement a GitHub connector that maps API/search results into `NewsItem` objects, handles missing optional fields, and records rate-limit or request warnings.
 - **Blocked by:** T3
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_connectors_github.py`
 
 ### T6 - Bilibili-Oriented Connector
 
-- [ ] **Do:** Implement conservative Bilibili-oriented collection using keyword metadata and/or manually supplied links. It must mark missing transcript/content as lower confidence rather than inventing details.
+- [ ] **Do:** Implement conservative Bilibili-oriented collection using keyword metadata, optional uploader-targeted inputs (request-provided handles/UIDs), and/or manually supplied links. It must mark missing transcript/content as lower confidence rather than inventing details.
 - **Blocked by:** T3
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_connectors_bilibili.py`
@@ -200,4 +200,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | Date | Change |
 |------|--------|
 | 2026-05-02 | Initial implementation plan for Milestone 1: Local Digest MVP |
+| 2026-05-12 | Updated T6 scope to include uploader-targeted Bilibili inputs (request-provided handles/UIDs) while keeping metadata-first conservative behavior |
 

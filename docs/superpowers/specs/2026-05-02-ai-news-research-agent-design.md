@@ -178,7 +178,7 @@ OpenClaw should not be required for MVP success.
 ## Data Flow
 
 1. User asks the chatbot for an AI digest.
-2. Agent interprets the request into topic, timeframe, source, and language preferences.
+2. Agent interprets the request into topic, timeframe, source, language preferences, and optional source-targeting inputs (for example, specific Bilibili uploader handles/UIDs or manually supplied links).
 3. GitHub and Bilibili-oriented connectors collect candidate items.
 4. Candidates are normalized into a shared `NewsItem` format.
 5. Ranking layer filters duplicates and weak items, then selects top candidates.
@@ -202,7 +202,7 @@ Use official GitHub APIs and search features where possible. The connector shoul
 
 ### Bilibili-Oriented Discovery
 
-Start conservatively. The connector may use keyword/search-result metadata and manually supplied video links if needed. It should collect available metadata such as:
+Start conservatively. The connector may use keyword/search-result metadata, uploader-targeted metadata collection (via request-provided handles/UIDs), and manually supplied video links when needed. It should collect available metadata such as:
 
 - video title
 - URL
@@ -213,6 +213,8 @@ Start conservatively. The connector may use keyword/search-result metadata and m
 - accessible transcript, subtitle, or text metadata when available
 
 If transcript or deeper video content is unavailable, the agent must label the item as lower confidence and summarize only from available metadata.
+
+Uploader targeting should remain metadata-first in Milestone 1: collect uploader/video metadata when accessible, but do not require brittle deep crawling or full transcript extraction for success.
 
 ### Future Sources
 
@@ -338,6 +340,6 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Model access: use an OpenAI-compatible client abstraction configured by environment variables, so the first implementation can work with the user's available API provider.
 - Initial topic taxonomy: AI agents, model releases, RAG, multimodal AI, AI developer tools, and notable open-source repos.
 - Initial GitHub query strategy: search recent repositories and topics using the taxonomy above, with ranking boosted by freshness, stars, recent activity, and README relevance.
-- Initial Bilibili strategy: keyword-based discovery plus manually supplied links when needed; do not require brittle deep crawling for MVP success.
+- Initial Bilibili strategy: keyword-based discovery plus optional uploader-targeted collection and manually supplied links when needed; keep it metadata-first and do not require brittle deep crawling for MVP success.
 - Default digest length: 5 ranked items per run, with the option to request a shorter or longer digest in chat.
 
