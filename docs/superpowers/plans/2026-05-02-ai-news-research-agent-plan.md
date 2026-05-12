@@ -137,7 +137,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 - Ranking And Deduplication
 
-- [ ] **Do:** Implement scoring, duplicate handling, source-quality penalties, freshness handling, and top-N selection. Ranking reasons must be inspectable.
+- [X] **Do:** Implement scoring, duplicate handling, source-quality penalties, freshness handling, and top-N selection. Ranking reasons must be inspectable.
 - **Blocked by:** T2, T5, T6
 - **Plan mode:** medium
 - **Verification:** `python -m pytest tests/test_ranking.py`
@@ -201,4 +201,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 |------|--------|
 | 2026-05-02 | Initial implementation plan for Milestone 1: Local Digest MVP |
 | 2026-05-12 | Completed T6: `BilibiliConnector`, extended `ConnectorRequest`, tests in `test_connectors_bilibili.py` |
+| 2026-05-12 | Completed T7: `rank_items()` in `ranking.py`, tests in `test_ranking.py` |
 
