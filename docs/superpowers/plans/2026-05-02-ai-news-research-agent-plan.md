@@ -151,7 +151,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T9 - Markdown/Text Rendering
 
-- [ ] **Do:** Render digest objects into readable Markdown/text for CLI and Gradio. Keep rendering separate from summarization so outputs are easy to test.
+- [X] **Do:** Render digest objects into readable Markdown/text for CLI and Gradio. Keep rendering separate from summarization so outputs are easy to test.
 - **Blocked by:** T8
 - **Plan mode:** skip
 - **Verification:** `python -m pytest tests/test_rendering.py`
