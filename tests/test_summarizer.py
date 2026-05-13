@@ -1,0 +1,310 @@
+"""Tests for LLM-backed summarization (Milestone 1 Task 8)."""
+
+from __future__ import annotations
+
+import os
+from datetime import UTC, datetime
+
+from ai_news_agent.models import (
+    ConfidenceLevel,
+    FollowUpAction,
+    NewsItem,
+    RankedItem,
+    SourceKind,
+)
+
+
+def _fixed_now() -> datetime:
+    return datetime(2026, 5, 13, 4, 0, 0, tzinfo=UTC)
+
+
+def test_summarize_ranked_items_returns_digest_when_no_candidates() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    digest = summarize_ranked_items(
+        [],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        timeframe="today",
+    )
+    assert digest.entries == []
+    assert digest.generated_at == _fixed_now()
+    assert digest.topics == ["AI"]
+    assert digest.timeframe == "today"
+
+
+def test_summarize_skips_unselected_ranked_items() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="1",
+        url="https://example.com",
+        title="t",
+        collected_at=_fixed_now(),
+    )
+    ranked = [RankedItem(item=ni, score_total=1.0, selected=False)]
+    digest = summarize_ranked_items(ranked, generated_at=_fixed_now(), topics=["x"])
+    assert digest.entries == []
+
+
+class FakeChatModel:
+    """Deterministic substitute for LLM-backed JSON generation in tests."""
+
+    _DEFAULT = {
+        "summary": "Brief summary.",
+        "why_it_matters": "Why.",
+        "background_knowledge": "Background.",
+        "follow_up_action": "read",
+    }
+
+    def __init__(
+        self,
+        *,
+        default: dict | None = None,
+        per_source: dict[tuple[SourceKind, str, str], dict] | None = None,
+    ) -> None:
+        self.calls: list[dict] = []
+        self._default = dict(self._DEFAULT if default is None else default)
+        self._per_source = dict(per_source or {})
+
+    def generate_entry_fields(self, context: dict) -> dict:
+        self.calls.append(context)
+        key = (
+            SourceKind(context["source_kind"]),
+            str(context["source_id"]),
+            str(context["title"]),
+        )
+        if key in self._per_source:
+            return dict(self._per_source[key])
+        return dict(self._default)
+
+
+def test_summarize_one_selected_requires_model() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="s1",
+        url="https://github.com/org/repo",
+        title="org/repo",
+        collected_at=_fixed_now(),
+        author="alice",
+        raw_snippet="description",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    ranked = [RankedItem(item=ni, score_total=2.0, selected=True)]
+    try:
+        summarize_ranked_items(ranked, generated_at=_fixed_now(), topics=["AI"])
+    except ValueError as exc:
+        assert "model" in str(exc).lower()
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_summarize_one_selected_uses_fake_model_output() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="s1",
+        url="https://github.com/org/repo",
+        title="org/repo",
+        collected_at=_fixed_now(),
+        author="alice",
+        raw_snippet="Rust agent toolkit.",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    fake = FakeChatModel()
+    ranked = [RankedItem(item=ni, score_total=2.0, selected=True, selection_reason="rank #1")]
+    digest = summarize_ranked_items(
+        ranked,
+        generated_at=_fixed_now(),
+        topics=["agents"],
+        timeframe="today",
+        model=fake,
+    )
+    assert len(digest.entries) == 1
+    e = digest.entries[0]
+    assert e.source_kind is SourceKind.GITHUB
+    assert e.source_id == "s1"
+    assert e.source_url == ni.url
+    assert e.title == ni.title
+    assert e.summary == "Brief summary."
+    assert e.why_it_matters == "Why."
+    assert e.background_knowledge == "Background."
+    assert e.follow_up_action is FollowUpAction.READ
+    assert fake.calls and fake.calls[0]["url"] == ni.url
+
+
+def test_summarize_keeps_selected_order_aligned_with_input_rank_list() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    n1 = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVaaa",
+        url="https://www.bilibili.com/video/BVaaa",
+        title="Video A",
+        collected_at=_fixed_now(),
+        raw_snippet="a",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    n2 = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="g2",
+        url="https://github.com/o/two",
+        title="two",
+        collected_at=_fixed_now(),
+        raw_snippet="b",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    ranked = [
+        RankedItem(item=n1, score_total=3.0, selected=True),
+        RankedItem(item=n2, score_total=2.0, selected=True),
+    ]
+
+    outs = {
+        (SourceKind.BILIBILI, "BVaaa", "Video A"): {
+            "summary": "S-A",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "watch",
+        },
+        (SourceKind.GITHUB, "g2", "two"): {
+            "summary": "S-B",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "try",
+        },
+    }
+    fake = FakeChatModel(per_source=outs)
+    digest = summarize_ranked_items(ranked, generated_at=_fixed_now(), topics=["t"], model=fake)
+    assert [x.summary for x in digest.entries] == ["S-A", "S-B"]
+    assert digest.entries[0].follow_up_action is FollowUpAction.WATCH
+    assert digest.entries[1].follow_up_action is FollowUpAction.TRY
+
+
+def test_low_confidence_adds_caveat_even_if_model_omits() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="low1",
+        url="https://github.com/x/y",
+        title="y",
+        collected_at=_fixed_now(),
+        raw_snippet="meta only",
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    fake = FakeChatModel(
+        default={
+            "summary": "S",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "read",
+        }
+    )
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["t"],
+        model=fake,
+    )
+    e = digest.entries[0]
+    assert e.confidence_caveat
+    assert "low-confidence" in e.confidence_caveat.lower()
+
+
+def test_invalid_follow_up_action_defaults_to_read_with_note() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="bad",
+        url="https://github.com/x/z",
+        title="z",
+        collected_at=_fixed_now(),
+        raw_snippet="snippet",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    fake = FakeChatModel(
+        default={
+            "summary": "S",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "surf-the-web",
+        }
+    )
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["t"],
+        model=fake,
+    )
+    e = digest.entries[0]
+    assert e.follow_up_action is FollowUpAction.READ
+    assert e.confidence_caveat
+    assert "Unrecognized follow_up_action" in e.confidence_caveat
+
+
+def test_missing_raw_snippet_triggers_metadata_only_caveat() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="ms",
+        url="https://github.com/x/m",
+        title="m",
+        collected_at=_fixed_now(),
+        raw_snippet=None,
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["t"],
+        model=fake,
+    )
+    assert "metadata-only" in (digest.entries[0].confidence_caveat or "").lower()
+
+
+def test_digest_round_trips_through_models_codec() -> None:
+    from ai_news_agent.models import digest_from_dict, digest_to_dict
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="rt",
+        url="https://github.com/x/r",
+        title="r",
+        collected_at=_fixed_now(),
+        raw_snippet="z",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    d0 = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["a"],
+        timeframe="week",
+        model=FakeChatModel(),
+    )
+    d1 = digest_from_dict(digest_to_dict(d0))
+    assert len(d1.entries) == 1
+    assert d1.entries[0].summary == d0.entries[0].summary
+
+
+def test_build_chat_model_requires_api_key_when_unset() -> None:
+    from ai_news_agent.llm import build_chat_model
+
+    backup = os.environ.pop("OPENAI_API_KEY", None)
+    try:
+        try:
+            build_chat_model()
+        except ValueError as exc:
+            assert "OPENAI_API_KEY" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        if backup is not None:
+            os.environ["OPENAI_API_KEY"] = backup

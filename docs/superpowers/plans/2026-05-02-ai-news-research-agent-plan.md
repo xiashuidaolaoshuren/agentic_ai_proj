@@ -144,7 +144,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 - LLM Client And Summarization
 
-- [ ] **Do:** Add an OpenAI-compatible model wrapper plus a summarizer that creates source-language summaries, why-it-matters notes, background knowledge, follow-up actions, and confidence caveats. Tests should use a fake model.
+- [X] **Do:** Add an OpenAI-compatible model wrapper plus a summarizer that creates source-language summaries, why-it-matters notes, background knowledge, follow-up actions, and confidence caveats. Tests should use a fake model.
 - **Blocked by:** T2, T7
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_summarizer.py`
@@ -202,4 +202,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-02 | Initial implementation plan for Milestone 1: Local Digest MVP |
 | 2026-05-12 | Completed T6: `BilibiliConnector`, extended `ConnectorRequest`, tests in `test_connectors_bilibili.py` |
 | 2026-05-12 | Completed T7: `rank_items()` in `ranking.py`, tests in `test_ranking.py` |
+| 2026-05-13 | Completed T8: `llm.py` (OpenAI SDK) + `summarizer.py`, `test_summarizer.py` |
 
