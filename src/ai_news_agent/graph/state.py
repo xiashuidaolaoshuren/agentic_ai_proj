@@ -20,6 +20,7 @@ from datetime import datetime
 from operator import add
 from typing import Annotated, TypedDict
 
+from ai_news_agent.connectors.base import ConnectorRequest
 from ai_news_agent.models import ConnectorWarning, Digest, NewsItem, RankedItem, utcnow
 from ai_news_agent.request import DigestRequest
 
@@ -53,6 +54,7 @@ class DigestGraphState(TypedDict, total=False):
     """LangGraph state for the digest pipeline."""
 
     request: DigestRequest
+    connector_request: ConnectorRequest | None
     started_at: datetime
     finished_at: datetime | None
 

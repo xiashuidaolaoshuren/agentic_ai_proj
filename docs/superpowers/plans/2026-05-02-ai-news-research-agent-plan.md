@@ -167,7 +167,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10b - Request Parsing And Collection Node
 
-- [ ] **Do:** Convert digest requests into `ConnectorRequest` values, invoke the configured connectors, merge collected items, and preserve connector warnings in workflow state. Use fake connectors in tests for deterministic success and partial-failure coverage.
+- [X] **Do:** Convert digest requests into `ConnectorRequest` values, invoke the configured connectors, merge collected items, and preserve connector warnings in workflow state. Use fake connectors in tests for deterministic success and partial-failure coverage.
 - **Blocked by:** T10a
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_workflow.py`
@@ -236,4 +236,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-16 | Decomposed T10 LangGraph workflow into T10a-T10e for smaller workflow implementation slices |
 | 2026-05-16 | Documented `src/ai_news_agent/request.py` / `DigestRequest` in file map, blast radius, and T10a; distinct from `ConnectorRequest` |
 | 2026-05-16 | Completed T10a: `DigestRequest`, `DigestGraphState` (TypedDict + reducers), `DigestResult`, `WorkflowError`, `tests/test_workflow.py`; added `langgraph` dependency |
+| 2026-05-16 | Completed T10b: `parse_request_node`, `make_collect_sources_node` (async), `connector_request` state slot, and fake-connector coverage in `tests/test_workflow.py` |
 

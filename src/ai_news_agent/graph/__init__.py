@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ai_news_agent.graph.nodes import make_collect_sources_node, parse_request_node
 from ai_news_agent.graph.state import (
     DigestGraphState,
     DigestResult,
@@ -14,6 +15,8 @@ __all__ = [
     "DigestGraphState",
     "DigestResult",
     "WorkflowError",
+    "make_collect_sources_node",
     "initial_state",
+    "parse_request_node",
     "state_to_result",
 ]
