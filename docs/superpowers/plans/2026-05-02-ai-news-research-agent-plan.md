@@ -30,6 +30,7 @@ Ship a local-first Python/LangGraph AI News Research Chatbot that generates an o
 | `src/ai_news_agent/config.py` | create | Load settings from environment with safe defaults | `Settings`, `load_settings()` |
 | `src/ai_news_agent/models.py` | create | Shared typed domain models for items, rankings, digests, and warnings | `NewsItem`, `RankedItem`, `Digest`, enums |
 | `src/ai_news_agent/topics.py` | create | Initial AI topic taxonomy and query expansion helpers | `DEFAULT_TOPICS`, `build_queries()` |
+| `src/ai_news_agent/request.py` | create | User-facing digest request for workflow, CLI, and UI (distinct from connector-facing `ConnectorRequest` in `connectors/base.py`) | `DigestRequest` |
 | `src/ai_news_agent/connectors/__init__.py` | create | Connector package exports | connector imports |
 | `src/ai_news_agent/connectors/base.py` | create | Connector protocol and shared result types | `SourceConnector`, `ConnectorResult` |
 | `src/ai_news_agent/connectors/github.py` | create | GitHub search/repo metadata connector | `GitHubConnector` |
@@ -76,6 +77,7 @@ Ship a local-first Python/LangGraph AI News Research Chatbot that generates an o
 |------|---------------|---------------------------------|
 | `pyproject.toml` | Establishes dependency and command structure for the whole project | high - confirm package manager, supported Python version, and dependency set |
 | `src/ai_news_agent/models.py` | Shared contract used by connectors, ranking, storage, summarization, and UI | high - finalize fields before dependent work |
+| `src/ai_news_agent/request.py` | Bridges user/UI input to the workflow; changes affect graph state and T10b parsing | medium - align with `ConnectorRequest` mapping in collection node |
 | `src/ai_news_agent/storage.py` | SQLite schema becomes the persistence contract | high - confirm schema and migration approach for MVP |
 | `src/ai_news_agent/connectors/github.py` | External API behavior, rate limits, auth, and response shape can change | high - verify API strategy and fallback behavior |
 | `src/ai_news_agent/connectors/bilibili.py` | Source access is less stable and must avoid brittle assumptions | high - verify conservative metadata approach |
@@ -232,4 +234,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-12 | Completed T7: `rank_items()` in `ranking.py`, tests in `test_ranking.py` |
 | 2026-05-13 | Completed T8: `llm.py` (OpenAI SDK) + `summarizer.py`, `test_summarizer.py` |
 | 2026-05-16 | Decomposed T10 LangGraph workflow into T10a-T10e for smaller workflow implementation slices |
+| 2026-05-16 | Documented `src/ai_news_agent/request.py` / `DigestRequest` in file map, blast radius, and T10a; distinct from `ConnectorRequest` |
 
