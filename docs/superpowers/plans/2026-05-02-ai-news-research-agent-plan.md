@@ -160,7 +160,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10a - Workflow Contracts And State
 
-- [ ] **Do:** Define the workflow input, typed graph state, final output shape, and warning/error propagation rules. Keep the contract narrow enough that later nodes can be tested with fake connectors and fake model objects.
+- [X] **Do:** Add `DigestRequest` in `src/ai_news_agent/request.py` (user/UI/CLI digest input; separate from `ConnectorRequest`). Define typed graph state (`DigestGraphState`), final result shape, and warning/error propagation in `src/ai_news_agent/graph/state.py`. Re-export from `src/ai_news_agent/graph/__init__.py`. Keep the contract narrow enough that later nodes can be tested with fake connectors and fake model objects.
 - **Blocked by:** T4, T5, T6, T7, T8, T9
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_workflow.py`
@@ -235,4 +235,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-13 | Completed T8: `llm.py` (OpenAI SDK) + `summarizer.py`, `test_summarizer.py` |
 | 2026-05-16 | Decomposed T10 LangGraph workflow into T10a-T10e for smaller workflow implementation slices |
 | 2026-05-16 | Documented `src/ai_news_agent/request.py` / `DigestRequest` in file map, blast radius, and T10a; distinct from `ConnectorRequest` |
+| 2026-05-16 | Completed T10a: `DigestRequest`, `DigestGraphState` (TypedDict + reducers), `DigestResult`, `WorkflowError`, `tests/test_workflow.py`; added `langgraph` dependency |
 
