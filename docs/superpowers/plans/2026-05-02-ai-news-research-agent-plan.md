@@ -156,24 +156,52 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **Plan mode:** skip
 - **Verification:** `python -m pytest tests/test_rendering.py`
 
-### T10 - LangGraph Workflow
+### T10a - Workflow Contracts And State
 
-- [ ] **Do:** Build the digest graph with nodes for request parsing, source collection, ranking, summarization, storage, and rendering. Use fake connectors/model in tests for deterministic coverage.
+- [ ] **Do:** Define the workflow input, typed graph state, final output shape, and warning/error propagation rules. Keep the contract narrow enough that later nodes can be tested with fake connectors and fake model objects.
 - **Blocked by:** T4, T5, T6, T7, T8, T9
+- **Plan mode:** high
+- **Verification:** `python -m pytest tests/test_workflow.py`
+
+### T10b - Request Parsing And Collection Node
+
+- [ ] **Do:** Convert digest requests into `ConnectorRequest` values, invoke the configured connectors, merge collected items, and preserve connector warnings in workflow state. Use fake connectors in tests for deterministic success and partial-failure coverage.
+- **Blocked by:** T10a
+- **Plan mode:** high
+- **Verification:** `python -m pytest tests/test_workflow.py`
+
+### T10c - Ranking And Summarization Nodes
+
+- [ ] **Do:** Wire collected items through `rank_items()` and `summarize_ranked_items()`, including empty-result behavior and fake-model summarization. Keep ranking evidence and confidence caveats available for storage and follow-up use.
+- **Blocked by:** T10b
+- **Plan mode:** medium
+- **Verification:** `python -m pytest tests/test_workflow.py`
+
+### T10d - Storage And Rendering Nodes
+
+- [ ] **Do:** Persist the workflow run, connector results, ranked items, and digest via `DigestStore`, then render Markdown/text outputs using the existing rendering helpers. Tests should use an isolated temporary SQLite store.
+- **Blocked by:** T10c
+- **Plan mode:** medium
+- **Verification:** `python -m pytest tests/test_workflow.py tests/test_storage.py tests/test_rendering.py`
+
+### T10e - Graph Assembly And End-To-End Workflow Tests
+
+- [ ] **Do:** Assemble the LangGraph workflow with named nodes for request parsing, source collection, ranking, summarization, storage, and rendering. Add end-to-end fake connector/model coverage for happy path, empty results, and non-fatal connector warnings.
+- **Blocked by:** T10d
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_workflow.py`
 
 ### T11 - Follow-Up Chat Service
 
 - [ ] **Do:** Implement a chat service that routes digest requests through the workflow and answers follow-up questions from the latest saved digest/source traces. Keep it independent from Gradio.
-- **Blocked by:** T4, T10
+- **Blocked by:** T4, T10e
 - **Plan mode:** medium
 - **Verification:** `python -m pytest tests/test_chat.py`
 
 ### T12 - CLI Smoke Entry Point
 
 - [ ] **Do:** Add a CLI path that can run a digest request with fixture/fake mode for smoke testing and future OpenClaw adapter compatibility.
-- **Blocked by:** T10
+- **Blocked by:** T10e
 - **Plan mode:** skip
 - **Verification:** `python -m pytest tests/test_cli.py`
 
@@ -203,4 +231,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-12 | Completed T6: `BilibiliConnector`, extended `ConnectorRequest`, tests in `test_connectors_bilibili.py` |
 | 2026-05-12 | Completed T7: `rank_items()` in `ranking.py`, tests in `test_ranking.py` |
 | 2026-05-13 | Completed T8: `llm.py` (OpenAI SDK) + `summarizer.py`, `test_summarizer.py` |
+| 2026-05-16 | Decomposed T10 LangGraph workflow into T10a-T10e for smaller workflow implementation slices |
 
