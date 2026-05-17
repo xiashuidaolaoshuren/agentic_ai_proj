@@ -188,7 +188,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10e - Graph Assembly And End-To-End Workflow Tests
 
-- [ ] **Do:** Assemble the LangGraph workflow with named nodes for request parsing, source collection, ranking, summarization, storage, and rendering. Add end-to-end fake connector/model coverage for happy path, empty results, and non-fatal connector warnings.
+- [X] **Do:** Assemble the LangGraph workflow with named nodes for request parsing, source collection, ranking, summarization, storage, and rendering. Add end-to-end fake connector/model coverage for happy path, empty results, and non-fatal connector warnings.
 - **Blocked by:** T10d
 - **Plan mode:** high
 - **Verification:** `python -m pytest tests/test_workflow.py`
@@ -239,3 +239,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-16 | Completed T10b: `parse_request_node`, `make_collect_sources_node` (async), `connector_request` state slot, and fake-connector coverage in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10c: `make_rank_items_node`, `make_summarize_items_node`, ranking/summarize tests in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10d: `persist_render` nodes (`make_persist_results_node`, `make_render_digest_node`), coverage in `tests/test_workflow.py` |
+| 2026-05-17 | Completed T10e: `graph/workflow.py` (`build_digest_graph`, `run_digest`), graph package re-exports, and end-to-end workflow tests in `tests/test_workflow.py` |

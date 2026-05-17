@@ -770,3 +770,150 @@ def test_t10d_persist_render_state_to_result_integration(tmp_path) -> None:
     assert result.markdown == render_digest_markdown(digest)
     assert result.text == render_digest_text(digest)
     assert result.digest is digest
+
+
+# --- Task T10e: graph assembly + end-to-end workflow --------------------------
+
+
+def test_build_digest_graph_returns_invokable_compiled_graph(tmp_path: Path) -> None:
+    from ai_news_agent.graph.workflow import build_digest_graph
+
+    db = tmp_path / "t10e-compile.db"
+    store = DigestStore(db)
+    store.init_schema()
+    graph = build_digest_graph(connectors=[], model=_FakeDigestModel(), store=store)
+
+    assert hasattr(graph, "ainvoke")
+
+
+def test_run_digest_happy_path_returns_digest_and_persists_run(tmp_path: Path) -> None:
+    from ai_news_agent.graph.workflow import run_digest
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    connector = _FakeConnector(name="github", items=[_news_item("a1"), _news_item("a2")])
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+
+    db = tmp_path / "t10e-happy.db"
+    store = DigestStore(db)
+    store.init_schema()
+
+    result = asyncio.run(
+        run_digest(
+            req,
+            connectors=[connector],
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        )
+    )
+
+    assert result.run_id == 1
+    assert result.digest is not None
+    assert len(result.digest.entries) > 0
+    assert result.markdown
+    assert result.text
+    assert result.errors == []
+    assert store.get_latest_digest() == result.digest
+
+
+def test_run_digest_with_no_items_returns_empty_digest_no_errors(tmp_path: Path) -> None:
+    from ai_news_agent.graph.workflow import run_digest
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    connector = _FakeConnector(name="github", items=[])
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+
+    db = tmp_path / "t10e-empty.db"
+    store = DigestStore(db)
+    store.init_schema()
+
+    result = asyncio.run(
+        run_digest(
+            req,
+            connectors=[connector],
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        )
+    )
+
+    assert result.run_id == 1
+    assert result.digest is not None
+    assert result.digest.entries == []
+    assert result.markdown
+    assert result.errors == []
+
+
+def test_run_digest_propagates_connector_warnings_into_result(tmp_path: Path) -> None:
+    from ai_news_agent.graph.workflow import run_digest
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    warning = ConnectorWarning(connector="github", code="rate_limit", message="slow")
+    connector = _FakeConnector(
+        name="github",
+        items=[_news_item("w1")],
+        warnings=[warning],
+    )
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+
+    db = tmp_path / "t10e-warnings.db"
+    store = DigestStore(db)
+    store.init_schema()
+
+    result = asyncio.run(
+        run_digest(
+            req,
+            connectors=[connector],
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        )
+    )
+
+    assert result.errors == []
+    assert result.warnings == [warning]
+    assert store.get_latest_followup_context().warnings == [warning]
+
+
+def test_run_digest_continues_when_one_connector_raises(tmp_path: Path) -> None:
+    from ai_news_agent.graph.workflow import run_digest
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    broken = _FakeConnector(name="broken", error=RuntimeError("boom"))
+    healthy = _FakeConnector(name="healthy", items=[_news_item("ok1")])
+    req = DigestRequest(topics=["RAG"])
+
+    db = tmp_path / "t10e-nonfatal.db"
+    store = DigestStore(db)
+    store.init_schema()
+
+    result = asyncio.run(
+        run_digest(
+            req,
+            connectors=[broken, healthy],
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        )
+    )
+
+    assert result.run_id == 1
+    assert result.digest is not None
+    assert len(result.digest.entries) == 1
+    assert len(result.errors) == 1
+    assert result.errors[0].stage == "collect"
+    assert "RuntimeError" in result.errors[0].message
+
+
+def test_graph_package_reexports_workflow_helpers() -> None:
+    from ai_news_agent.graph import (
+        build_digest_graph,
+        make_persist_results_node,
+        make_render_digest_node,
+        run_digest,
+    )
+
+    assert callable(build_digest_graph)
+    assert callable(run_digest)
+    assert callable(make_persist_results_node)
+    assert callable(make_render_digest_node)
