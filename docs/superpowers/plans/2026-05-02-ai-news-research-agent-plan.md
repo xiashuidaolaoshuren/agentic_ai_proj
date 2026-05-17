@@ -181,7 +181,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10d - Storage And Rendering Nodes
 
-- [ ] **Do:** Persist the workflow run, connector results, ranked items, and digest via `DigestStore`, then render Markdown/text outputs using the existing rendering helpers. Tests should use an isolated temporary SQLite store.
+- [X] **Do:** Persist the workflow run, connector results, ranked items, and digest via `DigestStore`, then render Markdown/text outputs using the existing rendering helpers. Tests should use an isolated temporary SQLite store.
 - **Blocked by:** T10c
 - **Plan mode:** medium
 - **Verification:** `python -m pytest tests/test_workflow.py tests/test_storage.py tests/test_rendering.py`
@@ -238,4 +238,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-16 | Completed T10a: `DigestRequest`, `DigestGraphState` (TypedDict + reducers), `DigestResult`, `WorkflowError`, `tests/test_workflow.py`; added `langgraph` dependency |
 | 2026-05-16 | Completed T10b: `parse_request_node`, `make_collect_sources_node` (async), `connector_request` state slot, and fake-connector coverage in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10c: `make_rank_items_node`, `make_summarize_items_node`, ranking/summarize tests in `tests/test_workflow.py` |
-
+| 2026-05-17 | Completed T10d: `persist_render` nodes (`make_persist_results_node`, `make_render_digest_node`), coverage in `tests/test_workflow.py` |

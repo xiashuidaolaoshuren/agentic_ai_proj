@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from operator import add
+from pathlib import Path
 
 import pytest
 
@@ -17,7 +18,9 @@ from ai_news_agent.graph.state import (
 )
 from ai_news_agent.graph.nodes import (
     make_collect_sources_node,
+    make_persist_results_node,
     make_rank_items_node,
+    make_render_digest_node,
     make_summarize_items_node,
     parse_request_node,
 )
@@ -25,11 +28,15 @@ from ai_news_agent.models import (
     ConfidenceLevel,
     ConnectorWarning,
     Digest,
+    DigestEntry,
+    FollowUpAction,
     NewsItem,
     RankedItem,
     SourceKind,
 )
+from ai_news_agent.rendering import render_digest_markdown, render_digest_text
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.storage import DigestStore
 from ai_news_agent import topics
 
 
@@ -532,3 +539,234 @@ def test_summarize_items_node_catches_summarizer_failure() -> None:
     assert err.stage == "summarize"
     assert "summarization failed" in err.message
     assert "ValueError" in err.message
+
+
+# --- Task T10d: persist + render workflow nodes --------------------------------
+
+
+class _BrokenDigestStore(DigestStore):
+    """Used to verify persist node catches unexpected storage failures."""
+
+    def save_run(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("boom")
+
+
+def test_persist_results_node_happy_path_saves_round_trip(tmp_path) -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], timeframe="last_7_days", connector_names=["github"])
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    w = ConnectorWarning(connector="github", code="rate", message="slow")
+    ranked = [
+        RankedItem(
+            item=item,
+            score_total=2.5,
+            score_breakdown={"k": 1.0},
+            selected=True,
+            selection_reason="top",
+        )
+    ]
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe="last_7_days",
+    )
+
+    db = tmp_path / "t10d.db"
+    store = DigestStore(db)
+    store.init_schema()
+    node = make_persist_results_node(store)
+
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": [item],
+        "warnings": [w],
+        "ranked_items": ranked,
+        "digest": digest,
+    }
+    before_keys = sorted(state.keys())
+    out = node(state)
+
+    assert out["run_id"] == 1
+    assert sorted(state.keys()) == before_keys
+
+    ctx = store.get_latest_followup_context()
+    assert ctx.run_id == 1
+    assert ctx.digest == digest
+    assert ctx.ranked_items == ranked
+    assert ctx.news_items == [item]
+    assert ctx.warnings == [w]
+
+
+def test_persist_results_node_missing_request_emits_error(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "miss_req.db")
+    store.init_schema()
+    node = make_persist_results_node(store)
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    digest = Digest(generated_at=now, entries=[], topics=[], timeframe=None)
+    out = node({"started_at": now, "digest": digest})
+
+    assert "run_id" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "store"
+    assert "missing DigestRequest" in out["errors"][0].message
+
+
+def test_persist_results_node_missing_digest_emits_error(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "miss_digest.db")
+    store.init_schema()
+    node = make_persist_results_node(store)
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    out = node({"request": req, "started_at": now})
+
+    assert "run_id" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "store"
+    assert "missing Digest" in out["errors"][0].message
+
+
+def test_persist_results_node_catches_storage_errors(tmp_path) -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    digest = Digest(generated_at=now, entries=[], topics=["RAG"], timeframe=None)
+    store = _BrokenDigestStore(tmp_path / "x.db")
+    store.init_schema()
+    node = make_persist_results_node(store)
+    out = node({"request": req, "started_at": now, "digest": digest})
+
+    assert "run_id" not in out
+    assert len(out["errors"]) == 1
+    err = out["errors"][0]
+    assert err.stage == "store"
+    assert "RuntimeError" in err.message
+    assert "boom" in (err.detail or "")
+
+
+def test_render_digest_node_populates_markdown_and_text() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    digest = Digest(
+        generated_at=now,
+        entries=[],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    node = make_render_digest_node()
+    state: DigestGraphState = {"digest": digest}
+    before_keys = sorted(state.keys())
+    out = node(state)
+
+    assert out["markdown"] == render_digest_markdown(digest)
+    assert out["text"] == render_digest_text(digest)
+    assert sorted(state.keys()) == before_keys
+
+
+def test_render_digest_node_missing_digest_emits_error() -> None:
+    node = make_render_digest_node()
+    out = node({})
+    assert "markdown" not in out
+    assert "text" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "render"
+    assert "missing Digest" in out["errors"][0].message
+
+
+def test_render_digest_node_catches_renderer_failure() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    digest = Digest(generated_at=now, entries=[], topics=[], timeframe=None)
+
+    def _boom(_: Digest) -> str:
+        raise ValueError("bad render")
+
+    node = make_render_digest_node(render_markdown=_boom, render_text=render_digest_text)
+    out = node({"digest": digest})
+
+    assert "markdown" not in out
+    assert len(out["errors"]) == 1
+    err = out["errors"][0]
+    assert err.stage == "render"
+    assert "ValueError" in err.message
+    assert "bad render" in (err.detail or "")
+
+
+def test_t10d_persist_render_state_to_result_integration(tmp_path) -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    ranked = [
+        RankedItem(
+            item=item,
+            score_total=1.0,
+            selected=True,
+            selection_reason="top",
+        )
+    ]
+
+    db = tmp_path / "e2e.db"
+    store = DigestStore(db)
+    store.init_schema()
+    persist = make_persist_results_node(store)
+    render = make_render_digest_node()
+
+    base: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "finished_at": now,
+        "collected_items": [item],
+        "warnings": [],
+        "errors": [],
+        "ranked_items": ranked,
+        "digest": digest,
+    }
+
+    merged: DigestGraphState = {**base, **persist(base)}
+    merged2: DigestGraphState = {**merged, **render(merged)}
+
+    result = state_to_result(merged2)
+    assert result.run_id == 1
+    assert result.markdown == render_digest_markdown(digest)
+    assert result.text == render_digest_text(digest)
+    assert result.digest is digest
