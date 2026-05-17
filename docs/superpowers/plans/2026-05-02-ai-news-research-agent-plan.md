@@ -174,7 +174,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10c - Ranking And Summarization Nodes
 
-- [ ] **Do:** Wire collected items through `rank_items()` and `summarize_ranked_items()`, including empty-result behavior and fake-model summarization. Keep ranking evidence and confidence caveats available for storage and follow-up use.
+- [X] **Do:** Wire collected items through `rank_items()` and `summarize_ranked_items()`, including empty-result behavior and fake-model summarization. Keep ranking evidence and confidence caveats available for storage and follow-up use.
 - **Blocked by:** T10b
 - **Plan mode:** medium
 - **Verification:** `python -m pytest tests/test_workflow.py`
@@ -237,4 +237,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-16 | Documented `src/ai_news_agent/request.py` / `DigestRequest` in file map, blast radius, and T10a; distinct from `ConnectorRequest` |
 | 2026-05-16 | Completed T10a: `DigestRequest`, `DigestGraphState` (TypedDict + reducers), `DigestResult`, `WorkflowError`, `tests/test_workflow.py`; added `langgraph` dependency |
 | 2026-05-16 | Completed T10b: `parse_request_node`, `make_collect_sources_node` (async), `connector_request` state slot, and fake-connector coverage in `tests/test_workflow.py` |
+| 2026-05-17 | Completed T10c: `make_rank_items_node`, `make_summarize_items_node`, ranking/summarize tests in `tests/test_workflow.py` |
 

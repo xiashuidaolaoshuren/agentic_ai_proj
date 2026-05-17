@@ -15,8 +15,14 @@ from ai_news_agent.graph.state import (
     initial_state,
     state_to_result,
 )
-from ai_news_agent.graph.nodes import make_collect_sources_node, parse_request_node
+from ai_news_agent.graph.nodes import (
+    make_collect_sources_node,
+    make_rank_items_node,
+    make_summarize_items_node,
+    parse_request_node,
+)
 from ai_news_agent.models import (
+    ConfidenceLevel,
     ConnectorWarning,
     Digest,
     NewsItem,
@@ -60,6 +66,16 @@ class _FakeConnector:
         if self._error is not None:
             raise self._error
         return ConnectorResult(items=list(self._items), warnings=list(self._warnings))
+
+
+class _FakeDigestModel:
+    def generate_entry_fields(self, context: dict) -> dict:  # noqa: ARG002
+        return {
+            "summary": "Test summary",
+            "why_it_matters": "Because",
+            "background_knowledge": "Bg",
+            "follow_up_action": "read",
+        }
 
 
 def test_digest_request_defaults_and_validation() -> None:
@@ -356,3 +372,163 @@ def test_collect_sources_node_unmatched_filter_emits_error() -> None:
     assert err.message == "no matching connectors"
     assert err.detail == "unknown"
     assert conn_a.calls == 0
+
+
+def test_rank_items_node_uses_top_n_and_populates_ranked_items() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    low = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="low",
+        url="https://example.com/low",
+        title="Low engagement",
+        collected_at=now,
+        stars_or_views=10,
+        metadata_completeness=0.5,
+    )
+    high = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="high",
+        url="https://example.com/high",
+        title="High engagement",
+        collected_at=now,
+        stars_or_views=50_000,
+        metadata_completeness=0.9,
+    )
+    req = DigestRequest(topics=["RAG"], top_n=1)
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": [low, high],
+    }
+    node = make_rank_items_node(now_provider=lambda: now)
+    out = node(state)
+
+    ranked = out["ranked_items"]
+    assert len(ranked) == 2
+    selected = [r for r in ranked if r.selected]
+    assert len(selected) == 1
+    assert selected[0].item.source_id == "high"
+    assert selected[0].score_breakdown
+    assert selected[0].selection_reason
+
+
+def test_rank_items_node_handles_empty_collected_items() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], top_n=3)
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": [],
+    }
+    node = make_rank_items_node(now_provider=lambda: now)
+    out = node(state)
+    assert out == {"ranked_items": []}
+
+
+def test_rank_items_node_missing_request_emits_error() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    state: DigestGraphState = {
+        "started_at": now,
+        "collected_items": [_news_item("a1")],
+    }
+    node = make_rank_items_node(now_provider=lambda: now)
+    out = node(state)
+    assert "ranked_items" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "rank"
+    assert "missing DigestRequest" in out["errors"][0].message
+
+
+def test_summarize_items_node_builds_digest_with_fake_model() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+        content_confidence=ConfidenceLevel.LOW,
+        raw_snippet=None,
+    )
+    ranked = [
+        RankedItem(
+            item=item,
+            score_total=1.0,
+            score_breakdown={"x": 1.0},
+            selected=True,
+            selection_reason="top",
+        )
+    ]
+    req = DigestRequest(topics=["RAG"], timeframe="last_7_days")
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "ranked_items": ranked,
+    }
+    node = make_summarize_items_node(_FakeDigestModel())
+    out = node(state)
+    digest = out["digest"]
+    assert isinstance(digest, Digest)
+    assert digest.generated_at == now
+    assert digest.topics == ["RAG"]
+    assert digest.timeframe == "last_7_days"
+    assert len(digest.entries) == 1
+    entry = digest.entries[0]
+    assert entry.summary == "Test summary"
+    assert entry.why_it_matters == "Because"
+    assert entry.confidence_caveat
+    assert "low-confidence" in entry.confidence_caveat.lower()
+
+
+def test_summarize_items_node_handles_empty_ranked_items() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    state: DigestGraphState = {"request": req, "started_at": now, "ranked_items": []}
+    node = make_summarize_items_node(_FakeDigestModel())
+    out = node(state)
+    digest = out["digest"]
+    assert digest.entries == []
+    assert "errors" not in out
+
+
+def test_summarize_items_node_missing_request_emits_error() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    state: DigestGraphState = {
+        "started_at": now,
+        "ranked_items": [],
+    }
+    node = make_summarize_items_node(_FakeDigestModel())
+    out = node(state)
+    assert "digest" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "summarize"
+    assert "missing DigestRequest" in out["errors"][0].message
+
+
+def test_summarize_items_node_catches_summarizer_failure() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    ranked = [
+        RankedItem(
+            item=item,
+            score_total=1.0,
+            selected=True,
+            selection_reason="top",
+        )
+    ]
+    req = DigestRequest(topics=["RAG"])
+    state: DigestGraphState = {"request": req, "started_at": now, "ranked_items": ranked}
+    node = make_summarize_items_node(None)
+    out = node(state)
+    assert "digest" not in out
+    assert len(out["errors"]) == 1
+    err = out["errors"][0]
+    assert err.stage == "summarize"
+    assert "summarization failed" in err.message
+    assert "ValueError" in err.message
