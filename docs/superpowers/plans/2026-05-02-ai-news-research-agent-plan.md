@@ -202,7 +202,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T12 - CLI Smoke Entry Point
 
-- [ ] **Do:** Add a CLI path that can run a digest request with fixture/fake mode for smoke testing and future OpenClaw adapter compatibility.
+- [X] **Do:** Add a CLI path that can run a digest request with fixture/fake mode for smoke testing and future OpenClaw adapter compatibility.
 - **Blocked by:** T10e
 - **Plan mode:** skip
 - **Verification:** `python -m pytest tests/test_cli.py`
@@ -241,3 +241,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-17 | Completed T10d: `persist_render` nodes (`make_persist_results_node`, `make_render_digest_node`), coverage in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10e: `graph/workflow.py` (`build_digest_graph`, `run_digest`), graph package re-exports, and end-to-end workflow tests in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T11: `chat.py` (`ChatService`), hybrid follow-up routing, tests in `tests/test_chat.py` |
+| 2026-05-18 | Completed T12: `cli.py` (``digest`` subcommand, ``--fake`` smoke mode), `tests/test_cli.py`, `[project.scripts]` entry `ai-news-agent` |
