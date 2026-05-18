@@ -195,7 +195,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T11 - Follow-Up Chat Service
 
-- [ ] **Do:** Implement a chat service that routes digest requests through the workflow and answers follow-up questions from the latest saved digest/source traces. Keep it independent from Gradio.
+- [X] **Do:** Implement a chat service that routes digest requests through the workflow and answers follow-up questions from the latest saved digest/source traces. Keep it independent from Gradio.
 - **Blocked by:** T4, T10e
 - **Plan mode:** medium
 - **Verification:** `python -m pytest tests/test_chat.py`
@@ -240,3 +240,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-17 | Completed T10c: `make_rank_items_node`, `make_summarize_items_node`, ranking/summarize tests in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10d: `persist_render` nodes (`make_persist_results_node`, `make_render_digest_node`), coverage in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T10e: `graph/workflow.py` (`build_digest_graph`, `run_digest`), graph package re-exports, and end-to-end workflow tests in `tests/test_workflow.py` |
+| 2026-05-17 | Completed T11: `chat.py` (`ChatService`), hybrid follow-up routing, tests in `tests/test_chat.py` |
