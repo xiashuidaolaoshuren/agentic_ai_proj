@@ -32,6 +32,8 @@ If `import ai_news_agent` fails outside an editable install, use `PYTHONPATH=src
 
 Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never commit secrets).
 
+**Local entrypoints auto-load `.env`** when you run `ai-news-agent` or `python -m ai_news_agent.app.gradio_app`. Lookup order: `./.env` in the current working directory, then the first `.env` found in parent directories. Variables already exported in your shell are **not** overwritten.
+
 | Variable | When needed | Purpose |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | Live digest / chat LLM follow-ups | Summarization via OpenAI-compatible API ([`llm.py`](src/ai_news_agent/llm.py)) |
@@ -65,7 +67,7 @@ Open the printed URL (default port **7860**). Try **“Give me today's AI digest
 
 ## Live digest (network + LLM)
 
-Requires `OPENAI_API_KEY`. Optionally set `GITHUB_TOKEN` for reliability.
+Requires `OPENAI_API_KEY` (in `.env` or your shell). Optionally set `GITHUB_TOKEN` for reliability.
 
 ```bash
 uv run ai-news-agent digest --sources github,bilibili --topics "RAG,agents" --timeframe today

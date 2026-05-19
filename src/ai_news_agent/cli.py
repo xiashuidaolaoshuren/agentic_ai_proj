@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
+from ai_news_agent.env import load_local_env
 from ai_news_agent.connectors.bilibili import BilibiliConnector
 from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.graph.workflow import run_digest
@@ -210,6 +211,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     """CLI entry. Returns process exit code."""
+    load_local_env()
     out = stdout or sys.stdout
     args = argv if argv is not None else sys.argv[1:]
     parser = build_arg_parser()

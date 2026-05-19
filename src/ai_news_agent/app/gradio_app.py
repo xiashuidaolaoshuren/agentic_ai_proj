@@ -11,6 +11,7 @@ from typing import Any
 import gradio as gr
 
 from ai_news_agent.chat import ChatService
+from ai_news_agent.env import load_local_env
 from ai_news_agent.cli import (
     _FakeBilibiliConnector,
     _FakeDigestModel,
@@ -133,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     ns = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    load_local_env()
 
     try:
         service = _build_service(fake=ns.fake, db_path=ns.db_path)
