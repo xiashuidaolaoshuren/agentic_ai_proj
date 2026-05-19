@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -40,10 +41,23 @@ def load_local_env(*, dotenv_path: str | Path | None = None) -> bool:
     return loaded
 
 
+def get_bilibili_cookie() -> str | None:
+    """Optional Bilibili session cookie(s) for anti-bot resilience.
+
+    Accepts a full ``Cookie`` header value, ``SESSDATA=...`` pair, or bare
+    ``SESSDATA`` token via ``BILIBILI_COOKIE`` / ``BILIBILI_SESSDATA``.
+    """
+    for key in ("BILIBILI_COOKIE", "BILIBILI_SESSDATA"):
+        val = os.environ.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
+    return None
+
+
 def _reset_loaded_state_for_testing() -> None:
     """Allow tests to reload ``.env`` with a different cwd or path."""
     global _loaded
     _loaded = False
 
 
-__all__ = ["load_local_env", "_reset_loaded_state_for_testing"]
+__all__ = ["get_bilibili_cookie", "load_local_env", "_reset_loaded_state_for_testing"]

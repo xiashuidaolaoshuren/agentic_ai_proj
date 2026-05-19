@@ -264,7 +264,9 @@ def test_collect_search_http_failure_warns() -> None:
                 ConnectorRequest(topics=["AI"], max_items=5),
             )
         assert out.items == []
-        assert any(w.code == "keyword_search_failed" for w in out.warnings)
+        assert any(
+            w.code in ("keyword_search_failed", "http_error") for w in out.warnings
+        )
 
     asyncio.run(main())
 

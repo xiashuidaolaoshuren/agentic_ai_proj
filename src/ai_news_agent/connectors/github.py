@@ -11,7 +11,7 @@ HTTP strategy
 
 Warning taxonomy
 -----------------
-- ``no_topics`` — empty topic list; no API call.
+- ``no_input`` — no topics, URLs, or channels; no API call.
 - ``rate_limited`` — HTTP 429 or 403 with exhausted rate limit headers.
 - ``search_failed`` — search HTTP error not classified as rate limit.
 - ``invalid_search_response`` — unreadable search JSON or unexpected shape.
@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -39,6 +41,13 @@ DEFAULT_HEADERS: dict[str, str] = {
 README_ACCEPT_RAW = "application/vnd.github.raw"
 MAX_README_CHARS = 2000
 SNIPPET_README_MAX = 650
+_GITHUB_REPO_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+    re.IGNORECASE,
+)
+_RESERVED_GITHUB_PATHS = frozenset(
+    {"settings", "pulls", "issues", "actions", "projects", "security", "pulse", "graphs"}
+)
 
 
 class GitHubConnector:
@@ -74,16 +83,221 @@ class GitHubConnector:
 
     async def collect(self, request: ConnectorRequest) -> ConnectorResult:
         warnings: list[ConnectorWarning] = []
-        if not request.topics:
+        has_topics = bool(request.topics)
+        has_urls = bool(request.github_manual_urls)
+        has_channels = bool(request.github_target_channels)
+        if not has_topics and not has_urls and not has_channels:
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
-                    code="no_topics",
-                    message="GitHub connector skipped: no topics in request",
+                    code="no_input",
+                    message=(
+                        "GitHub connector skipped: topics, github_manual_urls, "
+                        "and github_target_channels are all empty"
+                    ),
                 )
             )
             return ConnectorResult(items=[], warnings=warnings, raw_count=0)
 
+        by_repo_id: dict[str, NewsItem] = {}
+        raw_total = 0
+        now = datetime.now(UTC)
+
+        for url in request.github_manual_urls:
+            row, n_raw, ws = await self._fetch_repo_by_url(url, warnings)
+            raw_total += n_raw
+            warnings.extend(ws)
+            if row is not None:
+                item = await self._row_to_item(row, request.topics, now)
+                by_repo_id[item.source_id] = item
+
+        for owner in request.github_target_channels:
+            rows, n_raw, ws = await self._fetch_owner_repos(owner, request, warnings)
+            raw_total += n_raw
+            warnings.extend(ws)
+            for row in rows:
+                item = await self._row_to_item(row, request.topics, now)
+                by_repo_id[item.source_id] = item
+
+        if has_topics:
+            search_items, n_raw, ws = await self._collect_topic_search(request, now)
+            raw_total += n_raw
+            warnings.extend(ws)
+            for item in search_items:
+                by_repo_id[item.source_id] = item
+
+        merged = list(by_repo_id.values())[: request.max_items]
+        return ConnectorResult(items=merged, warnings=warnings, raw_count=raw_total)
+
+    async def _row_to_item(
+        self,
+        row: dict[str, Any],
+        topics: list[str],
+        collected_at: datetime,
+    ) -> NewsItem:
+        excerpt = await _fetch_readme_excerpt(self._client, str(row["full_name"]))
+        return _repo_to_news_item(row, topics, excerpt, collected_at)
+
+    async def _fetch_repo_by_url(
+        self,
+        url: str,
+        warnings: list[ConnectorWarning],
+    ) -> tuple[dict[str, Any] | None, int, list[ConnectorWarning]]:
+        ref = parse_github_repo_ref(url)
+        if ref is None:
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="invalid_manual_url",
+                    message="Could not parse owner/repo from GitHub URL",
+                    detail=url[:200],
+                )
+            )
+            return None, 0, warnings
+        owner, repo = ref
+        return await self._fetch_repo_api(owner, repo, warnings)
+
+    async def _fetch_repo_api(
+        self,
+        owner: str,
+        repo: str,
+        warnings: list[ConnectorWarning],
+    ) -> tuple[dict[str, Any] | None, int, list[ConnectorWarning]]:
+        try:
+            resp = await self._client.get(f"/repos/{owner}/{repo}")
+        except httpx.RequestError as exc:
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="repo_fetch_failed",
+                    message=f"GitHub repo fetch failed for {owner}/{repo}",
+                    detail=str(exc),
+                )
+            )
+            return None, 1, warnings
+
+        rate_ws = _warnings_for_rate_limit(resp)
+        warnings.extend(rate_ws)
+        if resp.status_code != 200:
+            if not rate_ws:
+                warnings.append(
+                    ConnectorWarning(
+                        connector=self.name(),
+                        code="repo_fetch_failed",
+                        message=f"GitHub repo fetch HTTP {resp.status_code} for {owner}/{repo}",
+                        detail=resp.text[:300] if resp.text else None,
+                    )
+                )
+            return None, 1, warnings
+
+        try:
+            row = resp.json()
+        except ValueError as exc:
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="repo_fetch_failed",
+                    message=f"GitHub repo response was not valid JSON for {owner}/{repo}",
+                    detail=str(exc),
+                )
+            )
+            return None, 1, warnings
+
+        if _missing_required_repo_fields(row):
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="skipped_malformed_repo",
+                    message=f"GitHub repo payload missing required fields for {owner}/{repo}",
+                )
+            )
+            return None, 1, warnings
+
+        return row, 1, warnings
+
+    async def _fetch_owner_repos(
+        self,
+        owner: str,
+        request: ConnectorRequest,
+        warnings: list[ConnectorWarning],
+    ) -> tuple[list[dict[str, Any]], int, list[ConnectorWarning]]:
+        owner = str(owner).strip().strip("/")
+        if not owner:
+            return [], 0, warnings
+
+        per_page = max(1, min(request.max_items, 100))
+        rows: list[dict[str, Any]] = []
+        for path in (f"/users/{owner}/repos", f"/orgs/{owner}/repos"):
+            try:
+                resp = await self._client.get(
+                    path,
+                    params={"sort": "updated", "per_page": per_page},
+                )
+            except httpx.RequestError as exc:
+                warnings.append(
+                    ConnectorWarning(
+                        connector=self.name(),
+                        code="owner_repos_failed",
+                        message=f"GitHub owner repos request failed for {owner!r}",
+                        detail=str(exc),
+                    )
+                )
+                continue
+
+            rate_ws = _warnings_for_rate_limit(resp)
+            warnings.extend(rate_ws)
+            if resp.status_code == 404:
+                continue
+            if resp.status_code != 200:
+                if not rate_ws:
+                    warnings.append(
+                        ConnectorWarning(
+                            connector=self.name(),
+                            code="owner_repos_failed",
+                            message=f"GitHub owner repos HTTP {resp.status_code} for {owner!r}",
+                            detail=resp.text[:300] if resp.text else None,
+                        )
+                    )
+                continue
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                warnings.append(
+                    ConnectorWarning(
+                        connector=self.name(),
+                        code="owner_repos_failed",
+                        message="GitHub owner repos response was not valid JSON",
+                        detail=str(exc),
+                    )
+                )
+                continue
+
+            if not isinstance(data, list):
+                continue
+
+            for row in data:
+                if isinstance(row, dict) and not _missing_required_repo_fields(row):
+                    rows.append(row)
+            if rows:
+                return rows, len(rows), warnings
+
+        if not rows:
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="unresolved_channel",
+                    message=f"Could not list repositories for GitHub owner/org: {owner!r}",
+                )
+            )
+        return rows, len(rows), warnings
+
+    async def _collect_topic_search(
+        self,
+        request: ConnectorRequest,
+        now: datetime,
+    ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
+        warnings: list[ConnectorWarning] = []
         q = _build_search_query(request.topics, request.timeframe)
         per_page = max(1, min(request.max_items, 100))
 
@@ -106,14 +320,14 @@ class GitHubConnector:
                     detail=str(exc),
                 )
             )
-            return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+            return [], 0, warnings
 
         rate_ws = _warnings_for_rate_limit(resp)
         warnings.extend(rate_ws)
 
         if resp.status_code != 200:
             if rate_ws:
-                return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+                return [], 0, warnings
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
@@ -122,7 +336,7 @@ class GitHubConnector:
                     detail=resp.text[:512] if resp.text else None,
                 )
             )
-            return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+            return [], 0, warnings
 
         try:
             data = resp.json()
@@ -135,7 +349,7 @@ class GitHubConnector:
                     detail=str(exc),
                 )
             )
-            return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+            return [], 0, warnings
 
         raw_items = data.get("items")
         if raw_items is None:
@@ -146,7 +360,7 @@ class GitHubConnector:
                     message="GitHub search JSON missing 'items'",
                 )
             )
-            return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+            return [], 0, warnings
 
         if not isinstance(raw_items, list):
             warnings.append(
@@ -156,7 +370,7 @@ class GitHubConnector:
                     message="GitHub search 'items' must be a list",
                 )
             )
-            return ConnectorResult(items=[], warnings=warnings, raw_count=0)
+            return [], 0, warnings
 
         if bool(data.get("incomplete_results")):
             warnings.append(
@@ -191,22 +405,36 @@ class GitHubConnector:
                 continue
             valid_rows.append(row)
 
-        readme_excerpts = await asyncio.gather(
-            *[_fetch_readme_excerpt(self._client, row["full_name"]) for row in valid_rows],
-            return_exceptions=True,
-        )
-
         items: list[NewsItem] = []
-        now = datetime.now(UTC)
-        for row, excerpt_result in zip(valid_rows, readme_excerpts, strict=True):
-            excerpt: str | None = None
-            if isinstance(excerpt_result, str):
-                excerpt = excerpt_result
-            readme_excerpt = excerpt
-            item = _repo_to_news_item(row, request.topics, readme_excerpt, now)
-            items.append(item)
+        for row in valid_rows:
+            items.append(await self._row_to_item(row, request.topics, now))
 
-        return ConnectorResult(items=items, warnings=warnings, raw_count=raw_count)
+        return items, raw_count, warnings
+
+
+def parse_github_repo_ref(text: str) -> tuple[str, str] | None:
+    """Parse ``owner/repo`` from a GitHub URL or ``owner/repo`` string."""
+    text = text.strip()
+    m = _GITHUB_REPO_URL.search(text)
+    if m:
+        owner, repo = m.group(1), m.group(2)
+        if owner.lower() in _RESERVED_GITHUB_PATHS:
+            return None
+        return owner, repo.rstrip("/")
+
+    if text.startswith("http://") or text.startswith("https://"):
+        parsed = urlparse(text)
+        parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(parts) >= 2 and parts[0].lower() not in _RESERVED_GITHUB_PATHS:
+            return parts[0], parts[1]
+
+    if "/" in text and " " not in text and not text.startswith("http"):
+        owner, _, repo = text.partition("/")
+        owner = owner.strip()
+        repo = repo.strip().rstrip("/")
+        if owner and repo:
+            return owner, repo
+    return None
 
 
 def _missing_required_repo_fields(row: dict[str, Any]) -> bool:

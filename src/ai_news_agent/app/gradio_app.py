@@ -23,11 +23,18 @@ from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
+from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 
-
 _DEFAULT_CONNECTORS: tuple[str, ...] = ("github", "bilibili")
+
+_UI_ERROR_MESSAGE = (
+    "Something went wrong while processing your request. "
+    "Please check the terminal or log file for details and try again."
+)
+
+logger = get_logger("gradio")
 
 
 async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
@@ -79,7 +86,6 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         model = build_chat_model()
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
-        # Fresh connectors each run: ``_run_digest_async`` closes HTTP clients in ``finally``.
         connectors = _build_connectors(fake=fake)
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
@@ -94,17 +100,24 @@ def create_app(service: ChatService) -> gr.Blocks:
     """Build a thin Gradio :class:`~gradio.ChatInterface` around ``service``."""
 
     async def respond(message: str, _history: list) -> str:
-        return await service.handle_message_async(message)
+        try:
+            return await service.handle_message_async(message)
+        except Exception:
+            logger.exception("gradio request failed")
+            return _UI_ERROR_MESSAGE
 
     return gr.ChatInterface(
         fn=respond,
         title="AI News Research Agent",
         description=(
-            'Ask for an AI news digest (e.g. mention "digest") or follow up with concrete '
-            'requests like "show sources", ranking hints, or caveats.'
+            'Ask for an AI news digest (e.g. mention "digest"). Include GitHub repo URLs, '
+            "Bilibili video URLs, or channel hints in the same message for targeted runs. "
+            'Follow up with "show sources", ranking hints, or "show caveats".'
         ),
         examples=[
             "Give me today's AI digest",
+            "Digest https://github.com/langchain-ai/langgraph",
+            "Digest bilibili channel 123456789",
             "show sources",
         ],
     )
@@ -136,19 +149,28 @@ def main(argv: list[str] | None = None) -> int:
     ns = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
     load_local_env()
+    configure_logging()
+    logger.info(
+        "starting gradio fake=%s db_path=%s port=%s",
+        ns.fake,
+        ns.db_path,
+        ns.port,
+    )
 
     try:
         service = _build_service(fake=ns.fake, db_path=ns.db_path)
     except ValueError as e:
+        logger.exception("failed to build service")
         print(str(e), file=sys.stderr)
         return 2
 
     demo = create_app(service)
+    logger.info("gradio launch on port=%s", ns.port)
     demo.launch(server_port=ns.port)
     return 0
 
 
-__all__ = ["create_app", "main"]
+__all__ = ["create_app", "main", "_UI_ERROR_MESSAGE"]
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -16,10 +16,17 @@ class ConnectorRequest:
     timeframe: str | None = None
     max_items: int = 20
     language_hint: str | None = None
-    #: Bilibili MID (numeric string) or uploader handle (resolved via user search when possible).
+    #: Legacy Bilibili fields (prefer bilibili_*); kept for backward compatibility.
     target_channels: list[str] = field(default_factory=list)
-    #: Explicit Bilibili video page URLs for metadata lookup.
     manual_urls: list[str] = field(default_factory=list)
+    #: Bilibili MID (numeric) or uploader handle (resolved via user search).
+    bilibili_target_channels: list[str] = field(default_factory=list)
+    #: Bilibili video page URLs or BV ids.
+    bilibili_manual_urls: list[str] = field(default_factory=list)
+    #: GitHub owner/org login for recent repos list.
+    github_target_channels: list[str] = field(default_factory=list)
+    #: GitHub repository page URLs (``owner/repo``).
+    github_manual_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

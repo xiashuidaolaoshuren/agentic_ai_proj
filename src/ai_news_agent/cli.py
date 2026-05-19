@@ -19,6 +19,7 @@ from typing import Any, TextIO
 
 from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
 from ai_news_agent.env import load_local_env
+from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.connectors.bilibili import BilibiliConnector
 from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.graph.workflow import run_digest
@@ -28,6 +29,8 @@ from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 
 ALLOWED_SOURCES: frozenset[str] = frozenset({"github", "bilibili"})
+
+logger = get_logger("cli")
 
 
 class _FakeGitHubConnector:
@@ -212,6 +215,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     """CLI entry. Returns process exit code."""
     load_local_env()
+    configure_logging()
     out = stdout or sys.stdout
     args = argv if argv is not None else sys.argv[1:]
     parser = build_arg_parser()
@@ -255,11 +259,25 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     async def _go():
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
+    logger.info(
+        "cli digest start fake=%s sources=%s db_path=%s",
+        ns.fake,
+        names,
+        db_path,
+    )
     try:
         result = asyncio.run(_go())
     except Exception as exc:  # noqa: BLE001 - CLI top-level error surface
+        logger.exception("cli digest failed")
         print(f"digest failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+
+    logger.info(
+        "cli digest done run_id=%s warnings=%d errors=%d",
+        result.run_id,
+        len(result.warnings),
+        len(result.errors),
+    )
 
     text = result.text
     if not text.endswith("\n"):

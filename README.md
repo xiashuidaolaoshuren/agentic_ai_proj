@@ -40,6 +40,7 @@ Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never c
 | `OPENAI_BASE_URL` | Optional | Custom gateway / compatible endpoint |
 | `OPENAI_MODEL` | Optional | Model name (default `gpt-4o-mini`) |
 | `GITHUB_TOKEN` | Optional | Higher GitHub API rate limits ([`connectors/github.py`](src/ai_news_agent/connectors/github.py)) |
+| `BILIBILI_COOKIE` / `BILIBILI_SESSDATA` | Optional | Bilibili session cookie when search returns HTTP 412 ([`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)) |
 
 SQLite defaults to `./digest.sqlite` in the current working directory unless you pass `--db-path`. Database files matching `*.db` are gitignored.
 
@@ -99,6 +100,33 @@ uv run python -m ai_news_agent.app.gradio_app --fake --port 7860 --db-path ./dig
 
 The UI delegates to [`ChatService`](src/ai_news_agent/chat.py): digest phrases trigger the workflow; follow-ups such as listing **sources**, **ranking/top pick**, or **caveats** use persisted traces. Open-ended follow-ups need a configured model with `generate_followup_reply` where implemented.
 
+### Targeted digests (URLs and channels)
+
+In chat, you can include GitHub repo URLs, Bilibili video URLs, or channel hints in the same message as “digest”. The app parses them via [`intent.py`](src/ai_news_agent/intent.py) and skips broad topic keyword search when explicit targets are present.
+
+Examples:
+
+- `Digest https://github.com/langchain-ai/langgraph`
+- `Digest https://www.bilibili.com/video/BV1xxxxx`
+- `Digest bilibili channel 123456789`
+- `Digest github user openai and https://www.bilibili.com/video/BV1demo0001`
+- `Give me today's AI digest` (default topics + timeframe when mentioned)
+
+If Bilibili keyword search fails with HTTP 412, set `BILIBILI_COOKIE` in `.env` or prefer video URLs / channel feeds. After a run, ask **show caveats** to see connector warnings.
+
+### Logging
+
+Gradio and CLI share structured logging to **terminal** and a rotating file (default: `logs/ai-news-agent.log`).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AI_NEWS_AGENT_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `AI_NEWS_AGENT_LOG_PATH` | `logs/ai-news-agent.log` | Log file location |
+| `AI_NEWS_AGENT_LOG_MAX_BYTES` | `2000000` | Rotate when file exceeds this size |
+| `AI_NEWS_AGENT_LOG_BACKUP_COUNT` | `3` | Number of rotated backups kept |
+
+On failures, the Gradio UI shows a short user-friendly message; full stack traces are written to the terminal and log file.
+
 ## Tests
 
 Full suite:
@@ -112,6 +140,14 @@ Milestone 1 smoke only:
 ```bash
 uv run pytest tests/test_mvp_smoke.py -q
 ```
+
+Optional live Bilibili URL smoke (network; uses a fixed public BV id):
+
+```bash
+RUN_LIVE_BILIBILI=1 uv run pytest -m live tests/test_connectors_bilibili_live.py -q
+```
+
+Set `BILIBILI_COOKIE` in `.env` if the live test reports HTTP 412 on the view API.
 
 ## Known MVP limits
 

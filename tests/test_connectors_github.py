@@ -192,7 +192,7 @@ def test_collect_search_http_error_emits_warning() -> None:
     asyncio.run(main())
 
 
-def test_collect_returns_empty_when_no_topics() -> None:
+def test_collect_returns_empty_when_no_input() -> None:
 
     async def main() -> None:
         transport = _make_transport(search_json={"items": []})
@@ -206,9 +206,96 @@ def test_collect_returns_empty_when_no_topics() -> None:
             )
         assert out.items == []
         assert out.raw_count == 0
-        assert any(w.code == "no_topics" for w in out.warnings)
+        assert any(w.code == "no_input" for w in out.warnings)
 
     asyncio.run(main())
+
+
+def test_collect_manual_repo_url() -> None:
+    repo_payload = {
+        "id": 42,
+        "full_name": "acme/widget",
+        "html_url": "https://github.com/acme/widget",
+        "description": "A widget",
+        "pushed_at": "2026-05-01T00:00:00Z",
+        "stargazers_count": 10,
+        "owner": {"login": "acme"},
+        "language": "Python",
+        "topics": [],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widget":
+            return httpx.Response(200, json=repo_payload)
+        if request.url.path.endswith("/readme"):
+            return httpx.Response(404)
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            conn = GitHubConnector(token=None, client=client)
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_manual_urls=["https://github.com/acme/widget"],
+                    max_items=5,
+                ),
+            )
+        assert len(out.items) == 1
+        assert out.items[0].title == "acme/widget"
+
+    asyncio.run(main())
+
+
+def test_collect_owner_repos_channel() -> None:
+    repos = [
+        {
+            "id": 1,
+            "full_name": "acme/a",
+            "html_url": "https://github.com/acme/a",
+            "description": "a",
+            "pushed_at": "2026-05-02T00:00:00Z",
+            "stargazers_count": 1,
+            "owner": {"login": "acme"},
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/users/acme/repos":
+            return httpx.Response(200, json=repos)
+        if request.url.path.endswith("/readme"):
+            return httpx.Response(404)
+        return httpx.Response(404)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            conn = GitHubConnector(token=None, client=client)
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_target_channels=["acme"],
+                    max_items=5,
+                ),
+            )
+        assert len(out.items) == 1
+        assert out.items[0].source_id == "1"
+
+    asyncio.run(main())
+
+
+def test_parse_github_repo_ref() -> None:
+    from ai_news_agent.connectors.github import parse_github_repo_ref
+
+    assert parse_github_repo_ref("https://github.com/o/r") == ("o", "r")
+    assert parse_github_repo_ref("o/r") == ("o", "r")
 
 
 def test_github_connector_name() -> None:

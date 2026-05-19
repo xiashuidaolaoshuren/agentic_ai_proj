@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ai_news_agent.graph.state import DigestResult
+from ai_news_agent.intent import parse_digest_intent
+from ai_news_agent.logging_setup import get_logger
 from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
 
 WorkflowRunner = Callable[[DigestRequest], Awaitable[DigestResult]]
+
+logger = get_logger("chat")
 
 _NO_SAVED_DIGEST = (
     "No saved digest yet. Ask for a digest first "
@@ -55,27 +60,81 @@ class ChatService:
         *,
         digest_request: DigestRequest | None = None,
     ) -> str:
+        preview = _message_preview(message)
+        logger.info("chat message received preview=%r", preview)
+
         if digest_request is not None or _message_requests_digest(message):
-            req = digest_request if digest_request is not None else DigestRequest()
+            if digest_request is not None:
+                req = digest_request
+                logger.info("digest path=explicit_request topics=%d", len(req.topics))
+            else:
+                parsed = parse_digest_intent(message)
+                if parsed.has_explicit_selectors() or parsed.timeframe is not None:
+                    req = parsed
+                    logger.info(
+                        "digest path=parsed_intent explicit=%s timeframe=%r",
+                        parsed.has_explicit_selectors(),
+                        parsed.timeframe,
+                    )
+                else:
+                    req = DigestRequest()
+                    logger.info("digest path=default_request")
+
+            t0 = time.perf_counter()
             result = await self._workflow_runner(req)
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "digest completed run_id=%s entries=%d warnings=%d errors=%d elapsed=%.2fs",
+                result.run_id,
+                len(result.digest.entries) if result.digest else 0,
+                len(result.warnings),
+                len(result.errors),
+                elapsed,
+            )
+            if result.warnings:
+                for w in result.warnings:
+                    logger.warning(
+                        "[%s] %s: %s",
+                        w.connector,
+                        w.code,
+                        w.message,
+                    )
+            if result.errors:
+                for err in result.errors:
+                    logger.error(
+                        "workflow stage=%s: %s",
+                        err.stage,
+                        err.message,
+                    )
             return result.text
 
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
+            logger.info("follow-up path=no_saved_digest")
             return _NO_SAVED_DIGEST
 
         structured = _answer_structured_followup(message, ctx)
         if structured is not None:
+            logger.info("follow-up path=structured")
             return structured
 
         llm_text = _try_llm_followup(self._chat_model, message, ctx)
         if llm_text is not None:
+            logger.info("follow-up path=llm")
             return llm_text
 
+        logger.info("follow-up path=guidance_fallback")
         return (
             "I need a configured language model to answer that question. "
             "Try a concrete request like listing sources or asking for caveats."
         )
+
+
+def _message_preview(message: str, *, max_len: int = 120) -> str:
+    s = " ".join(message.split())
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
 
 
 def _message_requests_digest(message: str) -> bool:

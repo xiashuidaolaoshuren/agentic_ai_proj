@@ -41,3 +41,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "live: hits real external APIs (opt-in via RUN_LIVE_BILIBILI=1)",
+]

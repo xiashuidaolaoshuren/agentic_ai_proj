@@ -102,3 +102,6 @@ def test_gradio_build_service_live_with_dotenv(tmp_path, monkeypatch) -> None:
 
 class _FakeDigestRunResult:
     text = "ok\n"
+    run_id = 1
+    warnings: list = []
+    errors: list = []

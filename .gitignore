@@ -35,6 +35,7 @@ htmlcov/
 
 # Local data & generated artifacts (MVP)
 .data/
+logs/
 *.db
 digest_artifacts/
 *.sqlite

@@ -340,6 +340,38 @@ def test_chat_open_ended_without_model_returns_fallback(tmp_path) -> None:
     assert "language model" in reply.lower()
 
 
+def test_chat_digest_with_url_passes_parsed_request(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "intent.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    msg = "Digest https://github.com/acme/widget"
+    reply = asyncio.run(svc.handle_message_async(msg))
+
+    assert reply == "ok\n"
+    assert len(captured) == 1
+    assert captured[0].topics == []
+    assert any("acme/widget" in u for u in captured[0].github_manual_urls)
+
+
 def test_chat_message_digest_keyword_triggers_workflow(tmp_path) -> None:
     seen: list[DigestRequest] = []
 

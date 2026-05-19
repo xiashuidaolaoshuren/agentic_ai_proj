@@ -11,11 +11,7 @@ from dataclasses import dataclass, field
 from ai_news_agent.topics import DEFAULT_TOPICS
 
 
-def _default_target_channels() -> list[str]:
-    return []
-
-
-def _default_manual_urls() -> list[str]:
+def _empty_str_list() -> list[str]:
     return []
 
 
@@ -28,8 +24,13 @@ class DigestRequest:
     max_items_per_source: int = 20
     top_n: int = 5
     language_hint: str | None = None
-    target_channels: list[str] = field(default_factory=_default_target_channels)
-    manual_urls: list[str] = field(default_factory=_default_manual_urls)
+    #: Legacy Bilibili selectors (prefer bilibili_* fields).
+    target_channels: list[str] = field(default_factory=_empty_str_list)
+    manual_urls: list[str] = field(default_factory=_empty_str_list)
+    bilibili_target_channels: list[str] = field(default_factory=_empty_str_list)
+    bilibili_manual_urls: list[str] = field(default_factory=_empty_str_list)
+    github_target_channels: list[str] = field(default_factory=_empty_str_list)
+    github_manual_urls: list[str] = field(default_factory=_empty_str_list)
     connector_names: list[str] | None = None
 
     def __post_init__(self) -> None:
@@ -45,3 +46,13 @@ class DigestRequest:
 
         object.__setattr__(self, "topics", norm_topics)
 
+    def has_explicit_selectors(self) -> bool:
+        """True when URL/channel targets were provided (not topic-only)."""
+        return bool(
+            self.target_channels
+            or self.manual_urls
+            or self.bilibili_target_channels
+            or self.bilibili_manual_urls
+            or self.github_target_channels
+            or self.github_manual_urls
+        )

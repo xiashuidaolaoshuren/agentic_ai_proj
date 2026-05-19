@@ -1,10 +1,12 @@
-"""Bilibili metadata connector (Task 6): keyword search, uploader feeds, manual URLs.
+"""Bilibili metadata connector: keyword search, uploader feeds, manual URLs.
 
-Uses public web-interface JSON endpoints only (metadata-first; no transcript scraping).
+Uses public web-interface JSON endpoints (metadata-first; no transcript scraping).
+Includes retry/backoff for anti-bot HTTP 412 and optional session cookies.
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -12,15 +14,60 @@ from typing import Any
 import httpx
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
+from ai_news_agent.env import get_bilibili_cookie
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 
 DEFAULT_BASE = "https://api.bilibili.com"
-DEFAULT_HEADERS: dict[str, str] = {
-    "User-Agent": "Mozilla/5.0 (compatible; ai-news-agent/0.1)",
-    "Referer": "https://www.bilibili.com",
-}
+_RETRYABLE_STATUS = frozenset({412, 429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 3
 # Real BV ids are typically 12 chars (e.g. BV1…); allow short test-style ids.
 _BVID_IN_TEXT = re.compile(r"(BV[0-9A-Za-z]{8,14})", re.IGNORECASE)
+
+
+def _browser_headers() -> dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.bilibili.com",
+        "Origin": "https://www.bilibili.com",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+
+
+def _cookie_raw_to_dict(raw: str) -> dict[str, str]:
+    s = raw.strip()
+    if not s:
+        return {}
+    if "=" not in s:
+        return {"SESSDATA": s}
+    out: dict[str, str] = {}
+    for part in s.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        out[key.strip()] = val.strip()
+    return out
+
+
+def _http_warning_code(status: int) -> str:
+    if status == 412:
+        return "anti_bot_blocked"
+    if status == 429:
+        return "rate_limited"
+    return "http_error"
+
+
+def _http_warning_message(operation: str, status: int) -> str:
+    if status == 412:
+        return (
+            f"Bilibili {operation} blocked with HTTP 412 (anti-bot). "
+            "Set BILIBILI_COOKIE or BILIBILI_SESSDATA in .env, or use video URLs/channels."
+        )
+    return f"Bilibili {operation} HTTP {status}"
 
 
 class BilibiliConnector:
@@ -31,13 +78,20 @@ class BilibiliConnector:
         *,
         client: httpx.AsyncClient | None = None,
         base_url: str = DEFAULT_BASE,
+        cookie: str | None = None,
     ) -> None:
         self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(
-            base_url=base_url,
-            headers=DEFAULT_HEADERS,
-            timeout=httpx.Timeout(30.0),
-        )
+        if client is not None:
+            self._client = client
+        else:
+            cookie_raw = cookie if cookie is not None else get_bilibili_cookie()
+            cookies = _cookie_raw_to_dict(cookie_raw) if cookie_raw else None
+            self._client = httpx.AsyncClient(
+                base_url=base_url,
+                headers=_browser_headers(),
+                cookies=cookies,
+                timeout=httpx.Timeout(30.0),
+            )
 
     def name(self) -> str:
         return "bilibili"
@@ -48,16 +102,21 @@ class BilibiliConnector:
 
     async def collect(self, request: ConnectorRequest) -> ConnectorResult:
         warnings: list[ConnectorWarning] = []
+        bili_urls = list(request.bilibili_manual_urls) or list(request.manual_urls)
+        bili_channels = list(request.bilibili_target_channels) or list(request.target_channels)
         if (
             not request.topics
-            and not request.target_channels
-            and not request.manual_urls
+            and not bili_channels
+            and not bili_urls
         ):
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="no_input",
-                    message="Bilibili connector skipped: topics, target_channels, and manual_urls are all empty",
+                    message=(
+                        "Bilibili connector skipped: topics, bilibili_target_channels, "
+                        "and bilibili_manual_urls are all empty"
+                    ),
                 )
             )
             return ConnectorResult(items=[], warnings=warnings, raw_count=0)
@@ -73,14 +132,14 @@ class BilibiliConnector:
             for it in items:
                 by_bvid[it.source_id] = it
 
-        for channel in request.target_channels:
+        for channel in bili_channels:
             items, n_raw, ws = await self._uploader_videos(request, channel, now)
             raw_total += n_raw
             warnings.extend(ws)
             for it in items:
                 by_bvid[it.source_id] = it
 
-        for url in request.manual_urls:
+        for url in bili_urls:
             item, n_raw, ws = await self._manual_url_item(url, request.topics, now)
             raw_total += n_raw
             warnings.extend(ws)
@@ -99,46 +158,121 @@ class BilibiliConnector:
 
         return ConnectorResult(items=merged, warnings=warnings, raw_count=raw_total)
 
+    async def _api_get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        warnings: list[ConnectorWarning],
+        operation: str,
+        failure_code: str,
+    ) -> httpx.Response | None:
+        last_resp: httpx.Response | None = None
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                resp = await self._client.get(path, params=params)
+            except httpx.RequestError as exc:
+                if attempt < _MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(0.4 * (attempt + 1))
+                    continue
+                warnings.append(
+                    ConnectorWarning(
+                        connector=self.name(),
+                        code=failure_code,
+                        message=f"Bilibili {operation} request failed",
+                        detail=str(exc),
+                    )
+                )
+                return None
+
+            if resp.status_code == 200:
+                return resp
+
+            last_resp = resp
+            if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            break
+
+        if last_resp is None:
+            return None
+
+        status = last_resp.status_code
+        code = _http_warning_code(status) if status in _RETRYABLE_STATUS else failure_code
+        detail = last_resp.text[:300] if last_resp.text else None
+        warnings.append(
+            ConnectorWarning(
+                connector=self.name(),
+                code=code,
+                message=_http_warning_message(operation, status),
+                detail=detail,
+            )
+        )
+        return last_resp
+
     async def _keyword_search(
         self,
         request: ConnectorRequest,
         collected_at: datetime,
     ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
         warnings: list[ConnectorWarning] = []
-        keyword = " ".join(t.strip() for t in request.topics if t and str(t).strip())
-        if not keyword:
+        topics = [t.strip() for t in request.topics if t and str(t).strip()]
+        if not topics:
             return [], 0, warnings
 
-        try:
-            resp = await self._client.get(
-                "/x/web-interface/search/type",
-                params={
-                    "search_type": "video",
-                    "keyword": keyword,
-                    "page": 1,
-                    "page_size": min(request.max_items, 20),
-                },
+        combined = " ".join(topics)
+        items, n_raw, ws = await self._keyword_search_once(
+            request, collected_at, combined, warnings
+        )
+        if items:
+            return items, n_raw, ws
+
+        if len(topics) <= 1:
+            return items, n_raw, ws
+
+        by_bvid: dict[str, NewsItem] = {}
+        total_raw = 0
+        for topic in topics:
+            part_items, part_raw, part_ws = await self._keyword_search_once(
+                request, collected_at, topic, warnings
             )
-        except httpx.RequestError as exc:
+            total_raw += part_raw
+            ws.extend(part_ws)
+            for it in part_items:
+                by_bvid[it.source_id] = it
+
+        if by_bvid:
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
-                    code="keyword_search_failed",
-                    message="Bilibili keyword search request failed",
-                    detail=str(exc),
+                    code="keyword_search_fallback",
+                    message="Used per-topic Bilibili keyword search after combined query failed",
                 )
             )
-            return [], 0, warnings
+        return list(by_bvid.values()), total_raw, warnings
 
-        if resp.status_code != 200:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="keyword_search_failed",
-                    message=f"Bilibili keyword search HTTP {resp.status_code}",
-                    detail=resp.text[:300] if resp.text else None,
-                )
-            )
+    async def _keyword_search_once(
+        self,
+        request: ConnectorRequest,
+        collected_at: datetime,
+        keyword: str,
+        warnings: list[ConnectorWarning],
+    ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
+        local_warnings: list[ConnectorWarning] = []
+        resp = await self._api_get(
+            "/x/web-interface/search/type",
+            params={
+                "search_type": "video",
+                "keyword": keyword,
+                "page": 1,
+                "page_size": min(request.max_items, 20),
+            },
+            warnings=local_warnings,
+            operation="keyword search",
+            failure_code="keyword_search_failed",
+        )
+        warnings.extend(local_warnings)
+        if resp is None or resp.status_code != 200:
             return [], 0, warnings
 
         try:
@@ -215,35 +349,20 @@ class BilibiliConnector:
         if mid is None:
             return [], 0, warnings
 
-        try:
-            resp = await self._client.get(
-                "/x/space/arc/search",
-                params={
-                    "mid": mid,
-                    "pn": 1,
-                    "ps": min(request.max_items, 30),
-                },
-            )
-        except httpx.RequestError as exc:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="space_search_failed",
-                    message=f"Bilibili space archive search failed for mid={mid}",
-                    detail=str(exc),
-                )
-            )
-            return [], 0, warnings
-
-        if resp.status_code != 200:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="space_search_failed",
-                    message=f"Bilibili space search HTTP {resp.status_code} for mid={mid}",
-                    detail=resp.text[:300] if resp.text else None,
-                )
-            )
+        local_warnings: list[ConnectorWarning] = []
+        resp = await self._api_get(
+            "/x/space/arc/search",
+            params={
+                "mid": mid,
+                "pn": 1,
+                "ps": min(request.max_items, 30),
+            },
+            warnings=local_warnings,
+            operation=f"space search (mid={mid})",
+            failure_code="space_search_failed",
+        )
+        warnings.extend(local_warnings)
+        if resp is None or resp.status_code != 200:
             return [], 0, warnings
 
         try:
@@ -300,34 +419,20 @@ class BilibiliConnector:
         if channel.isdigit():
             return int(channel)
 
-        try:
-            resp = await self._client.get(
-                "/x/web-interface/search/type",
-                params={
-                    "search_type": "bili_user",
-                    "keyword": channel,
-                    "page": 1,
-                },
-            )
-        except httpx.RequestError as exc:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="user_search_failed",
-                    message=f"Bilibili user search failed for {channel!r}",
-                    detail=str(exc),
-                )
-            )
-            return None
-
-        if resp.status_code != 200:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="user_search_failed",
-                    message=f"Bilibili user search HTTP {resp.status_code} for {channel!r}",
-                )
-            )
+        local_warnings: list[ConnectorWarning] = []
+        resp = await self._api_get(
+            "/x/web-interface/search/type",
+            params={
+                "search_type": "bili_user",
+                "keyword": channel,
+                "page": 1,
+            },
+            warnings=local_warnings,
+            operation=f"user search ({channel!r})",
+            failure_code="user_search_failed",
+        )
+        warnings.extend(local_warnings)
+        if resp is None or resp.status_code != 200:
             return None
 
         try:
@@ -380,7 +485,7 @@ class BilibiliConnector:
         collected_at: datetime,
     ) -> tuple[NewsItem | None, int, list[ConnectorWarning]]:
         warnings: list[ConnectorWarning] = []
-        bvid = _extract_bvid(url)
+        bvid = extract_bvid(url)
         if not bvid:
             warnings.append(
                 ConnectorWarning(
@@ -392,30 +497,16 @@ class BilibiliConnector:
             )
             return None, 0, warnings
 
-        try:
-            resp = await self._client.get(
-                "/x/web-interface/view",
-                params={"bvid": bvid},
-            )
-        except httpx.RequestError as exc:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="view_fetch_failed",
-                    message=f"Bilibili view lookup failed for {bvid}",
-                    detail=str(exc),
-                )
-            )
-            return None, 1, warnings
-
-        if resp.status_code != 200:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="view_fetch_failed",
-                    message=f"Bilibili view HTTP {resp.status_code} for {bvid}",
-                )
-            )
+        local_warnings: list[ConnectorWarning] = []
+        resp = await self._api_get(
+            "/x/web-interface/view",
+            params={"bvid": bvid},
+            warnings=local_warnings,
+            operation=f"view ({bvid})",
+            failure_code="view_fetch_failed",
+        )
+        warnings.extend(local_warnings)
+        if resp is None or resp.status_code != 200:
             return None, 1, warnings
 
         try:
@@ -457,12 +548,17 @@ class BilibiliConnector:
         return it, 1, warnings
 
 
-def _extract_bvid(text: str) -> str | None:
+def extract_bvid(text: str) -> str | None:
     text = text.strip()
     m = _BVID_IN_TEXT.search(text)
     if m:
         return m.group(1)
     return None
+
+
+def _extract_bvid(text: str) -> str | None:
+    """Backward-compatible alias."""
+    return extract_bvid(text)
 
 
 def _topic_matches(request_topics: list[str], title: str, snippet: str, author: str) -> list[str]:
