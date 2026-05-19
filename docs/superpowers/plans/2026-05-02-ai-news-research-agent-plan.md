@@ -209,14 +209,14 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T13 - Gradio Chat UI
 
-- [ ] **Do:** Build a local Gradio chatbot that delegates to `ChatService`, shows digest output, and supports follow-up messages. Keep UI code thin.
+- [X] **Do:** Build a local Gradio chatbot that delegates to `ChatService`, shows digest output, and supports follow-up messages. Keep UI code thin.
 - **Blocked by:** T11
 - **Plan mode:** medium
 - **Verification:** launch locally with `python -m ai_news_agent.app.gradio_app` and ask for a fixture-backed digest
 
 ### T14 - End-To-End MVP Check And Docs
 
-- [ ] **Do:** Add a final smoke path and update README instructions for setup, environment variables, running tests, launching the chatbot, and known MVP limits.
+- [X] **Do:** Add a final smoke path and update README instructions for setup, environment variables, running tests, launching the chatbot, and known MVP limits.
 - **Blocked by:** T12, T13
 - **Plan mode:** skip
 - **Verification:** `python -m pytest` and manual local chatbot digest request
@@ -242,3 +242,5 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-17 | Completed T10e: `graph/workflow.py` (`build_digest_graph`, `run_digest`), graph package re-exports, and end-to-end workflow tests in `tests/test_workflow.py` |
 | 2026-05-17 | Completed T11: `chat.py` (`ChatService`), hybrid follow-up routing, tests in `tests/test_chat.py` |
 | 2026-05-18 | Completed T12: `cli.py` (``digest`` subcommand, ``--fake`` smoke mode), `tests/test_cli.py`, `[project.scripts]` entry `ai-news-agent` |
+| 2026-05-19 | Completed T13: `app/gradio_app.py` (`create_app`, `main`), `gradio` dependency in `pyproject.toml` |
+| 2026-05-19 | Completed T14: `tests/test_mvp_smoke.py`, README operator guide, `.env.example` refresh |
