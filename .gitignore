@@ -46,4 +46,5 @@ digest_artifacts/
 *.swp
 *.swo
 
+.cursor/rules/
 
