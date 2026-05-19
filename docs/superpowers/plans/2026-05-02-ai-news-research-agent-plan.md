@@ -80,7 +80,7 @@ Ship a local-first Python/LangGraph AI News Research Chatbot that generates an o
 | `src/ai_news_agent/request.py` | Bridges user/UI input to the workflow; changes affect graph state and T10b parsing | medium - align with `ConnectorRequest` mapping in collection node |
 | `src/ai_news_agent/storage.py` | SQLite schema becomes the persistence contract | high - confirm schema and migration approach for MVP |
 | `src/ai_news_agent/connectors/github.py` | External API behavior, rate limits, auth, and response shape can change | high - verify API strategy and fallback behavior |
-| `src/ai_news_agent/connectors/bilibili.py` | Source access is less stable and must avoid brittle assumptions | high - verify conservative metadata approach |
+| `src/ai_news_agent/connectors/bilibili.py` | Refactoring to `bilibili-api-python` (T6b); GPL-3.0 dependency; credential env vars | high - follow design spec Bilibili section |
 | `src/ai_news_agent/graph/workflow.py` | Orchestrates the whole workflow and sets LangGraph conventions | high - research graph state and node boundaries before implementation |
 | `src/ai_news_agent/app/gradio_app.py` | User-facing entrypoint and interaction loop | medium - confirm Gradio chat history shape before implementation |
 
@@ -244,3 +244,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-18 | Completed T12: `cli.py` (``digest`` subcommand, ``--fake`` smoke mode), `tests/test_cli.py`, `[project.scripts]` entry `ai-news-agent` |
 | 2026-05-19 | Completed T13: `app/gradio_app.py` (`create_app`, `main`), `gradio` dependency in `pyproject.toml` |
 | 2026-05-19 | Completed T14: `tests/test_mvp_smoke.py`, README operator guide, `.env.example` refresh |
+| 2026-05-19 | Spec amended: Bilibili connector refactor to `bilibili-api-python` — see design spec § Bilibili-Oriented Discovery |

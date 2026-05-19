@@ -1,6 +1,7 @@
 # AI News Research Agent Design
 
-Date: 2026-05-02
+Date: 2026-05-02  
+Amended: 2026-05-19 (Bilibili connector library refactor)
 
 ## Summary
 
@@ -202,7 +203,7 @@ Use official GitHub APIs and search features where possible. The connector shoul
 
 ### Bilibili-Oriented Discovery
 
-Start conservatively. The connector may use keyword/search-result metadata, uploader-targeted metadata collection (via request-provided handles/UIDs), and manually supplied video links when needed. It should collect available metadata such as:
+Start conservatively. The connector collects keyword/search-result metadata, uploader-targeted metadata (via request-provided handles/UIDs), and manually supplied video links. It should collect available metadata such as:
 
 - video title
 - URL
@@ -214,7 +215,87 @@ Start conservatively. The connector may use keyword/search-result metadata, uplo
 
 If transcript or deeper video content is unavailable, the agent must label the item as lower confidence and summarize only from available metadata.
 
-Uploader targeting should remain metadata-first in Milestone 1: collect uploader/video metadata when accessible, but do not require brittle deep crawling or full transcript extraction for success.
+Uploader targeting remains metadata-first in Milestone 1: collect uploader/video metadata when accessible, but do not require full transcript extraction for digest success.
+
+#### Implementation: `bilibili-api-python` (refactor, 2026-05-19)
+
+The Bilibili connector is implemented behind the shared `SourceConnector` protocol (`ConnectorRequest` → `ConnectorResult`). Internally it delegates to the community-maintained [bilibili-api-python](https://github.com/nemo2011/bilibili-api) package (PyPI: `bilibili-api-python`, docs: [bilibili-api dev docs](https://nemo2011.github.io/bilibili-api/)) instead of hand-rolled `httpx` calls to `api.bilibili.com`.
+
+**Rationale**
+
+- Raw HTTP access is brittle under Bilibili anti-bot (HTTP 412, HTML challenge pages, invalid JSON payloads).
+- The library maintains endpoint knowledge, retries, and optional browser fingerprinting (`curl_cffi`) without duplicating that logic in this repo.
+- The same library exposes subtitle and AI-summary APIs needed for a later transcript-enrichment milestone.
+
+**External contract (unchanged)**
+
+- Module: `src/ai_news_agent/connectors/bilibili.py`, class `BilibiliConnector`.
+- Inputs: `ConnectorRequest` fields `topics`, `timeframe`, `max_items`, `bilibili_target_channels` / `target_channels`, `bilibili_manual_urls` / `manual_urls`.
+- Outputs: `ConnectorResult` with `NewsItem` list, `ConnectorWarning` list, `raw_count`.
+- Warning codes remain stable (`no_input`, `anti_bot_blocked`, `keyword_search_failed`, `space_search_failed`, `user_search_failed`, `view_fetch_failed`, `invalid_payload`, `metadata_limited`, `skipped_malformed_video`, `keyword_search_fallback`, `unresolved_channel`, `invalid_manual_url`, etc.).
+- `intent.py`, `chat.py`, and LangGraph nodes are not changed by this refactor.
+
+**Library API mapping**
+
+| Connector behavior | Library entry point | Notes |
+| --- | --- | --- |
+| Keyword / topic search | `bilibili_api.search.search_by_type` with `SearchObjectType.VIDEO` | Replaces `/x/web-interface/search/type` |
+| Timeframe filter | `time_start`, `time_end` (`YYYY-MM-DD`) on `search_by_type` | Derived from `ConnectorRequest.timeframe` (see below) |
+| AI/tech zone bias | `video_zone_type` (e.g. `VideoZoneTypes.TECH`, `VideoZoneTypes.KNOWLEDGE`) | Optional narrowing for digest topics |
+| Single video by URL/BV | `bilibili_api.video.Video(bvid=...).get_info()` | Replaces `/x/web-interface/view` |
+| Uploader feed | `bilibili_api.user.User(uid=...).get_videos(pn=1, ps=...)` | Replaces `/x/space/arc/search` |
+| Resolve handle → MID | `search_by_type` with `SearchObjectType.USER` | Replaces user search on same path |
+| Future: subtitles | `Video.get_pages()`, `Video.get_subtitle(cid)` | Not used in Milestone 1 digest |
+| Future: AI summary | `Video.get_ai_conclusion(...)` | Not used in Milestone 1 digest |
+
+**Timeframe → search date range**
+
+`ConnectorRequest.timeframe` is mapped to `time_start` / `time_end` for video search:
+
+| `timeframe` value | `time_start` | `time_end` |
+| --- | --- | --- |
+| `today` | today (UTC) | today (UTC) |
+| `this week`, `week` | 7 days ago | today |
+| `this month`, `month` | 30 days ago | today |
+| missing / unknown | omitted | omitted |
+
+**Credentials**
+
+Authentication is optional for read-only metadata collection but recommended when search is rate-limited or blocked.
+
+Environment variables (see `.env.example`):
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `BILIBILI_COOKIE` | no | Full cookie header or `SESSDATA=...` string |
+| `BILIBILI_SESSDATA` | no | Bare `SESSDATA` token (alternative to cookie) |
+| `BILIBILI_BILI_JCT` | no | CSRF token for logged-in calls |
+| `BILIBILI_BUVID3` | no | Device id cookie |
+
+`env.get_bilibili_credential()` builds `bilibili_api.Credential(sessdata=..., bili_jct=..., buvid3=...)`. When unset, the connector runs without credentials and surfaces library/network failures as existing warning codes.
+
+**Collection flow (unchanged logically)**
+
+1. Keyword search: combined topics, then per-topic fallback if combined returns no items.
+2. Channel feeds: numeric MID or resolved handle.
+3. Manual URLs: BV id extraction, then `Video.get_info()`.
+4. Dedupe by `source_id` (bvid), sort by `published_at`, cap at `max_items`.
+5. Dedupe warnings by `(connector, code, message, detail)` before returning.
+
+**Testing**
+
+- Unit tests patch library functions (`search.search_by_type`, `Video.get_info`, `User.get_videos`, etc.) with `unittest.mock`; existing JSON fixtures remain valid because the library returns the same envelope shapes.
+- Opt-in live smoke: `RUN_LIVE_BILIBILI=1` in `tests/test_connectors_bilibili_live.py`.
+
+**Licensing note**
+
+`bilibili-api-python` is GPL-3.0. This project uses it as a library dependency for personal learning tooling; comply with license terms if distributing binaries or combined works.
+
+**Out of scope for this refactor**
+
+- Changing `NewsItem` schema or adding `transcript` fields (deferred to transcript milestone).
+- Wiring `get_subtitle` / `get_ai_conclusion` into summarization (deferred).
+- Replacing GitHub connector or adding new source types.
 
 ### Future Sources
 
@@ -224,7 +305,7 @@ After the core digest loop works, add connectors for:
 - Hugging Face
 - AI blogs and RSS feeds
 - general news or web search
-- deeper Bilibili video extraction if reliable and appropriate
+- Bilibili transcript enrichment via `Video.get_subtitle` / `get_ai_conclusion` (library already integrated at connector layer)
 
 ## Data Model
 
@@ -306,7 +387,7 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 
 - Local chatbot interface
 - GitHub connector
-- conservative Bilibili-oriented connector
+- Bilibili-oriented connector via `bilibili-api-python` (metadata-only digest)
 - normalized item model
 - ranking layer
 - source-language digest generation
@@ -340,6 +421,6 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Model access: use an OpenAI-compatible client abstraction configured by environment variables, so the first implementation can work with the user's available API provider.
 - Initial topic taxonomy: AI agents, model releases, RAG, multimodal AI, AI developer tools, and notable open-source repos.
 - Initial GitHub query strategy: search recent repositories and topics using the taxonomy above, with ranking boosted by freshness, stars, recent activity, and README relevance.
-- Initial Bilibili strategy: keyword-based discovery plus optional uploader-targeted collection and manually supplied links when needed; keep it metadata-first and do not require brittle deep crawling for MVP success.
+- Initial Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
 - Default digest length: 5 ranked items per run, with the option to request a shorter or longer digest in chat.
 
