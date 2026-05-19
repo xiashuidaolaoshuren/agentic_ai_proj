@@ -37,9 +37,12 @@ htmlcov/
 .data/
 *.db
 digest_artifacts/
+*.sqlite
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+
+
