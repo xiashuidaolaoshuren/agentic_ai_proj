@@ -251,6 +251,52 @@ def test_collect_manual_repo_url() -> None:
     asyncio.run(main())
 
 
+def test_collect_repo_url_only_does_not_fetch_owner_repos() -> None:
+    requested_paths: list[str] = []
+    repo_payload = {
+        "id": 99,
+        "full_name": "langchain-ai/langgraph",
+        "html_url": "https://github.com/langchain-ai/langgraph",
+        "description": "Graph framework",
+        "pushed_at": "2026-05-01T00:00:00Z",
+        "stargazers_count": 100,
+        "owner": {"login": "langchain-ai"},
+        "language": "Python",
+        "topics": [],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/repos/langchain-ai/langgraph":
+            return httpx.Response(200, json=repo_payload)
+        if request.url.path.endswith("/readme"):
+            return httpx.Response(404)
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            conn = GitHubConnector(token=None, client=client)
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_manual_urls=["https://github.com/langchain-ai/langgraph"],
+                    github_target_channels=[],
+                    max_items=5,
+                ),
+            )
+
+        assert len(out.items) == 1
+        assert out.items[0].title == "langchain-ai/langgraph"
+        assert not any(p.startswith("/users/") for p in requested_paths)
+        assert not any("/repos?" in p for p in requested_paths)
+
+    asyncio.run(main())
+
+
 def test_collect_owner_repos_channel() -> None:
     repos = [
         {

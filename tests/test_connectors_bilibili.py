@@ -249,6 +249,72 @@ def test_collect_manual_url_invalid_emits_warning() -> None:
     asyncio.run(main())
 
 
+def test_keyword_fallback_does_not_duplicate_invalid_json_warnings() -> None:
+    html = "<html><body>challenge</body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/x/web-interface/search/type" in request.url.path:
+            if request.url.params.get("search_type") == "video":
+                return httpx.Response(
+                    200,
+                    text=html,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                )
+        return httpx.Response(404, json={"code": -1})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.bilibili.com",
+        ) as client:
+            conn = BilibiliConnector(client=client)
+            out = await conn.collect(
+                ConnectorRequest(topics=["AI", "ML"], max_items=5),
+            )
+
+        json_warnings = [
+            w
+            for w in out.warnings
+            if w.code in ("anti_bot_blocked", "invalid_payload")
+        ]
+        # combined query + one attempt per topic (bounded, not exponential spam)
+        assert len(json_warnings) <= 3
+        assert len(out.warnings) < 10
+
+    asyncio.run(main())
+
+
+def test_invalid_json_warning_includes_payload_context() -> None:
+    html = "<!DOCTYPE html><title>verify</title>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/x/web-interface/search/type" in request.url.path:
+            return httpx.Response(
+                200,
+                text=html,
+                headers={"content-type": "text/html"},
+            )
+        return httpx.Response(404, json={"code": -1})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.bilibili.com",
+        ) as client:
+            conn = BilibiliConnector(client=client)
+            out = await conn.collect(ConnectorRequest(topics=["AI"], max_items=5))
+
+        w = next(x for x in out.warnings if x.code == "anti_bot_blocked")
+        assert w.detail is not None
+        assert "content-type" in w.detail
+        assert "text/html" in w.detail
+        assert "<!DOCTYPE" in w.detail
+
+    asyncio.run(main())
+
+
 def test_collect_search_http_failure_warns() -> None:
 
     async def main() -> None:

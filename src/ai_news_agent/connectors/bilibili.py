@@ -61,6 +61,51 @@ def _http_warning_code(status: int) -> str:
     return "http_error"
 
 
+def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]:
+    seen: set[tuple[str, str, str, str | None]] = set()
+    out: list[ConnectorWarning] = []
+    for w in warnings:
+        key = (w.connector, w.code, w.message, w.detail)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+    return out
+
+
+def _json_parse_detail(resp: httpx.Response, exc: ValueError) -> str:
+    content_type = resp.headers.get("content-type") or resp.headers.get("Content-Type") or ""
+    snippet = (resp.text or "").strip()[:200]
+    return f"{exc}; content-type={content_type!r}; body={snippet!r}"
+
+
+def _warning_for_invalid_json(
+    resp: httpx.Response,
+    *,
+    operation: str,
+    failure_code: str,
+    exc: ValueError,
+) -> ConnectorWarning:
+    content_type = (resp.headers.get("content-type") or "").lower()
+    snippet = (resp.text or "").lstrip()
+    if "text/html" in content_type or snippet.startswith("<"):
+        return ConnectorWarning(
+            connector="bilibili",
+            code="anti_bot_blocked",
+            message=(
+                f"Bilibili {operation} returned non-JSON (likely HTML challenge). "
+                "Set BILIBILI_COOKIE or use video URLs/channels."
+            ),
+            detail=_json_parse_detail(resp, exc),
+        )
+    return ConnectorWarning(
+        connector="bilibili",
+        code="invalid_payload",
+        message=f"Bilibili {operation} response was not valid JSON",
+        detail=_json_parse_detail(resp, exc),
+    )
+
+
 def _http_warning_message(operation: str, status: int) -> str:
     if status == 412:
         return (
@@ -156,7 +201,11 @@ class BilibiliConnector:
         merged.sort(key=_sort_key, reverse=True)
         merged = merged[: request.max_items]
 
-        return ConnectorResult(items=merged, warnings=warnings, raw_count=raw_total)
+        return ConnectorResult(
+            items=merged,
+            warnings=_dedupe_warnings(warnings),
+            raw_count=raw_total,
+        )
 
     async def _api_get(
         self,
@@ -222,22 +271,23 @@ class BilibiliConnector:
 
         combined = " ".join(topics)
         items, n_raw, ws = await self._keyword_search_once(
-            request, collected_at, combined, warnings
+            request, collected_at, combined
         )
+        warnings.extend(ws)
         if items:
-            return items, n_raw, ws
+            return items, n_raw, warnings
 
         if len(topics) <= 1:
-            return items, n_raw, ws
+            return items, n_raw, warnings
 
         by_bvid: dict[str, NewsItem] = {}
         total_raw = 0
         for topic in topics:
             part_items, part_raw, part_ws = await self._keyword_search_once(
-                request, collected_at, topic, warnings
+                request, collected_at, topic
             )
             total_raw += part_raw
-            ws.extend(part_ws)
+            warnings.extend(part_ws)
             for it in part_items:
                 by_bvid[it.source_id] = it
 
@@ -256,7 +306,6 @@ class BilibiliConnector:
         request: ConnectorRequest,
         collected_at: datetime,
         keyword: str,
-        warnings: list[ConnectorWarning],
     ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
         local_warnings: list[ConnectorWarning] = []
         resp = await self._api_get(
@@ -271,25 +320,24 @@ class BilibiliConnector:
             operation="keyword search",
             failure_code="keyword_search_failed",
         )
-        warnings.extend(local_warnings)
         if resp is None or resp.status_code != 200:
-            return [], 0, warnings
+            return [], 0, list(local_warnings)
 
         try:
             payload = resp.json()
         except ValueError as exc:
-            warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="keyword_search_failed",
-                    message="Bilibili keyword search response was not valid JSON",
-                    detail=str(exc),
+            local_warnings.append(
+                _warning_for_invalid_json(
+                    resp,
+                    operation="keyword search",
+                    failure_code="keyword_search_failed",
+                    exc=exc,
                 )
             )
-            return [], 0, warnings
+            return [], 0, local_warnings
 
         if int(payload.get("code", -1)) != 0:
-            warnings.append(
+            local_warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="keyword_search_failed",
@@ -297,12 +345,12 @@ class BilibiliConnector:
                     detail=str(payload.get("message")),
                 )
             )
-            return [], 0, warnings
+            return [], 0, local_warnings
 
         data = payload.get("data") or {}
         note = data.get("note")
         if note:
-            warnings.append(
+            local_warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="metadata_limited",
@@ -322,7 +370,7 @@ class BilibiliConnector:
             raw_count += 1
             it = _video_row_to_news_item(row, request.topics, collected_at)
             if it is None:
-                warnings.append(
+                local_warnings.append(
                     ConnectorWarning(
                         connector=self.name(),
                         code="skipped_malformed_video",
@@ -332,7 +380,7 @@ class BilibiliConnector:
                 continue
             items.append(it)
 
-        return items, raw_count, warnings
+        return items, raw_count, local_warnings
 
     async def _uploader_videos(
         self,
@@ -369,11 +417,11 @@ class BilibiliConnector:
             payload = resp.json()
         except ValueError as exc:
             warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="space_search_failed",
-                    message="Bilibili space search response was not valid JSON",
-                    detail=str(exc),
+                _warning_for_invalid_json(
+                    resp,
+                    operation=f"space search (mid={mid})",
+                    failure_code="space_search_failed",
+                    exc=exc,
                 )
             )
             return [], 0, warnings
@@ -439,11 +487,11 @@ class BilibiliConnector:
             payload = resp.json()
         except ValueError as exc:
             warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="user_search_failed",
-                    message="Bilibili user search response was not valid JSON",
-                    detail=str(exc),
+                _warning_for_invalid_json(
+                    resp,
+                    operation=f"user search ({channel!r})",
+                    failure_code="user_search_failed",
+                    exc=exc,
                 )
             )
             return None
@@ -513,11 +561,11 @@ class BilibiliConnector:
             payload = resp.json()
         except ValueError as exc:
             warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="view_fetch_failed",
-                    message=f"Bilibili view response was not valid JSON for {bvid}",
-                    detail=str(exc),
+                _warning_for_invalid_json(
+                    resp,
+                    operation=f"view ({bvid})",
+                    failure_code="view_fetch_failed",
+                    exc=exc,
                 )
             )
             return None, 1, warnings

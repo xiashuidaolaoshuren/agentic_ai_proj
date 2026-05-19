@@ -19,6 +19,23 @@ def test_parse_github_repo_url() -> None:
     )
     assert req.topics == []
     assert any("github.com/acme/widget" in u for u in req.github_manual_urls)
+    assert req.github_target_channels == []
+
+
+def test_parse_github_repo_url_does_not_infer_owner_channel() -> None:
+    req = parse_digest_intent(
+        "Digest https://github.com/langchain-ai/langgraph",
+    )
+    assert any("langchain-ai/langgraph" in u for u in req.github_manual_urls)
+    assert req.github_target_channels == []
+
+
+def test_parse_github_explicit_channel_phrase() -> None:
+    req = parse_digest_intent(
+        "Digest github user langchain-ai and https://github.com/langchain-ai/langgraph",
+    )
+    assert "langchain-ai" in req.github_target_channels
+    assert any("langchain-ai/langgraph" in u for u in req.github_manual_urls)
 
 
 def test_parse_today_timeframe_keeps_default_topics() -> None:

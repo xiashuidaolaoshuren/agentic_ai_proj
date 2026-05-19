@@ -18,10 +18,10 @@ _BILIBILI_VIDEO_URL = re.compile(
 )
 _URL_TOKEN = re.compile(r"https?://\S+", re.IGNORECASE)
 
+# Owner/org channels only from explicit phrasing — not from bare github.com/owner in a repo URL.
 _GITHUB_CHANNEL = re.compile(
     r"(?:github\s+(?:user|org|channel|owner)\s+([A-Za-z0-9_.-]+)"
-    r"|from\s+([A-Za-z0-9_.-]+)\s+on\s+github"
-    r"|github\.com/([A-Za-z0-9_.-]+)(?:/|$|\s))",
+    r"|from\s+([A-Za-z0-9_.-]+)\s+on\s+github)",
     re.IGNORECASE,
 )
 _BILIBILI_CHANNEL = re.compile(

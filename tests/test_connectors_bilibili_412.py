@@ -77,6 +77,33 @@ def test_keyword_search_recovers_after_412_retry() -> None:
     asyncio.run(main())
 
 
+def test_keyword_search_html_payload_classified_as_anti_bot() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/x/web-interface/search/type" in request.url.path:
+            return httpx.Response(
+                200,
+                text="<html>blocked</html>",
+                headers={"content-type": "text/html"},
+            )
+        return httpx.Response(404)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.bilibili.com",
+        ) as client:
+            conn = BilibiliConnector(client=client)
+            out = await conn.collect(ConnectorRequest(topics=["AI"], max_items=5))
+
+        assert out.items == []
+        assert any(w.code == "anti_bot_blocked" for w in out.warnings)
+        w = next(x for x in out.warnings if x.code == "anti_bot_blocked")
+        assert w.detail and "content-type" in w.detail
+
+    asyncio.run(main())
+
+
 def test_bilibili_client_uses_cookie_env(monkeypatch) -> None:
     monkeypatch.setenv("BILIBILI_COOKIE", "SESSDATA=abc123")
 
