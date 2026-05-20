@@ -93,12 +93,21 @@ class ChatService:
             )
             if result.warnings:
                 for w in result.warnings:
-                    logger.warning(
-                        "[%s] %s: %s",
-                        w.connector,
-                        w.code,
-                        w.message,
-                    )
+                    if w.detail:
+                        logger.warning(
+                            "[%s] %s: %s | detail=%s",
+                            w.connector,
+                            w.code,
+                            w.message,
+                            w.detail[:300],
+                        )
+                    else:
+                        logger.warning(
+                            "[%s] %s: %s",
+                            w.connector,
+                            w.code,
+                            w.message,
+                        )
             if result.errors:
                 for err in result.errors:
                     logger.error(

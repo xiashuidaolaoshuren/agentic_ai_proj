@@ -277,6 +277,43 @@ def test_collect_search_http_failure_warns() -> None:
     asyncio.run(main())
 
 
+def test_timeframe_today_start_before_end() -> None:
+    from ai_news_agent.connectors.bilibili import _timeframe_to_dates
+
+    start, end = _timeframe_to_dates("today")
+    assert start is not None
+    assert end is not None
+    assert start < end
+
+
+def test_keyword_search_today_passes_dates_to_library() -> None:
+    from ai_news_agent.connectors.bilibili import _timeframe_to_dates
+
+    captured: dict[str, str | None] = {}
+
+    async def capture_search(**kwargs: object) -> dict:
+        captured["time_start"] = kwargs.get("time_start")  # type: ignore[assignment]
+        captured["time_end"] = kwargs.get("time_end")  # type: ignore[assignment]
+        return {"result": []}
+
+    async def main() -> None:
+        with patch(
+            "ai_news_agent.connectors.bilibili.search.search_by_type",
+            new=AsyncMock(side_effect=capture_search),
+        ):
+            conn = BilibiliConnector()
+            await conn.collect(
+                ConnectorRequest(topics=["AI"], timeframe="today", max_items=5),
+            )
+
+        start, end = _timeframe_to_dates("today")
+        assert captured["time_start"] == start
+        assert captured["time_end"] == end
+        assert captured["time_start"] != captured["time_end"]
+
+    asyncio.run(main())
+
+
 def test_bilibili_connector_name() -> None:
     assert BilibiliConnector().name() == "bilibili"
 

@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bilibili_api import Credential, search, user, video
-from bilibili_api.exceptions import NetworkException, ResponseCodeException
+from bilibili_api.exceptions import ArgsException, NetworkException, ResponseCodeException
 from bilibili_api.search import SearchObjectType
 from bilibili_api.video_zone import VideoZoneTypes
 
@@ -43,7 +43,9 @@ def _timeframe_to_dates(timeframe: str | None) -> tuple[str | None, str | None]:
     today = datetime.now(UTC).date()
     end = today.isoformat()
     if key in ("today",):
-        return end, end
+        start = today.isoformat()
+        time_end = (today + timedelta(days=1)).isoformat()
+        return start, time_end
     if key in ("this week", "week"):
         start = (today - timedelta(days=7)).isoformat()
         return start, end
@@ -122,6 +124,20 @@ def _warning_from_exception(
         connector="bilibili",
         code=failure_code,
         message=f"Bilibili {operation} failed",
+        detail=str(exc)[:300],
+    )
+
+
+def _warning_for_client_error(
+    exc: BaseException,
+    *,
+    operation: str,
+    failure_code: str,
+) -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="bilibili",
+        code=failure_code,
+        message=f"Bilibili {operation} date range or arguments invalid",
         detail=str(exc)[:300],
     )
 
@@ -264,6 +280,15 @@ class BilibiliConnector:
                 page=1,
                 page_size=min(request.max_items, 20),
             )
+        except (ValueError, ArgsException) as exc:
+            local_warnings.append(
+                _warning_for_client_error(
+                    exc,
+                    operation="keyword search",
+                    failure_code="keyword_search_failed",
+                )
+            )
+            return [], 0, local_warnings
         except (ResponseCodeException, NetworkException) as exc:
             local_warnings.append(
                 _warning_from_exception(
