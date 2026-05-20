@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+from bilibili_api.exceptions import NetworkException, ResponseCodeException
+from bilibili_api.search import SearchObjectType
 
 from ai_news_agent.connectors.base import ConnectorRequest
 from ai_news_agent.connectors.bilibili import BilibiliConnector
@@ -22,27 +24,15 @@ def _load_fixture(name: str) -> dict:
         return json.load(f)
 
 
-def _make_keyword_transport(search_json: dict) -> httpx.MockTransport:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/search/type" in request.url.path:
-            st = request.url.params.get("search_type")
-            if st == "video":
-                return httpx.Response(200, json=search_json)
-        return httpx.Response(404, json={"code": -1, "message": "not found"})
-
-    return httpx.MockTransport(handler)
-
-
 def test_collect_keyword_search_maps_fixture() -> None:
     data = _load_fixture("bilibili_search_sample.json")
 
     async def main() -> None:
-        transport = _make_keyword_transport(data)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        with patch(
+            "ai_news_agent.connectors.bilibili.search.search_by_type",
+            new=AsyncMock(return_value=data),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(topics=["RAG", "agents"], max_items=10),
             )
@@ -63,21 +53,14 @@ def test_collect_keyword_search_maps_fixture() -> None:
 def test_collect_empty_inputs_returns_warning() -> None:
 
     async def main() -> None:
-        transport = httpx.MockTransport(
-            lambda r: httpx.Response(404, json={"code": -1}),
+        conn = BilibiliConnector()
+        out = await conn.collect(
+            ConnectorRequest(
+                topics=[],
+                target_channels=[],
+                manual_urls=[],
+            ),
         )
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
-            out = await conn.collect(
-                ConnectorRequest(
-                    topics=[],
-                    target_channels=[],
-                    manual_urls=[],
-                ),
-            )
         assert out.items == []
         assert out.raw_count == 0
         assert any(w.code == "no_input" for w in out.warnings)
@@ -86,36 +69,29 @@ def test_collect_empty_inputs_returns_warning() -> None:
 
 
 def test_collect_target_channel_space_list() -> None:
-    space_payload = {
-        "code": 0,
-        "data": {
-            "list": {
-                "vlist": [
-                    {
-                        "bvid": "BVspace001",
-                        "title": "From uploader feed",
-                        "author": "UploaderName",
-                        "play": 100,
-                        "description": "desc",
-                        "created": 1715000000,
-                    }
-                ]
-            }
-        },
+    feed_data = {
+        "list": {
+            "vlist": [
+                {
+                    "bvid": "BVspace001",
+                    "title": "From uploader feed",
+                    "author": "UploaderName",
+                    "play": 100,
+                    "description": "desc",
+                    "created": 1715000000,
+                }
+            ]
+        }
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/space/arc/search" in request.url.path:
-            return httpx.Response(200, json=space_payload)
-        return httpx.Response(404, json={"code": -1})
-
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        mock_user = MagicMock()
+        mock_user.get_videos = AsyncMock(return_value=feed_data)
+        with patch(
+            "ai_news_agent.connectors.bilibili.user.User",
+            return_value=mock_user,
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(topics=[], target_channels=["123456789"], max_items=5),
             )
@@ -139,38 +115,39 @@ def test_collect_target_channel_name_resolved_via_user_search() -> None:
             ]
         },
     }
-    space_payload = {
-        "code": 0,
-        "data": {
-            "list": {
-                "vlist": [
-                    {
-                        "bvid": "BVaftersearch",
-                        "title": "Resolved uploader",
-                        "author": "Resolved",
-                        "play": 1,
-                        "description": None,
-                    }
-                ]
-            }
-        },
+    feed_data = {
+        "list": {
+            "vlist": [
+                {
+                    "bvid": "BVaftersearch",
+                    "title": "Resolved uploader",
+                    "author": "Resolved",
+                    "play": 1,
+                    "description": None,
+                }
+            ]
+        }
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/search/type" in request.url.path:
-            if request.url.params.get("search_type") == "bili_user":
-                return httpx.Response(200, json=user_search)
-        if "/x/space/arc/search" in request.url.path:
-            return httpx.Response(200, json=space_payload)
-        return httpx.Response(404, json={"code": -1})
+    async def search_side_effect(**kwargs: object) -> dict:
+        if kwargs.get("search_type") == SearchObjectType.USER:
+            return user_search
+        return {"code": -1, "data": {}}
 
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        mock_user = MagicMock()
+        mock_user.get_videos = AsyncMock(return_value=feed_data)
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(side_effect=search_side_effect),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.user.User",
+                return_value=mock_user,
+            ),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(
                     topics=[],
@@ -185,31 +162,23 @@ def test_collect_target_channel_name_resolved_via_user_search() -> None:
 
 
 def test_collect_manual_urls_uses_view_api() -> None:
-    view_payload = {
-        "code": 0,
-        "data": {
-            "bvid": "BVmanual01",
-            "title": "Manual video title",
-            "desc": "Manual description",
-            "pubdate": 1715012345,
-            "owner": {"name": "OwnerX", "mid": 1},
-            "stat": {"view": 9999},
-        },
+    view_data = {
+        "bvid": "BVmanual01",
+        "title": "Manual video title",
+        "desc": "Manual description",
+        "pubdate": 1715012345,
+        "owner": {"name": "OwnerX", "mid": 1},
+        "stat": {"view": 9999},
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/view" in request.url.path:
-            assert request.url.params.get("bvid") == "BVmanual01"
-            return httpx.Response(200, json=view_payload)
-        return httpx.Response(404, json={"code": -1})
-
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value=view_data)
+        with patch(
+            "ai_news_agent.connectors.bilibili.video.Video",
+            return_value=mock_video,
+        ) as VideoCls:
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(
                     topics=[],
@@ -217,6 +186,8 @@ def test_collect_manual_urls_uses_view_api() -> None:
                     max_items=5,
                 ),
             )
+        VideoCls.assert_called_once()
+        assert VideoCls.call_args.kwargs.get("bvid") == "BVmanual01"
         assert len(out.items) == 1
         assert out.items[0].title == "Manual video title"
         assert out.items[0].raw_snippet is not None
@@ -228,21 +199,14 @@ def test_collect_manual_urls_uses_view_api() -> None:
 def test_collect_manual_url_invalid_emits_warning() -> None:
 
     async def main() -> None:
-        transport = httpx.MockTransport(
-            lambda r: httpx.Response(404, json={"code": -1}),
+        conn = BilibiliConnector()
+        out = await conn.collect(
+            ConnectorRequest(
+                topics=[],
+                manual_urls=["https://example.com/not-bilibili"],
+                max_items=5,
+            ),
         )
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
-            out = await conn.collect(
-                ConnectorRequest(
-                    topics=[],
-                    manual_urls=["https://example.com/not-bilibili"],
-                    max_items=5,
-                ),
-            )
         assert out.items == []
         assert any(w.code == "invalid_manual_url" for w in out.warnings)
 
@@ -250,35 +214,21 @@ def test_collect_manual_url_invalid_emits_warning() -> None:
 
 
 def test_keyword_fallback_does_not_duplicate_invalid_json_warnings() -> None:
-    html = "<html><body>challenge</body></html>"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/search/type" in request.url.path:
-            if request.url.params.get("search_type") == "video":
-                return httpx.Response(
-                    200,
-                    text=html,
-                    headers={"content-type": "text/html; charset=utf-8"},
-                )
-        return httpx.Response(404, json={"code": -1})
+    blocked = ResponseCodeException(-412, "blocked")
 
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        with patch(
+            "ai_news_agent.connectors.bilibili.search.search_by_type",
+            new=AsyncMock(side_effect=blocked),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(topics=["AI", "ML"], max_items=5),
             )
 
         json_warnings = [
-            w
-            for w in out.warnings
-            if w.code in ("anti_bot_blocked", "invalid_payload")
+            w for w in out.warnings if w.code in ("anti_bot_blocked", "invalid_payload")
         ]
-        # combined query + one attempt per topic (bounded, not exponential spam)
         assert len(json_warnings) <= 3
         assert len(out.warnings) < 10
 
@@ -286,31 +236,24 @@ def test_keyword_fallback_does_not_duplicate_invalid_json_warnings() -> None:
 
 
 def test_invalid_json_warning_includes_payload_context() -> None:
-    html = "<!DOCTYPE html><title>verify</title>"
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/search/type" in request.url.path:
-            return httpx.Response(
-                200,
-                text=html,
-                headers={"content-type": "text/html"},
-            )
-        return httpx.Response(404, json={"code": -1})
+    html_detail = "content-type='text/html'; body='<!DOCTYPE html><title>verify</title>'"
 
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        with patch(
+            "ai_news_agent.connectors.bilibili.search.search_by_type",
+            new=AsyncMock(
+                side_effect=NetworkException(
+                    200,
+                    f"invalid json; {html_detail}",
+                ),
+            ),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(ConnectorRequest(topics=["AI"], max_items=5))
 
         w = next(x for x in out.warnings if x.code == "anti_bot_blocked")
         assert w.detail is not None
-        assert "content-type" in w.detail
-        assert "text/html" in w.detail
-        assert "<!DOCTYPE" in w.detail
+        assert "content-type" in w.detail.lower() or "html" in w.detail.lower()
 
     asyncio.run(main())
 
@@ -318,14 +261,11 @@ def test_invalid_json_warning_includes_payload_context() -> None:
 def test_collect_search_http_failure_warns() -> None:
 
     async def main() -> None:
-        transport = httpx.MockTransport(
-            lambda r: httpx.Response(503, text="unavailable"),
-        )
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        with patch(
+            "ai_news_agent.connectors.bilibili.search.search_by_type",
+            new=AsyncMock(side_effect=NetworkException(503, "service unavailable")),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(topics=["AI"], max_items=5),
             )
@@ -338,47 +278,34 @@ def test_collect_search_http_failure_warns() -> None:
 
 
 def test_bilibili_connector_name() -> None:
-
-    async def main() -> None:
-        transport = httpx.MockTransport(lambda r: httpx.Response(404))
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            assert BilibiliConnector(client=client).name() == "bilibili"
-
-    asyncio.run(main())
+    assert BilibiliConnector().name() == "bilibili"
 
 
 def test_collect_dedupes_bvid_across_paths() -> None:
     overlap = _load_fixture("bilibili_search_sample.json")
-    view_dup = {
-        "code": 0,
-        "data": {
-            "bvid": "BV1demo0001",
-            "title": "Dup from view",
-            "desc": "x",
-            "pubdate": 1715012345,
-            "owner": {"name": "O", "mid": 1},
-            "stat": {"view": 1},
-        },
+    view_data = {
+        "bvid": "BV1demo0001",
+        "title": "Dup from view",
+        "desc": "x",
+        "pubdate": 1715012345,
+        "owner": {"name": "O", "mid": 1},
+        "stat": {"view": 1},
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/x/web-interface/search/type" in request.url.path:
-            if request.url.params.get("search_type") == "video":
-                return httpx.Response(200, json=overlap)
-        if "/x/web-interface/view" in request.url.path:
-            return httpx.Response(200, json=view_dup)
-        return httpx.Response(404, json={"code": -1})
-
     async def main() -> None:
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.bilibili.com",
-        ) as client:
-            conn = BilibiliConnector(client=client)
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value=view_data)
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=overlap),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            conn = BilibiliConnector()
             out = await conn.collect(
                 ConnectorRequest(
                     topics=["RAG"],

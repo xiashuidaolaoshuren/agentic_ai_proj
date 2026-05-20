@@ -1,64 +1,26 @@
-"""Bilibili metadata connector: keyword search, uploader feeds, manual URLs.
+"""Bilibili metadata connector via bilibili-api-python.
 
-Uses public web-interface JSON endpoints (metadata-first; no transcript scraping).
-Includes retry/backoff for anti-bot HTTP 412 and optional session cookies.
+Keyword search, uploader feeds, and manual BV/URL resolution. Metadata-first;
+subtitle/transcript hooks reserved for a later milestone.
 """
 
 from __future__ import annotations
 
-import asyncio
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+from bilibili_api import Credential, search, user, video
+from bilibili_api.exceptions import NetworkException, ResponseCodeException
+from bilibili_api.search import SearchObjectType
+from bilibili_api.video_zone import VideoZoneTypes
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
-from ai_news_agent.env import get_bilibili_cookie
+from ai_news_agent.env import get_bilibili_credential
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 
-DEFAULT_BASE = "https://api.bilibili.com"
-_RETRYABLE_STATUS = frozenset({412, 429, 500, 502, 503, 504})
-_MAX_ATTEMPTS = 3
 # Real BV ids are typically 12 chars (e.g. BV1…); allow short test-style ids.
 _BVID_IN_TEXT = re.compile(r"(BV[0-9A-Za-z]{8,14})", re.IGNORECASE)
-
-
-def _browser_headers() -> dict[str, str]:
-    return {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Referer": "https://www.bilibili.com",
-        "Origin": "https://www.bilibili.com",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    }
-
-
-def _cookie_raw_to_dict(raw: str) -> dict[str, str]:
-    s = raw.strip()
-    if not s:
-        return {}
-    if "=" not in s:
-        return {"SESSDATA": s}
-    out: dict[str, str] = {}
-    for part in s.split(";"):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        key, val = part.split("=", 1)
-        out[key.strip()] = val.strip()
-    return out
-
-
-def _http_warning_code(status: int) -> str:
-    if status == 412:
-        return "anti_bot_blocked"
-    if status == 429:
-        return "rate_limited"
-    return "http_error"
 
 
 def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]:
@@ -73,87 +35,122 @@ def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]
     return out
 
 
-def _json_parse_detail(resp: httpx.Response, exc: ValueError) -> str:
-    content_type = resp.headers.get("content-type") or resp.headers.get("Content-Type") or ""
-    snippet = (resp.text or "").strip()[:200]
-    return f"{exc}; content-type={content_type!r}; body={snippet!r}"
+def _timeframe_to_dates(timeframe: str | None) -> tuple[str | None, str | None]:
+    """Map digest timeframe to Bilibili search ``time_start`` / ``time_end`` (YYYY-MM-DD)."""
+    if not timeframe:
+        return None, None
+    key = timeframe.strip().lower()
+    today = datetime.now(UTC).date()
+    end = today.isoformat()
+    if key in ("today",):
+        return end, end
+    if key in ("this week", "week"):
+        start = (today - timedelta(days=7)).isoformat()
+        return start, end
+    if key in ("this month", "month"):
+        start = (today - timedelta(days=30)).isoformat()
+        return start, end
+    return None, None
 
 
-def _warning_for_invalid_json(
-    resp: httpx.Response,
+def _unwrap_payload(payload: Any) -> tuple[dict[str, Any], int, str | None]:
+    """Normalize library/API dicts to ``(data, code, message)``."""
+    if not isinstance(payload, dict):
+        return {}, -1, "response was not a dict"
+    if "code" in payload and "data" in payload:
+        code = int(payload.get("code", -1))
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return data, code, str(payload.get("message")) if payload.get("message") else None
+        return {}, code, str(payload.get("message")) if payload.get("message") else None
+    return payload, 0, None
+
+
+def _warning_from_exception(
+    exc: BaseException,
     *,
     operation: str,
     failure_code: str,
-    exc: ValueError,
 ) -> ConnectorWarning:
-    content_type = (resp.headers.get("content-type") or "").lower()
-    snippet = (resp.text or "").lstrip()
-    if "text/html" in content_type or snippet.startswith("<"):
+    if isinstance(exc, ResponseCodeException):
+        code = getattr(exc, "code", None)
+        msg = str(getattr(exc, "msg", exc) or exc)
+        detail = str(getattr(exc, "raw", "") or "")[:300] or None
+        if code in (-412, 412) or "412" in msg:
+            return ConnectorWarning(
+                connector="bilibili",
+                code="anti_bot_blocked",
+                message=(
+                    f"Bilibili {operation} blocked (anti-bot). "
+                    "Set BILIBILI_COOKIE or use video URLs/channels."
+                ),
+                detail=detail or msg,
+            )
+        if code in (-429, 429):
+            return ConnectorWarning(
+                connector="bilibili",
+                code="rate_limited",
+                message=f"Bilibili {operation} rate limited",
+                detail=detail or msg,
+            )
         return ConnectorWarning(
             connector="bilibili",
-            code="anti_bot_blocked",
-            message=(
-                f"Bilibili {operation} returned non-JSON (likely HTML challenge). "
-                "Set BILIBILI_COOKIE or use video URLs/channels."
-            ),
-            detail=_json_parse_detail(resp, exc),
+            code=failure_code,
+            message=f"Bilibili {operation} returned code={code!r}",
+            detail=detail or msg,
+        )
+    if isinstance(exc, NetworkException):
+        text = str(exc)
+        lower = text.lower()
+        if "html" in lower or text.lstrip().startswith("<"):
+            return ConnectorWarning(
+                connector="bilibili",
+                code="anti_bot_blocked",
+                message=(
+                    f"Bilibili {operation} returned non-JSON (likely HTML challenge). "
+                    "Set BILIBILI_COOKIE or use video URLs/channels."
+                ),
+                detail=text[:300],
+            )
+        return ConnectorWarning(
+            connector="bilibili",
+            code=failure_code,
+            message=f"Bilibili {operation} request failed",
+            detail=text[:300],
         )
     return ConnectorWarning(
         connector="bilibili",
-        code="invalid_payload",
-        message=f"Bilibili {operation} response was not valid JSON",
-        detail=_json_parse_detail(resp, exc),
+        code=failure_code,
+        message=f"Bilibili {operation} failed",
+        detail=str(exc)[:300],
     )
 
 
-def _http_warning_message(operation: str, status: int) -> str:
-    if status == 412:
-        return (
-            f"Bilibili {operation} blocked with HTTP 412 (anti-bot). "
-            "Set BILIBILI_COOKIE or BILIBILI_SESSDATA in .env, or use video URLs/channels."
-        )
-    return f"Bilibili {operation} HTTP {status}"
-
-
 class BilibiliConnector:
-    """Fetch Bilibili video metadata via conservative API calls."""
+    """Fetch Bilibili video metadata via bilibili-api-python."""
 
     def __init__(
         self,
         *,
-        client: httpx.AsyncClient | None = None,
-        base_url: str = DEFAULT_BASE,
-        cookie: str | None = None,
+        credential: Credential | None = None,
     ) -> None:
-        self._owns_client = client is None
-        if client is not None:
-            self._client = client
-        else:
-            cookie_raw = cookie if cookie is not None else get_bilibili_cookie()
-            cookies = _cookie_raw_to_dict(cookie_raw) if cookie_raw else None
-            self._client = httpx.AsyncClient(
-                base_url=base_url,
-                headers=_browser_headers(),
-                cookies=cookies,
-                timeout=httpx.Timeout(30.0),
-            )
+        self._credential = (
+            credential if credential is not None else get_bilibili_credential()
+        )
 
     def name(self) -> str:
         return "bilibili"
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        """No persistent HTTP client; kept for CLI/workflow symmetry."""
 
     async def collect(self, request: ConnectorRequest) -> ConnectorResult:
         warnings: list[ConnectorWarning] = []
         bili_urls = list(request.bilibili_manual_urls) or list(request.manual_urls)
-        bili_channels = list(request.bilibili_target_channels) or list(request.target_channels)
-        if (
-            not request.topics
-            and not bili_channels
-            and not bili_urls
-        ):
+        bili_channels = list(request.bilibili_target_channels) or list(
+            request.target_channels
+        )
+        if not request.topics and not bili_channels and not bili_urls:
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
@@ -207,58 +204,6 @@ class BilibiliConnector:
             raw_count=raw_total,
         )
 
-    async def _api_get(
-        self,
-        path: str,
-        *,
-        params: dict[str, Any] | None,
-        warnings: list[ConnectorWarning],
-        operation: str,
-        failure_code: str,
-    ) -> httpx.Response | None:
-        last_resp: httpx.Response | None = None
-        for attempt in range(_MAX_ATTEMPTS):
-            try:
-                resp = await self._client.get(path, params=params)
-            except httpx.RequestError as exc:
-                if attempt < _MAX_ATTEMPTS - 1:
-                    await asyncio.sleep(0.4 * (attempt + 1))
-                    continue
-                warnings.append(
-                    ConnectorWarning(
-                        connector=self.name(),
-                        code=failure_code,
-                        message=f"Bilibili {operation} request failed",
-                        detail=str(exc),
-                    )
-                )
-                return None
-
-            if resp.status_code == 200:
-                return resp
-
-            last_resp = resp
-            if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS - 1:
-                await asyncio.sleep(0.5 * (attempt + 1))
-                continue
-            break
-
-        if last_resp is None:
-            return None
-
-        status = last_resp.status_code
-        code = _http_warning_code(status) if status in _RETRYABLE_STATUS else failure_code
-        detail = last_resp.text[:300] if last_resp.text else None
-        warnings.append(
-            ConnectorWarning(
-                connector=self.name(),
-                code=code,
-                message=_http_warning_message(operation, status),
-                detail=detail,
-            )
-        )
-        return last_resp
-
     async def _keyword_search(
         self,
         request: ConnectorRequest,
@@ -308,46 +253,48 @@ class BilibiliConnector:
         keyword: str,
     ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
         local_warnings: list[ConnectorWarning] = []
-        resp = await self._api_get(
-            "/x/web-interface/search/type",
-            params={
-                "search_type": "video",
-                "keyword": keyword,
-                "page": 1,
-                "page_size": min(request.max_items, 20),
-            },
-            warnings=local_warnings,
-            operation="keyword search",
-            failure_code="keyword_search_failed",
-        )
-        if resp is None or resp.status_code != 200:
-            return [], 0, list(local_warnings)
-
+        time_start, time_end = _timeframe_to_dates(request.timeframe)
         try:
-            payload = resp.json()
-        except ValueError as exc:
+            raw = await search.search_by_type(
+                keyword=keyword,
+                search_type=SearchObjectType.VIDEO,
+                time_start=time_start,
+                time_end=time_end,
+                video_zone_type=VideoZoneTypes.TECH,
+                page=1,
+                page_size=min(request.max_items, 20),
+            )
+        except (ResponseCodeException, NetworkException) as exc:
             local_warnings.append(
-                _warning_for_invalid_json(
-                    resp,
+                _warning_from_exception(
+                    exc,
                     operation="keyword search",
                     failure_code="keyword_search_failed",
-                    exc=exc,
+                )
+            )
+            return [], 0, local_warnings
+        except Exception as exc:
+            local_warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation="keyword search",
+                    failure_code="keyword_search_failed",
                 )
             )
             return [], 0, local_warnings
 
-        if int(payload.get("code", -1)) != 0:
+        data, code, message = _unwrap_payload(raw)
+        if code != 0:
             local_warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="keyword_search_failed",
-                    message=f"Bilibili keyword search returned code={payload.get('code')!r}",
-                    detail=str(payload.get("message")),
+                    message=f"Bilibili keyword search returned code={code!r}",
+                    detail=message,
                 )
             )
             return [], 0, local_warnings
 
-        data = payload.get("data") or {}
         note = data.get("note")
         if note:
             local_warnings.append(
@@ -397,47 +344,43 @@ class BilibiliConnector:
         if mid is None:
             return [], 0, warnings
 
-        local_warnings: list[ConnectorWarning] = []
-        resp = await self._api_get(
-            "/x/space/arc/search",
-            params={
-                "mid": mid,
-                "pn": 1,
-                "ps": min(request.max_items, 30),
-            },
-            warnings=local_warnings,
-            operation=f"space search (mid={mid})",
-            failure_code="space_search_failed",
-        )
-        warnings.extend(local_warnings)
-        if resp is None or resp.status_code != 200:
-            return [], 0, warnings
-
         try:
-            payload = resp.json()
-        except ValueError as exc:
+            uploader = user.User(uid=mid, credential=self._credential)
+            raw = await uploader.get_videos(
+                pn=1,
+                ps=min(request.max_items, 30),
+            )
+        except (ResponseCodeException, NetworkException) as exc:
             warnings.append(
-                _warning_for_invalid_json(
-                    resp,
-                    operation=f"space search (mid={mid})",
+                _warning_from_exception(
+                    exc,
+                    operation=f"uploader videos (mid={mid})",
                     failure_code="space_search_failed",
-                    exc=exc,
+                )
+            )
+            return [], 0, warnings
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"uploader videos (mid={mid})",
+                    failure_code="space_search_failed",
                 )
             )
             return [], 0, warnings
 
-        if int(payload.get("code", -1)) != 0:
+        data, code, message = _unwrap_payload(raw)
+        if code != 0:
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="space_search_failed",
-                    message=f"Bilibili space search returned code={payload.get('code')!r} for mid={mid}",
-                    detail=str(payload.get("message")),
+                    message=f"Bilibili uploader feed returned code={code!r} for mid={mid}",
+                    detail=message,
                 )
             )
             return [], 0, warnings
 
-        data = payload.get("data") or {}
         vlist = (data.get("list") or {}).get("vlist") or []
         items: list[NewsItem] = []
         raw_count = 0
@@ -467,47 +410,45 @@ class BilibiliConnector:
         if channel.isdigit():
             return int(channel)
 
-        local_warnings: list[ConnectorWarning] = []
-        resp = await self._api_get(
-            "/x/web-interface/search/type",
-            params={
-                "search_type": "bili_user",
-                "keyword": channel,
-                "page": 1,
-            },
-            warnings=local_warnings,
-            operation=f"user search ({channel!r})",
-            failure_code="user_search_failed",
-        )
-        warnings.extend(local_warnings)
-        if resp is None or resp.status_code != 200:
-            return None
-
         try:
-            payload = resp.json()
-        except ValueError as exc:
+            raw = await search.search_by_type(
+                keyword=channel,
+                search_type=SearchObjectType.USER,
+                page=1,
+                page_size=5,
+            )
+        except (ResponseCodeException, NetworkException) as exc:
             warnings.append(
-                _warning_for_invalid_json(
-                    resp,
+                _warning_from_exception(
+                    exc,
                     operation=f"user search ({channel!r})",
                     failure_code="user_search_failed",
-                    exc=exc,
+                )
+            )
+            return None
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"user search ({channel!r})",
+                    failure_code="user_search_failed",
                 )
             )
             return None
 
-        if int(payload.get("code", -1)) != 0:
+        data, code, message = _unwrap_payload(raw)
+        if code != 0:
             warnings.append(
                 ConnectorWarning(
                     connector=self.name(),
                     code="user_search_failed",
-                    message=f"Bilibili user search returned code={payload.get('code')!r}",
-                    detail=str(payload.get("message")),
+                    message=f"Bilibili user search returned code={code!r}",
+                    detail=message,
                 )
             )
             return None
 
-        rows = (payload.get("data") or {}).get("result") or []
+        rows = data.get("result") or []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -545,43 +486,42 @@ class BilibiliConnector:
             )
             return None, 0, warnings
 
-        local_warnings: list[ConnectorWarning] = []
-        resp = await self._api_get(
-            "/x/web-interface/view",
-            params={"bvid": bvid},
-            warnings=local_warnings,
-            operation=f"view ({bvid})",
-            failure_code="view_fetch_failed",
-        )
-        warnings.extend(local_warnings)
-        if resp is None or resp.status_code != 200:
-            return None, 1, warnings
-
         try:
-            payload = resp.json()
-        except ValueError as exc:
+            v = video.Video(bvid=bvid, credential=self._credential)
+            data = await v.get_info()
+        except (ResponseCodeException, NetworkException) as exc:
             warnings.append(
-                _warning_for_invalid_json(
-                    resp,
+                _warning_from_exception(
+                    exc,
                     operation=f"view ({bvid})",
                     failure_code="view_fetch_failed",
-                    exc=exc,
                 )
             )
             return None, 1, warnings
-
-        if int(payload.get("code", -1)) != 0:
+        except Exception as exc:
             warnings.append(
-                ConnectorWarning(
-                    connector=self.name(),
-                    code="view_fetch_failed",
-                    message=f"Bilibili view returned code={payload.get('code')!r} for {bvid}",
-                    detail=str(payload.get("message")),
+                _warning_from_exception(
+                    exc,
+                    operation=f"view ({bvid})",
+                    failure_code="view_fetch_failed",
                 )
             )
             return None, 1, warnings
 
-        data = payload.get("data") or {}
+        if isinstance(data, dict) and "code" in data and "data" in data:
+            inner, code, message = _unwrap_payload(data)
+            if code != 0:
+                warnings.append(
+                    ConnectorWarning(
+                        connector=self.name(),
+                        code="view_fetch_failed",
+                        message=f"Bilibili view returned code={code!r} for {bvid}",
+                        detail=message,
+                    )
+                )
+                return None, 1, warnings
+            data = inner
+
         it = _view_data_to_news_item(data, topics, collected_at)
         if it is None:
             warnings.append(
@@ -594,6 +534,20 @@ class BilibiliConnector:
             return None, 1, warnings
 
         return it, 1, warnings
+
+    async def _get_cid(self, bvid: str) -> int | None:
+        """Resolve first-page CID for future subtitle/transcript work."""
+        try:
+            v = video.Video(bvid=bvid, credential=self._credential)
+            pages = await v.get_pages()
+            if not pages:
+                return None
+            first = pages[0]
+            if isinstance(first, dict) and first.get("cid") is not None:
+                return int(first["cid"])
+        except Exception:
+            return None
+        return None
 
 
 def extract_bvid(text: str) -> str | None:
