@@ -45,44 +45,22 @@ def load_local_env(*, dotenv_path: str | Path | None = None) -> bool:
     return loaded
 
 
-def _cookie_raw_to_dict(raw: str) -> dict[str, str]:
-    s = raw.strip()
-    if not s:
-        return {}
-    if "=" not in s:
-        return {"SESSDATA": s}
-    out: dict[str, str] = {}
-    for part in s.split(";"):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        key, val = part.split("=", 1)
-        out[key.strip()] = val.strip()
-    return out
-
-
-def get_bilibili_cookie() -> str | None:
-    """Optional Bilibili session cookie(s) for anti-bot resilience.
-
-    Accepts a full ``Cookie`` header value, ``SESSDATA=...`` pair, or bare
-    ``SESSDATA`` token via ``BILIBILI_COOKIE`` / ``BILIBILI_SESSDATA``.
-    """
-    for key in ("BILIBILI_COOKIE", "BILIBILI_SESSDATA"):
-        val = os.environ.get(key)
-        if val and str(val).strip():
-            return str(val).strip()
-    return None
+def _env(name: str) -> str:
+    return os.environ.get(name, "").strip()
 
 
 def get_bilibili_credential() -> Credential | None:
-    """Build ``bilibili_api.Credential`` from env when any session field is set."""
+    """Build ``bilibili_api.Credential`` from discrete env vars.
+
+    Reads ``BILIBILI_SESSDATA``, ``BILIBILI_BILI_JCT``, and ``BILIBILI_BUVID3``.
+    Channel/uploader feeds typically need all three; video URL fetches may work
+    with fewer fields when Bilibili anti-bot is lenient.
+    """
     from bilibili_api import Credential
 
-    cookie_raw = get_bilibili_cookie()
-    cookies = _cookie_raw_to_dict(cookie_raw) if cookie_raw else {}
-    sessdata = cookies.get("SESSDATA") or os.environ.get("BILIBILI_SESSDATA", "").strip()
-    bili_jct = cookies.get("bili_jct") or os.environ.get("BILIBILI_BILI_JCT", "").strip()
-    buvid3 = cookies.get("buvid3") or os.environ.get("BILIBILI_BUVID3", "").strip()
+    sessdata = _env("BILIBILI_SESSDATA")
+    bili_jct = _env("BILIBILI_BILI_JCT")
+    buvid3 = _env("BILIBILI_BUVID3")
 
     if not any((sessdata, bili_jct, buvid3)):
         return None
@@ -104,7 +82,6 @@ def _reset_loaded_state_for_testing() -> None:
 
 
 __all__ = [
-    "get_bilibili_cookie",
     "get_bilibili_credential",
     "load_local_env",
     "_reset_loaded_state_for_testing",

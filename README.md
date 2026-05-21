@@ -40,7 +40,9 @@ Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never c
 | `OPENAI_BASE_URL` | Optional | Custom gateway / compatible endpoint |
 | `OPENAI_MODEL` | Optional | Model name (default `gpt-4o-mini`) |
 | `GITHUB_TOKEN` | Optional | Higher GitHub API rate limits ([`connectors/github.py`](src/ai_news_agent/connectors/github.py)) |
-| `BILIBILI_COOKIE` / `BILIBILI_SESSDATA` | Optional | Bilibili session cookie when search returns HTTP 412 ([`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)) |
+| `BILIBILI_SESSDATA` | Optional | Bilibili session token ([`env.py`](src/ai_news_agent/env.py)) |
+| `BILIBILI_BILI_JCT` | Optional | Bilibili CSRF token (often required with `SESSDATA`) |
+| `BILIBILI_BUVID3` | Optional | Bilibili device id cookie (helps avoid HTTP 412) |
 
 SQLite defaults to `./digest.sqlite` in the current working directory unless you pass `--db-path`. Database files matching `*.db` are gitignored.
 
@@ -112,7 +114,7 @@ Examples:
 - `Digest github user openai and https://www.bilibili.com/video/BV1demo0001`
 - `Give me today's AI digest` (default topics + timeframe when mentioned)
 
-If Bilibili keyword search fails with HTTP 412, set `BILIBILI_COOKIE` in `.env` or prefer video URLs / channel feeds. After a run, ask **show caveats** to see connector warnings.
+If Bilibili requests fail with HTTP 412, set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` (from browser cookies), restart Gradio, or prefer specific video URLs. After a run, ask **show caveats** to see connector warnings.
 
 ### Logging
 
@@ -147,7 +149,7 @@ Optional live Bilibili URL smoke (network; uses a fixed public BV id):
 RUN_LIVE_BILIBILI=1 uv run pytest -m live tests/test_connectors_bilibili_live.py -q
 ```
 
-Set `BILIBILI_COOKIE` in `.env` if the live test reports HTTP 412 on the view API.
+Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if the live test reports HTTP 412.
 
 ## Known MVP limits
 

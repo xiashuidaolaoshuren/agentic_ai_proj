@@ -84,7 +84,8 @@ def _warning_from_exception(
                 code="anti_bot_blocked",
                 message=(
                     f"Bilibili {operation} blocked (anti-bot). "
-                    "Set BILIBILI_COOKIE or use video URLs/channels."
+                    "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
+                    "in .env, or use video URLs/channels."
                 ),
                 detail=detail or msg,
             )
@@ -110,7 +111,8 @@ def _warning_from_exception(
                 code="anti_bot_blocked",
                 message=(
                     f"Bilibili {operation} returned non-JSON (likely HTML challenge). "
-                    "Set BILIBILI_COOKIE or use video URLs/channels."
+                    "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
+                    "in .env, or use video URLs/channels."
                 ),
                 detail=text[:300],
             )

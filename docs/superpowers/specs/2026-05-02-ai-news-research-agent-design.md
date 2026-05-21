@@ -267,10 +267,9 @@ Environment variables (see `.env.example`):
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `BILIBILI_COOKIE` | no | Full cookie header or `SESSDATA=...` string |
-| `BILIBILI_SESSDATA` | no | Bare `SESSDATA` token (alternative to cookie) |
+| `BILIBILI_SESSDATA` | no | Session token from browser cookies |
 | `BILIBILI_BILI_JCT` | no | CSRF token for logged-in calls |
-| `BILIBILI_BUVID3` | no | Device id cookie |
+| `BILIBILI_BUVID3` | no | Device id cookie (helps avoid HTTP 412) |
 
 `env.get_bilibili_credential()` builds `bilibili_api.Credential(sessdata=..., bili_jct=..., buvid3=...)`. When unset, the connector runs without credentials and surfaces library/network failures as existing warning codes.
 

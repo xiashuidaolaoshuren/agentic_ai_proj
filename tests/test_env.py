@@ -45,6 +45,26 @@ def test_load_local_env_explicit_path(tmp_path, monkeypatch) -> None:
     assert os.environ.get("GITHUB_TOKEN") == "gh-test"
 
 
+def test_get_bilibili_credential_returns_none_when_unset(monkeypatch) -> None:
+    monkeypatch.delenv("BILIBILI_SESSDATA", raising=False)
+    monkeypatch.delenv("BILIBILI_BILI_JCT", raising=False)
+    monkeypatch.delenv("BILIBILI_BUVID3", raising=False)
+
+    assert env.get_bilibili_credential() is None
+
+
+def test_get_bilibili_credential_from_separate_env_vars(monkeypatch) -> None:
+    monkeypatch.setenv("BILIBILI_SESSDATA", "sess-abc")
+    monkeypatch.setenv("BILIBILI_BILI_JCT", "jct-xyz")
+    monkeypatch.setenv("BILIBILI_BUVID3", "buvid3-123")
+
+    cred = env.get_bilibili_credential()
+    assert cred is not None
+    assert cred.sessdata == "sess-abc"
+    assert cred.bili_jct == "jct-xyz"
+    assert cred.buvid3 == "buvid3-123"
+
+
 def test_cli_live_uses_dotenv_before_build_chat_model(
     tmp_path, monkeypatch, capsys
 ) -> None:

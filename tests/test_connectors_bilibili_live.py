@@ -4,7 +4,7 @@ Run::
 
     RUN_LIVE_BILIBILI=1 uv run pytest -m live tests/test_connectors_bilibili_live.py -q
 
-Loads ``.env`` so ``BILIBILI_COOKIE`` / ``BILIBILI_SESSDATA`` apply when set.
+Loads ``.env`` so ``BILIBILI_SESSDATA``, ``BILIBILI_BILI_JCT``, and ``BILIBILI_BUVID3`` apply when set.
 """
 
 from __future__ import annotations

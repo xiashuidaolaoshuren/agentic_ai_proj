@@ -88,8 +88,8 @@ def test_keyword_search_html_payload_classified_as_anti_bot() -> None:
     asyncio.run(main())
 
 
-def test_bilibili_client_uses_cookie_env(monkeypatch) -> None:
-    monkeypatch.setenv("BILIBILI_COOKIE", "SESSDATA=abc123")
+def test_bilibili_client_uses_sessdata_env(monkeypatch) -> None:
+    monkeypatch.setenv("BILIBILI_SESSDATA", "abc123")
 
     async def main() -> None:
         conn = BilibiliConnector()
