@@ -71,11 +71,11 @@ def test_mvp_smoke_chat_digest_then_sources(tmp_path: Path) -> None:
 
     digest_reply = asyncio.run(svc.handle_message_async("Give me today's AI digest"))
     assert "AI News Digest" in digest_reply
-    assert "CLI fake repo" in digest_reply
+    assert "Fake GitHub repo" in digest_reply
 
     sources_reply = asyncio.run(svc.handle_message_async("show sources"))
     assert "Sources from the latest digest" in sources_reply
-    assert "https://example.com/cli-fake" in sources_reply
+    assert "https://example.com/fake-github" in sources_reply
 
 
 def test_mvp_smoke_cli_fake_digest(tmp_path: Path) -> None:
@@ -96,4 +96,4 @@ def test_mvp_smoke_cli_fake_digest(tmp_path: Path) -> None:
     out = buf.getvalue()
     assert code == 0
     assert "AI News Digest" in out
-    assert "CLI fake repo" in out
+    assert "Fake GitHub repo" in out

@@ -12,22 +12,18 @@ import gradio as gr
 
 from ai_news_agent.chat import ChatService
 from ai_news_agent.env import load_local_env
-from ai_news_agent.cli import (
-    _FakeBilibiliConnector,
-    _FakeDigestModel,
-    _FakeGitHubConnector,
-)
 from ai_news_agent.connectors.base import SourceConnector
-from ai_news_agent.connectors.bilibili import BilibiliConnector
-from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import (
+    DEFAULT_SOURCE_NAMES,
+    FakeDigestModel,
+    build_connectors,
+)
 from ai_news_agent.storage import DigestStore
-
-_DEFAULT_CONNECTORS: tuple[str, ...] = ("github", "bilibili")
 
 _UI_ERROR_MESSAGE = (
     "Something went wrong while processing your request. "
@@ -62,31 +58,17 @@ async def _run_digest_async(
         await _aclose_connectors(connectors)
 
 
-def _build_connectors(*, fake: bool) -> list[SourceConnector]:
-    if fake:
-        factories: dict[str, SourceConnector] = {
-            "github": _FakeGitHubConnector(),
-            "bilibili": _FakeBilibiliConnector(),
-        }
-    else:
-        factories = {
-            "github": GitHubConnector(),
-            "bilibili": BilibiliConnector(),
-        }
-    return [factories[name] for name in _DEFAULT_CONNECTORS]
-
-
 def _build_service(*, fake: bool, db_path: Path) -> ChatService:
     store = DigestStore(db_path)
     store.init_schema()
 
     if fake:
-        model: Any = _FakeDigestModel()
+        model: Any = FakeDigestModel()
     else:
         model = build_chat_model()
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
-        connectors = _build_connectors(fake=fake)
+        connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
     return ChatService(
@@ -97,30 +79,53 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
 
 
 def create_app(service: ChatService) -> gr.Blocks:
-    """Build a thin Gradio :class:`~gradio.ChatInterface` around ``service``."""
+    """Build a thin Gradio chat UI with session-sticky source toggles."""
 
-    async def respond(message: str, _history: list) -> str:
+    async def respond(message: str, _history: list, enabled_sources: list[str]) -> str:
+        if not enabled_sources:
+            return "Please enable at least one source (GitHub or Bilibili)."
         try:
-            return await service.handle_message_async(message)
+            return await service.handle_message_async(
+                message,
+                session_connector_names=enabled_sources,
+            )
         except Exception:
             logger.exception("gradio request failed")
             return _UI_ERROR_MESSAGE
 
-    return gr.ChatInterface(
-        fn=respond,
-        title="AI News Research Agent",
-        description=(
+    with gr.Blocks(title="AI News Research Agent") as demo:
+        gr.Markdown(
+            "# AI News Research Agent\n"
             'Ask for an AI news digest (e.g. mention "digest"). Include GitHub repo URLs, '
             "Bilibili video URLs, or channel hints in the same message for targeted runs. "
             'Follow up with "show sources", ranking hints, or "show caveats".'
-        ),
-        examples=[
-            "Give me today's AI digest",
-            "Digest https://github.com/langchain-ai/langgraph",
-            "Digest bilibili channel 123456789",
-            "show sources",
-        ],
-    )
+        )
+        source_toggles = gr.CheckboxGroup(
+            choices=list(DEFAULT_SOURCE_NAMES),
+            value=list(DEFAULT_SOURCE_NAMES),
+            label="Sources",
+            info=(
+                "Session filters for digest runs. Override one request with phrases like "
+                "'github only' or 'bilibili only'."
+            ),
+        )
+        default_sources = list(DEFAULT_SOURCE_NAMES)
+        gr.ChatInterface(
+            fn=respond,
+            additional_inputs=[source_toggles],
+            examples=[
+                ["Give me today's AI digest", default_sources],
+                ["Give me today's AI digest from github only", default_sources],
+                [
+                    "Digest https://github.com/langchain-ai/langgraph",
+                    default_sources,
+                ],
+                ["Digest bilibili channel 123456789", default_sources],
+                ["show sources", default_sources],
+            ],
+        )
+
+    return demo
 
 
 def main(argv: list[str] | None = None) -> int:

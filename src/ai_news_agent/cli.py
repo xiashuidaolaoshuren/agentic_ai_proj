@@ -13,64 +13,32 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
+from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.env import load_local_env
-from ai_news_agent.logging_setup import configure_logging, get_logger
-from ai_news_agent.connectors.bilibili import BilibiliConnector
-from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
-from ai_news_agent.models import NewsItem, SourceKind
+from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import (
+    DEFAULT_SOURCE_NAMES,
+    FakeDigestModel,
+    build_connectors,
+    normalize_source_names,
+    parse_sources_csv,
+)
 from ai_news_agent.storage import DigestStore
 
-ALLOWED_SOURCES: frozenset[str] = frozenset({"github", "bilibili"})
+# Backward-compatible aliases for tests and Gradio imports.
+from ai_news_agent.sources import (
+    FakeBilibiliConnector as _FakeBilibiliConnector,
+    FakeDigestModel as _FakeDigestModel,
+    FakeGitHubConnector as _FakeGitHubConnector,
+)
 
 logger = get_logger("cli")
-
-
-class _FakeGitHubConnector:
-    """Deterministic offline stand-in for GitHub."""
-
-    def name(self) -> str:
-        return "github"
-
-    async def collect(self, request) -> ConnectorResult:  # noqa: ANN001
-        now = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
-        item = NewsItem(
-            source=SourceKind.GITHUB,
-            source_id="cli-fake-1",
-            url="https://example.com/cli-fake",
-            title="CLI fake repo",
-            collected_at=now,
-        )
-        return ConnectorResult(items=[item], warnings=[], raw_count=1)
-
-
-class _FakeBilibiliConnector:
-    """Deterministic offline stand-in for Bilibili."""
-
-    def name(self) -> str:
-        return "bilibili"
-
-    async def collect(self, request) -> ConnectorResult:  # noqa: ANN001
-        return ConnectorResult(items=[], warnings=[], raw_count=0)
-
-
-class _FakeDigestModel:
-    """Matches summarizer contract: generate_entry_fields."""
-
-    def generate_entry_fields(self, context: dict[str, Any]) -> dict[str, Any]:  # noqa: ARG002
-        return {
-            "summary": "Fake CLI summary",
-            "why_it_matters": "Because tests need it",
-            "background_knowledge": "N/A",
-            "follow_up_action": "read",
-        }
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -98,12 +66,9 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
     if getattr(ns, "max_items", None) is not None:
         kw["max_items_per_source"] = ns.max_items
 
-    sources = _split_csv(getattr(ns, "sources", "") or "")
+    sources = parse_sources_csv(getattr(ns, "sources", "") or "")
     if sources:
-        unknown = set(sources) - ALLOWED_SOURCES
-        if unknown:
-            raise ValueError(f"Unknown --sources entries: {', '.join(sorted(unknown))}")
-        kw["connector_names"] = sources
+        kw["connector_names"] = normalize_source_names(sources)
 
     return DigestRequest(**kw)
 
@@ -115,30 +80,12 @@ def _resolve_db_path(ns: argparse.Namespace) -> Path:
     return Path.cwd() / "digest.sqlite"
 
 
-def _build_connectors(*, fake: bool, names: list[str]) -> list[SourceConnector]:
-    """Return ordered connectors matching ``names`` (subset of allowed)."""
-    if fake:
-        factories: dict[str, SourceConnector] = {
-            "github": _FakeGitHubConnector(),
-            "bilibili": _FakeBilibiliConnector(),
-        }
-    else:
-        factories = {
-            "github": GitHubConnector(),
-            "bilibili": BilibiliConnector(),
-        }
-    out: list[SourceConnector] = []
-    for n in names:
-        out.append(factories[n])
-    return out
-
-
 def _pick_connector_names(ns: argparse.Namespace) -> list[str]:
     """Default to both sources when unspecified."""
-    sources = _split_csv(getattr(ns, "sources", "") or "")
+    sources = parse_sources_csv(getattr(ns, "sources", "") or "")
     if not sources:
-        return ["github", "bilibili"]
-    return sources
+        return list(DEFAULT_SOURCE_NAMES)
+    return normalize_source_names(sources)
 
 
 async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
@@ -239,17 +186,17 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     store = DigestStore(db_path)
     store.init_schema()
 
-    names = _pick_connector_names(ns)
-    for n in names:
-        if n not in ALLOWED_SOURCES:
-            print(f"Unknown connector in --sources: {n}", file=sys.stderr)
-            return 2
+    try:
+        names = _pick_connector_names(ns)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
 
-    connectors = _build_connectors(fake=ns.fake, names=names)
+    connectors = build_connectors(fake=ns.fake, names=names)
 
     try:
         if ns.fake:
-            model: Any = _FakeDigestModel()
+            model: Any = FakeDigestModel()
         else:
             model = build_chat_model()
     except ValueError as e:

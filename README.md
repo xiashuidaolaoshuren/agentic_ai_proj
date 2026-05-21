@@ -102,6 +102,18 @@ uv run python -m ai_news_agent.app.gradio_app --fake --port 7860 --db-path ./dig
 
 The UI delegates to [`ChatService`](src/ai_news_agent/chat.py): digest phrases trigger the workflow; follow-ups such as listing **sources**, **ranking/top pick**, or **caveats** use persisted traces. Open-ended follow-ups need a configured model with `generate_followup_reply` where implemented.
 
+### Source toggles and selection
+
+Gradio shows **session-sticky** checkboxes for `github` and `bilibili` (both enabled by default). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.
+
+You can override the toggles for a single request with natural-language phrases:
+
+- `Give me today's AI digest from github only`
+- `bilibili only digest today`
+- `use github and bilibili for today's digest`
+
+CLI and Gradio share the canonical source registry in [`sources.py`](src/ai_news_agent/sources.py). Future interfaces (including Milestone 2 OpenClaw) should map tool arguments to the same `DigestRequest.connector_names` field.
+
 ### Targeted digests (URLs and channels)
 
 In chat, you can include GitHub repo URLs, Bilibili video URLs, or channel hints in the same message as “digest”. The app parses them via [`intent.py`](src/ai_news_agent/intent.py) and skips broad topic keyword search when explicit targets are present.

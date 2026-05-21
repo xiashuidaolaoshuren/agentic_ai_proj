@@ -83,7 +83,7 @@ def test_cli_digest_fake_exits_zero_and_prints_digest(tmp_path) -> None:
     out = buf.getvalue()
     assert code == 0
     assert "AI News Digest" in out
-    assert "CLI fake repo" in out
+    assert "Fake GitHub repo" in out
 
 
 def test_cli_rejects_unknown_connector_name(tmp_path) -> None:
@@ -136,7 +136,7 @@ def test_build_digest_request_unknown_sources_raises() -> None:
         db_path=None,
         fake=False,
     )
-    with pytest.raises(ValueError, match="Unknown --sources"):
+    with pytest.raises(ValueError, match="Unknown source"):
         build_digest_request(ns)
 
 

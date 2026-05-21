@@ -42,6 +42,29 @@ _TIMEFRAME_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 _TOPICS_PREFIX = re.compile(r"\btopics?\s*:\s*(.+)$", re.I | re.MULTILINE)
 
 
+def parse_connector_names_from_message(text: str) -> list[str] | None:
+    """Return explicit source-only phrases from a message, or ``None`` if absent."""
+    low = text.strip().lower()
+    if not low:
+        return None
+
+    if re.search(r"\buse\s+github\s+and\s+bilibili\b", low):
+        return ["github", "bilibili"]
+
+    found: list[str] = []
+    for match in re.finditer(
+        r"\b(?:from\s+)?(github|bilibili)\s+only\b",
+        low,
+    ):
+        name = match.group(1).lower()
+        if name not in found:
+            found.append(name)
+
+    if not found:
+        return None
+    return found
+
+
 def parse_digest_intent(message: str) -> DigestRequest:
     """Build a digest request from a free-form user message.
 
@@ -119,4 +142,4 @@ def parse_digest_intent(message: str) -> DigestRequest:
     )
 
 
-__all__ = ["parse_digest_intent"]
+__all__ = ["parse_connector_names_from_message", "parse_digest_intent"]

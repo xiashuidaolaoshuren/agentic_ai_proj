@@ -174,6 +174,8 @@ Fallback adapter boundary:
 
 - CLI: `python -m ai_news_agent digest --timeframe today --sources github,bilibili`
 
+Source selection for all entrypoints (CLI, Gradio, future OpenClaw tool) should map to `DigestRequest.connector_names` via the shared registry in `ai_news_agent.sources`. `None` means all injected connectors; a non-empty list runs only those named connectors.
+
 OpenClaw should not be required for MVP success.
 
 ## Data Flow

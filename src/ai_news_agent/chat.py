@@ -7,8 +7,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.graph.state import DigestResult
-from ai_news_agent.intent import parse_digest_intent
 from ai_news_agent.logging_setup import get_logger
 from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
@@ -50,15 +50,23 @@ class ChatService:
         message: str,
         *,
         digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
     ) -> str:
         """Sync wrapper for UI/CLI callers."""
-        return asyncio.run(self.handle_message_async(message, digest_request=digest_request))
+        return asyncio.run(
+            self.handle_message_async(
+                message,
+                digest_request=digest_request,
+                session_connector_names=session_connector_names,
+            )
+        )
 
     async def handle_message_async(
         self,
         message: str,
         *,
         digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
     ) -> str:
         preview = _message_preview(message)
         logger.info("chat message received preview=%r", preview)
@@ -66,19 +74,22 @@ class ChatService:
         if digest_request is not None or _message_requests_digest(message):
             if digest_request is not None:
                 req = digest_request
-                logger.info("digest path=explicit_request topics=%d", len(req.topics))
+                logger.info(
+                    "digest path=explicit_request topics=%d connector_names=%s",
+                    len(req.topics),
+                    req.connector_names,
+                )
             else:
-                parsed = parse_digest_intent(message)
-                if parsed.has_explicit_selectors() or parsed.timeframe is not None:
-                    req = parsed
-                    logger.info(
-                        "digest path=parsed_intent explicit=%s timeframe=%r",
-                        parsed.has_explicit_selectors(),
-                        parsed.timeframe,
-                    )
-                else:
-                    req = DigestRequest()
-                    logger.info("digest path=default_request")
+                req = resolve_digest_request(
+                    message,
+                    session_connector_names=session_connector_names,
+                )
+                logger.info(
+                    "digest path=resolved_request explicit=%s timeframe=%r connector_names=%s",
+                    req.has_explicit_selectors(),
+                    req.timeframe,
+                    req.connector_names,
+                )
 
             t0 = time.perf_counter()
             result = await self._workflow_runner(req)

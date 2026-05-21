@@ -245,3 +245,4 @@ When implementing, follow the `test-driven-development` skill for each subtask o
 | 2026-05-19 | Completed T13: `app/gradio_app.py` (`create_app`, `main`), `gradio` dependency in `pyproject.toml` |
 | 2026-05-19 | Completed T14: `tests/test_mvp_smoke.py`, README operator guide, `.env.example` refresh |
 | 2026-05-19 | Spec amended: Bilibili connector refactor to `bilibili-api-python` — see design spec § Bilibili-Oriented Discovery |
+| 2026-05-21 | Follow-on slice: shared `sources.py` registry, Gradio session source toggles, NL source phrases (`github only`), `DigestRequest.connector_names` as OpenClaw-ready boundary |

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ai_news_agent.intent import parse_digest_intent
+import pytest
+
+from ai_news_agent.intent import parse_connector_names_from_message, parse_digest_intent
 
 
 def test_parse_bilibili_video_url_skips_default_topics() -> None:
@@ -59,3 +61,16 @@ def test_parse_mixed_sources() -> None:
 def test_parse_topics_prefix() -> None:
     req = parse_digest_intent("digest\nTopics: RAG, agents")
     assert req.topics == ["RAG", "agents"]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Give me today's AI digest from github only", ["github"]),
+        ("bilibili only digest today", ["bilibili"]),
+        ("use github and bilibili for today's digest", ["github", "bilibili"]),
+        ("Give me today's AI digest", None),
+    ],
+)
+def test_parse_connector_names_from_message(message: str, expected: list[str] | None) -> None:
+    assert parse_connector_names_from_message(message) == expected

@@ -432,3 +432,69 @@ def test_chat_message_digest_keyword_triggers_workflow(tmp_path) -> None:
 
     assert reply == "from-workflow\n"
     assert len(seen) == 1
+
+
+def test_chat_session_source_toggles_apply_connector_names(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "session.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    asyncio.run(
+        svc.handle_message_async(
+            "Give me today's AI digest",
+            session_connector_names=["github"],
+        )
+    )
+
+    assert captured[0].connector_names == ["github"]
+
+
+def test_chat_nl_source_phrase_overrides_session_toggles(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "override.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    asyncio.run(
+        svc.handle_message_async(
+            "Give me today's AI digest from bilibili only",
+            session_connector_names=["github"],
+        )
+    )
+
+    assert captured[0].connector_names == ["bilibili"]
