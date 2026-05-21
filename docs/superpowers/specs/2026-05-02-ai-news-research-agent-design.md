@@ -2,12 +2,13 @@
 
 Date: 2026-05-02  
 Amended: 2026-05-19 (Bilibili connector library refactor)
+Amended: 2026-05-21 (Milestone 2 LLM tool usage layer)
 
 ## Summary
 
 Build a local-first, on-demand AI News Research Chatbot for personal learning. The user asks for an AI digest, and the agent collects recent AI-related signals from GitHub and conservative Bilibili-oriented sources, ranks the most useful items, summarizes them in their source language, explains why they matter, suggests follow-up learning actions, and stores source traces for verification and follow-up chat.
 
-OpenClaw is included as a planned Milestone 2 interface adapter, not as the MVP foundation.
+OpenClaw is included as a planned Milestone 3 interface adapter, not as the MVP foundation.
 
 ## Goals
 
@@ -16,6 +17,7 @@ OpenClaw is included as a planned Milestone 2 interface adapter, not as the MVP 
 - Start with GitHub and Bilibili-oriented discovery while keeping source collection reliable and inspectable.
 - Preserve source URLs, collected metadata, ranking decisions, and generated outputs for debugging.
 - Keep the architecture modular so later sources and interfaces can be added without rewriting the core agent.
+- Add explicit LLM tool usage after the local digest MVP is stable, using existing connector and storage boundaries rather than duplicating source logic.
 
 ## Non-Goals For MVP
 
@@ -146,9 +148,39 @@ Records enough information to debug and improve the agent:
 
 Logs should make it possible to answer: why was this item included, why was another item excluded, and what evidence was used for the summary?
 
+### LLM Tool Usage Layer
+
+Milestone 2 adds explicit LLM-callable tools on top of the completed local digest workflow. The deterministic Milestone 1 LangGraph digest graph remains the stable default path for generating a digest; tool usage is introduced as an additional agentic layer for learning, follow-up reasoning, and controlled source exploration.
+
+The tool layer should expose existing capabilities through a small registry of structured tools instead of creating a parallel connector system. Tool implementations should delegate to the same `SourceConnector`, `DigestStore`, ranking, and rendering contracts already used by CLI and Gradio.
+
+Initial follow-up tools:
+
+- `load_latest_digest`: return the latest saved digest summary and run id.
+- `get_digest_item`: return one selected item by rank or item id.
+- `get_source_trace`: return stored source metadata, URL, connector warnings, and evidence for a digest item.
+- `get_ranking_explanation`: return ranking score, ranking reasons, penalties, and caveats for a digest item.
+
+Initial connector tools:
+
+- `search_github_ai_news`: call the GitHub connector through the shared connector request boundary.
+- `search_bilibili_ai_news`: call the Bilibili connector through the shared connector request boundary.
+
+Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and RSS/blog search tools after Milestone 4 source expansion.
+
+The Milestone 2 agent should use a bounded tool-calling loop: the model decides when to call a registered tool, a tool execution node runs the call, and the model then answers from the returned observations. Tool calls must have typed input schemas, stable tool names, concise descriptions, and outputs that can be serialized to JSON or markdown for the final answer.
+
+Reliability constraints:
+
+- Tool calls must be logged with tool name, arguments, success/failure, and summarized output.
+- Tool failures should become user-facing caveats or partial-result warnings, not crashes.
+- Connector tools must preserve source URLs and confidence/caveat metadata.
+- Follow-up answers must stay grounded in tool results and saved digest traces.
+- The tool layer must not require OpenClaw, arXiv, Hugging Face, RSS, scheduling, vector search, or deployment.
+
 ## OpenClaw Integration
 
-OpenClaw should be integrated as Milestone 2, after the local agent works.
+OpenClaw should be integrated as Milestone 3, after the local agent and internal LLM tool usage layer work.
 
 OpenClaw's role is an outer assistant gateway, not the core retrieval engine. It can receive messages from channels such as Telegram, Slack, Discord, or webchat, then call the AI News Research Agent through a registered tool.
 
@@ -372,6 +404,14 @@ MVP testing should include:
 - summarization format tests using golden sample inputs
 - end-to-end smoke test that generates a small digest from fixture data
 
+Milestone 2 tool-usage testing should include:
+
+- unit tests for each tool schema and argument validation
+- unit tests proving connector tools delegate to the existing `SourceConnector` contract
+- follow-up chat tests where the model chooses digest-inspection tools and answers from tool observations
+- failure-path tests where tool errors become caveats or partial-result warnings
+- smoke tests that keep the deterministic digest workflow passing unchanged
+
 Manual quality evaluation should score early digests on:
 
 - relevance
@@ -395,21 +435,30 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - local storage and inspectable artifacts
 - basic tests and smoke test
 
-### Milestone 2: OpenClaw Adapter
+### Milestone 2: LLM Tool Usage Layer
+
+- Add a structured tool registry for LLM-callable follow-up and connector tools
+- Implement follow-up tools for latest digest lookup, digest item lookup, source trace inspection, and ranking explanation
+- Wrap GitHub and Bilibili connectors as LLM-callable search tools through the existing connector boundary
+- Add a bounded LangGraph tool-calling loop for follow-up chat and controlled source exploration
+- Log tool calls and surface tool failures as caveats or partial-result warnings
+- Keep the deterministic Milestone 1 digest graph available as the stable default digest path
+
+### Milestone 3: OpenClaw Adapter
 
 - Register an OpenClaw tool such as `generate_ai_news_digest`
 - Expose the Python agent through HTTP or CLI
 - Return digest results through an OpenClaw-supported channel
 - Preserve the same source traces and logging used by the local interface
 
-### Milestone 3: Broader Research Sources
+### Milestone 4: Broader Research Sources
 
 - Add arXiv connector
 - Add Hugging Face connector
 - Add RSS/blog sources
 - Improve ranking across source types
 
-### Milestone 4: Memory, Scheduling, And Deployment
+### Milestone 5: Memory, Scheduling, And Deployment
 
 - Add scheduled daily or weekly digest generation
 - Add richer local memory or vector search if stored digests become large
@@ -423,5 +472,6 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Initial topic taxonomy: AI agents, model releases, RAG, multimodal AI, AI developer tools, and notable open-source repos.
 - Initial GitHub query strategy: search recent repositories and topics using the taxonomy above, with ranking boosted by freshness, stars, recent activity, and README relevance.
 - Initial Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
+- Initial LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; start with follow-up inspection tools plus GitHub/Bilibili connector wrappers.
 - Default digest length: 5 ranked items per run, with the option to request a shorter or longer digest in chat.
 
