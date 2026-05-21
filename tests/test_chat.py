@@ -498,3 +498,77 @@ def test_chat_nl_source_phrase_overrides_session_toggles(tmp_path) -> None:
     )
 
     assert captured[0].connector_names == ["bilibili"]
+
+
+async def _collect_streaming(service: ChatService, message: str, **kwargs) -> list[str]:  # noqa: ANN003
+    chunks: list[str] = []
+    async for chunk in service.handle_message_streaming_async(message, **kwargs):
+        chunks.append(chunk)
+    return chunks
+
+
+def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    async def fake_streaming_runner(req: DigestRequest):
+        yield "Parsing request…", False, None
+        yield "", True, DigestResult(
+            request=req,
+            digest=None,
+            run_id=1,
+            markdown="",
+            text="ABCDEFGHIJ",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow runner should not be used")
+
+    store = DigestStore(tmp_path / "stream-chat.db")
+    store.init_schema()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        streaming_workflow_runner=fake_streaming_runner,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            "Give me today's AI digest",
+            chunk_size=4,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert chunks[0] == "Parsing request…"
+    assert chunks[-1] == "ABCDEFGHIJ"
+    assert len(chunks) > 2
+
+
+def test_chat_streaming_follow_up_yields_multiple_chunks(tmp_path) -> None:
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow runner should not be used")
+
+    store = DigestStore(tmp_path / "stream-follow.db")
+    store.init_schema()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            "What does item 2 mean?",
+            chunk_size=10,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert len(chunks) >= 2
+    assert chunks[-1].startswith("No saved digest")

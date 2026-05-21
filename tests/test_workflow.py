@@ -38,6 +38,7 @@ from ai_news_agent.rendering import render_digest_markdown, render_digest_text
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 from ai_news_agent import topics
+from ai_news_agent.graph.workflow import run_digest
 
 
 def _news_item(source_id: str) -> NewsItem:
@@ -917,3 +918,49 @@ def test_graph_package_reexports_workflow_helpers() -> None:
     assert callable(run_digest)
     assert callable(make_persist_results_node)
     assert callable(make_render_digest_node)
+
+
+def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> None:
+    from ai_news_agent.graph.workflow import run_digest, run_digest_streaming
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    store = DigestStore(tmp_path / "stream.db")
+    store.init_schema()
+    connectors = [
+        _FakeConnector(name="github", items=[_news_item("r1")]),
+    ]
+
+    async def collect():
+        events: list[tuple[str, bool, object | None]] = []
+        async for event in run_digest_streaming(
+            req,
+            connectors=connectors,
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(collect())
+    progress = [text for text, done, _ in events if not done]
+    finals = [result for _, done, result in events if done]
+
+    assert progress
+    assert "Collecting from sources" in progress[-1]
+    assert "Rendering digest" in progress[-1]
+    assert len(finals) == 1
+
+    store_compare = DigestStore(tmp_path / "stream-compare.db")
+    store_compare.init_schema()
+    expected = asyncio.run(
+        run_digest(
+            req,
+            connectors=connectors,
+            model=_FakeDigestModel(),
+            store=store_compare,
+            now_provider=lambda: now,
+        )
+    )
+    assert finals[0].text == expected.text

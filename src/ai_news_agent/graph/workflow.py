@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +26,15 @@ from ai_news_agent.graph.state import (
 from ai_news_agent.models import utcnow
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
+
+_STAGE_LABELS: dict[str, str] = {
+    "parse_request": "Parsing request…",
+    "collect_sources": "Collecting from sources…",
+    "rank_items": "Ranking candidates…",
+    "summarize_items": "Summarizing entries…",
+    "persist_results": "Saving run…",
+    "render_digest": "Rendering digest…",
+}
 
 
 def _make_finalize_run_node(*, now_provider: Callable[[], datetime] | None = None):
@@ -85,4 +94,45 @@ async def run_digest(
     return state_to_result(final_state)
 
 
-__all__ = ["build_digest_graph", "run_digest"]
+async def run_digest_streaming(
+    request: DigestRequest,
+    *,
+    connectors: Sequence[SourceConnector],
+    model: Any,
+    store: DigestStore,
+    now_provider: Callable[[], datetime] | None = None,
+) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+    """Run the digest graph, yielding progress text then the final result."""
+    graph = build_digest_graph(
+        connectors=connectors,
+        model=model,
+        store=store,
+        now_provider=now_provider,
+    )
+    start_ts = now_provider() if now_provider is not None else utcnow()
+    progress_lines: list[str] = []
+    seen_nodes: set[str] = set()
+    final_state: DigestGraphState | None = None
+
+    async for mode, chunk in graph.astream(
+        initial_state(request, now=start_ts),
+        stream_mode=["updates", "values"],
+    ):
+        if mode == "values":
+            final_state = chunk
+            continue
+        for node_name in chunk:
+            if node_name not in _STAGE_LABELS or node_name in seen_nodes:
+                continue
+            seen_nodes.add(node_name)
+            progress_lines.append(_STAGE_LABELS[node_name])
+            yield "\n".join(progress_lines), False, None
+
+    if final_state is None:
+        return
+
+    result = state_to_result(final_state)
+    yield "", True, result
+
+
+__all__ = ["build_digest_graph", "run_digest", "run_digest_streaming"]

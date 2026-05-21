@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from ai_news_agent.digest_request_builder import resolve_digest_request
@@ -13,8 +13,13 @@ from ai_news_agent.logging_setup import get_logger
 from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
+from ai_news_agent.streaming import iter_text_chunks
 
 WorkflowRunner = Callable[[DigestRequest], Awaitable[DigestResult]]
+StreamingWorkflowRunner = Callable[
+    [DigestRequest],
+    AsyncIterator[tuple[str, bool, DigestResult | None]],
+]
 
 logger = get_logger("chat")
 
@@ -39,10 +44,12 @@ class ChatService:
         *,
         store: DigestStore,
         workflow_runner: WorkflowRunner,
+        streaming_workflow_runner: StreamingWorkflowRunner | None = None,
         chat_model: Any | None = None,
     ) -> None:
         self._store = store
         self._workflow_runner = workflow_runner
+        self._streaming_workflow_runner = streaming_workflow_runner
         self._chat_model = chat_model
 
     def handle_message(
@@ -72,62 +79,20 @@ class ChatService:
         logger.info("chat message received preview=%r", preview)
 
         if digest_request is not None or _message_requests_digest(message):
-            if digest_request is not None:
-                req = digest_request
-                logger.info(
-                    "digest path=explicit_request topics=%d connector_names=%s",
-                    len(req.topics),
-                    req.connector_names,
-                )
-            else:
-                req = resolve_digest_request(
-                    message,
-                    session_connector_names=session_connector_names,
-                )
-                logger.info(
-                    "digest path=resolved_request explicit=%s timeframe=%r connector_names=%s",
-                    req.has_explicit_selectors(),
-                    req.timeframe,
-                    req.connector_names,
-                )
-
+            req = _resolve_digest_request(
+                message,
+                digest_request=digest_request,
+                session_connector_names=session_connector_names,
+            )
             t0 = time.perf_counter()
             result = await self._workflow_runner(req)
             elapsed = time.perf_counter() - t0
-            logger.info(
-                "digest completed run_id=%s entries=%d warnings=%d errors=%d elapsed=%.2fs",
-                result.run_id,
-                len(result.digest.entries) if result.digest else 0,
-                len(result.warnings),
-                len(result.errors),
-                elapsed,
-            )
-            if result.warnings:
-                for w in result.warnings:
-                    if w.detail:
-                        logger.warning(
-                            "[%s] %s: %s | detail=%s",
-                            w.connector,
-                            w.code,
-                            w.message,
-                            w.detail[:300],
-                        )
-                    else:
-                        logger.warning(
-                            "[%s] %s: %s",
-                            w.connector,
-                            w.code,
-                            w.message,
-                        )
-            if result.errors:
-                for err in result.errors:
-                    logger.error(
-                        "workflow stage=%s: %s",
-                        err.stage,
-                        err.message,
-                    )
+            _log_digest_result(result, elapsed=elapsed)
             return result.text
 
+        return self._handle_followup_message(message)
+
+    def _handle_followup_message(self, message: str) -> str:
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
             logger.info("follow-up path=no_saved_digest")
@@ -148,6 +113,123 @@ class ChatService:
             "I need a configured language model to answer that question. "
             "Try a concrete request like listing sources or asking for caveats."
         )
+
+    async def handle_message_streaming_async(
+        self,
+        message: str,
+        *,
+        digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
+        chunk_size: int = 80,
+        chunk_delay_s: float = 0.02,
+    ) -> AsyncIterator[str]:
+        preview = _message_preview(message)
+        logger.info("chat streaming message received preview=%r", preview)
+
+        if digest_request is not None or _message_requests_digest(message):
+            req = _resolve_digest_request(
+                message,
+                digest_request=digest_request,
+                session_connector_names=session_connector_names,
+            )
+            if self._streaming_workflow_runner is not None:
+                t0 = time.perf_counter()
+                async for progress, done, result in self._streaming_workflow_runner(req):
+                    if not done:
+                        if progress:
+                            yield progress
+                        continue
+                    if result is None:
+                        continue
+                    elapsed = time.perf_counter() - t0
+                    _log_digest_result(result, elapsed=elapsed)
+                    async for chunk in iter_text_chunks(
+                        result.text,
+                        chunk_size=chunk_size,
+                        delay_s=chunk_delay_s,
+                    ):
+                        yield chunk
+                return
+
+            t0 = time.perf_counter()
+            result = await self._workflow_runner(req)
+            elapsed = time.perf_counter() - t0
+            _log_digest_result(result, elapsed=elapsed)
+            async for chunk in iter_text_chunks(
+                result.text,
+                chunk_size=chunk_size,
+                delay_s=chunk_delay_s,
+            ):
+                yield chunk
+            return
+
+        text = self._handle_followup_message(message)
+        async for chunk in iter_text_chunks(
+            text,
+            chunk_size=chunk_size,
+            delay_s=chunk_delay_s,
+        ):
+            yield chunk
+
+
+def _resolve_digest_request(
+    message: str,
+    *,
+    digest_request: DigestRequest | None,
+    session_connector_names: list[str] | None,
+) -> DigestRequest:
+    if digest_request is not None:
+        req = digest_request
+        logger.info(
+            "digest path=explicit_request topics=%d connector_names=%s",
+            len(req.topics),
+            req.connector_names,
+        )
+        return req
+
+    req = resolve_digest_request(message, session_connector_names=session_connector_names)
+    logger.info(
+        "digest path=resolved_request explicit=%s timeframe=%r connector_names=%s",
+        req.has_explicit_selectors(),
+        req.timeframe,
+        req.connector_names,
+    )
+    return req
+
+
+def _log_digest_result(result: DigestResult, *, elapsed: float) -> None:
+    logger.info(
+        "digest completed run_id=%s entries=%d warnings=%d errors=%d elapsed=%.2fs",
+        result.run_id,
+        len(result.digest.entries) if result.digest else 0,
+        len(result.warnings),
+        len(result.errors),
+        elapsed,
+    )
+    if result.warnings:
+        for w in result.warnings:
+            if w.detail:
+                logger.warning(
+                    "[%s] %s: %s | detail=%s",
+                    w.connector,
+                    w.code,
+                    w.message,
+                    w.detail[:300],
+                )
+            else:
+                logger.warning(
+                    "[%s] %s: %s",
+                    w.connector,
+                    w.code,
+                    w.message,
+                )
+    if result.errors:
+        for err in result.errors:
+            logger.error(
+                "workflow stage=%s: %s",
+                err.stage,
+                err.message,
+            )
 
 
 def _message_preview(message: str, *, max_len: int = 120) -> str:

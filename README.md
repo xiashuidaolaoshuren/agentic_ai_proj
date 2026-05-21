@@ -102,6 +102,8 @@ uv run python -m ai_news_agent.app.gradio_app --fake --port 7860 --db-path ./dig
 
 The UI delegates to [`ChatService`](src/ai_news_agent/chat.py): digest phrases trigger the workflow; follow-ups such as listing **sources**, **ranking/top pick**, or **caveats** use persisted traces. Open-ended follow-ups need a configured model with `generate_followup_reply` where implemented.
 
+Example prompts live in a collapsible **Example prompts** panel below the chat. Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
+
 ### Source toggles and selection
 
 Gradio shows **session-sticky** checkboxes for `github` and `bilibili` (both enabled by default). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.

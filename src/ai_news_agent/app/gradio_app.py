@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ from ai_news_agent.chat import ChatService
 from ai_news_agent.env import load_local_env
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.graph.state import DigestResult
-from ai_news_agent.graph.workflow import run_digest
+from ai_news_agent.graph.workflow import run_digest, run_digest_streaming
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest
@@ -29,6 +29,14 @@ _UI_ERROR_MESSAGE = (
     "Something went wrong while processing your request. "
     "Please check the terminal or log file for details and try again."
 )
+
+_EXAMPLE_ROWS: list[list] = [
+    ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
+    ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
+    ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
+    ["Digest bilibili channel 123456789", list(DEFAULT_SOURCE_NAMES)],
+    ["show sources", list(DEFAULT_SOURCE_NAMES)],
+]
 
 logger = get_logger("gradio")
 
@@ -58,6 +66,25 @@ async def _run_digest_async(
         await _aclose_connectors(connectors)
 
 
+async def _run_digest_streaming_async(
+    req: DigestRequest,
+    *,
+    store: DigestStore,
+    connectors: Sequence[SourceConnector],
+    model: Any,
+) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+    try:
+        async for event in run_digest_streaming(
+            req,
+            connectors=list(connectors),
+            model=model,
+            store=store,
+        ):
+            yield event
+    finally:
+        await _aclose_connectors(connectors)
+
+
 def _build_service(*, fake: bool, db_path: Path) -> ChatService:
     store = DigestStore(db_path)
     store.init_schema()
@@ -71,27 +98,46 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
+    async def streaming_workflow_runner(
+        req: DigestRequest,
+    ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+        connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
+        async for event in _run_digest_streaming_async(
+            req,
+            store=store,
+            connectors=connectors,
+            model=model,
+        ):
+            yield event
+
     return ChatService(
         store=store,
         workflow_runner=workflow_runner,
+        streaming_workflow_runner=streaming_workflow_runner,
         chat_model=model,
     )
 
 
 def create_app(service: ChatService) -> gr.Blocks:
-    """Build a thin Gradio chat UI with session-sticky source toggles."""
+    """Build a Gradio chat UI with session-sticky source toggles and streaming."""
 
-    async def respond(message: str, _history: list, enabled_sources: list[str]) -> str:
+    async def respond_stream(
+        message: str,
+        _history: list,
+        enabled_sources: list[str],
+    ) -> AsyncIterator[str]:
         if not enabled_sources:
-            return "Please enable at least one source (GitHub or Bilibili)."
+            yield "Please enable at least one source (GitHub or Bilibili)."
+            return
         try:
-            return await service.handle_message_async(
+            async for partial in service.handle_message_streaming_async(
                 message,
                 session_connector_names=enabled_sources,
-            )
+            ):
+                yield partial
         except Exception:
             logger.exception("gradio request failed")
-            return _UI_ERROR_MESSAGE
+            yield _UI_ERROR_MESSAGE
 
     with gr.Blocks(title="AI News Research Agent") as demo:
         gr.Markdown(
@@ -109,21 +155,19 @@ def create_app(service: ChatService) -> gr.Blocks:
                 "'github only' or 'bilibili only'."
             ),
         )
-        default_sources = list(DEFAULT_SOURCE_NAMES)
-        gr.ChatInterface(
-            fn=respond,
+        chat = gr.ChatInterface(
+            fn=respond_stream,
             additional_inputs=[source_toggles],
-            examples=[
-                ["Give me today's AI digest", default_sources],
-                ["Give me today's AI digest from github only", default_sources],
-                [
-                    "Digest https://github.com/langchain-ai/langgraph",
-                    default_sources,
-                ],
-                ["Digest bilibili channel 123456789", default_sources],
-                ["show sources", default_sources],
-            ],
+            examples=None,
         )
+        with gr.Accordion("Example prompts", open=False):
+            gr.Examples(
+                examples=_EXAMPLE_ROWS,
+                inputs=[chat.textbox, source_toggles],
+                outputs=chat.chatbot,
+                fn=respond_stream,
+                cache_examples=False,
+            )
 
     return demo
 
