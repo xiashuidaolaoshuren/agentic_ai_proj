@@ -97,7 +97,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 - Connector Tool Wrappers
 
-- [ ] **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
+- [X] **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_connectors.py tests/test_connector_contracts.py`

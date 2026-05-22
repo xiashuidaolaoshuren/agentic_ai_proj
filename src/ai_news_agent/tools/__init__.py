@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
 from ai_news_agent.tools.followup import (
     get_digest_item,
     get_ranking_explanation,
@@ -28,6 +29,8 @@ __all__ = [
     "get_ranking_explanation",
     "get_source_trace",
     "load_latest_digest",
+    "search_bilibili_ai_news",
+    "search_github_ai_news",
     "tool_observation_to_dict",
 ]
 
