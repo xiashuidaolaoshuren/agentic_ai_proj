@@ -81,7 +81,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T1 - Dependencies And Tool Schema Foundation
 
-- [ ] **Do:** Add explicit dependencies for the tool-calling implementation and create shared schema/serialization helpers for tool inputs and observations. Keep outputs compact, JSON-safe, and easy for the LLM to quote.
+- [X] **Do:** Add explicit dependencies for the tool-calling implementation and create shared schema/serialization helpers for tool inputs and observations. Keep outputs compact, JSON-safe, and easy for the LLM to quote.
 - **TDD suitable:** partial - schema behavior is testable first; dependency metadata is declarative and verified by import/tests.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_schemas.py` and `uv run python -c "from ai_news_agent.tools import build_tool_registry"`
