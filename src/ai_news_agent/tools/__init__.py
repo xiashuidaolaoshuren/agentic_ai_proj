@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from ai_news_agent.tools.followup import (
+    get_digest_item,
+    get_ranking_explanation,
+    get_source_trace,
+    load_latest_digest,
+)
 from ai_news_agent.tools.schemas import (
     SearchQueryInput,
     ToolObservation,
@@ -18,6 +24,10 @@ __all__ = [
     "ToolObservationStatus",
     "build_tool_registry",
     "encode_tool_value",
+    "get_digest_item",
+    "get_ranking_explanation",
+    "get_source_trace",
+    "load_latest_digest",
     "tool_observation_to_dict",
 ]
 

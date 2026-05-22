@@ -89,7 +89,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 - Follow-Up Inspection Tools
 
-- [ ] **Do:** Implement `load_latest_digest`, `get_digest_item`, `get_source_trace`, and `get_ranking_explanation` over `DigestStore.get_latest_followup_context()`. Tools should return structured observations for happy paths, empty store, missing rank/item, and caveat/warning cases.
+- [X] **Do:** Implement `load_latest_digest`, `get_digest_item`, `get_source_trace`, and `get_ranking_explanation` over `DigestStore.get_latest_followup_context()`. Tools should return structured observations for happy paths, empty store, missing rank/item, and caveat/warning cases.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_followup.py tests/test_storage.py`
@@ -97,7 +97,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 - Connector Tool Wrappers
 
-- **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
+- [ ] **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_connectors.py tests/test_connector_contracts.py`
