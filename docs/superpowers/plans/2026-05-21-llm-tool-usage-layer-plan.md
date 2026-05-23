@@ -105,7 +105,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 - Tool Registry And Connector Lifecycle
 
-- [ ] **Do:** Build a registry that exposes stable tool names/descriptions/schemas and injects `DigestStore` plus connector factories. Ensure connector tools can create and close connectors per call when needed, so Gradio does not keep stale network clients alive.
+- [X] **Do:** Build a registry that exposes stable tool names/descriptions/schemas and injects `DigestStore` plus connector factories. Ensure connector tools can create and close connectors per call when needed, so Gradio does not keep stale network clients alive.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_registry.py tests/test_sources.py`
