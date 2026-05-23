@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ai_news_agent.tools.agent import ToolAgentRunner, build_tool_agent_runner
 from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
 from ai_news_agent.tools.followup import (
     get_digest_item,
@@ -24,6 +25,8 @@ __all__ = [
     "ToolObservation",
     "ToolObservationStatus",
     "ToolRegistry",
+    "ToolAgentRunner",
+    "build_tool_agent_runner",
     "build_tool_registry",
     "encode_tool_value",
     "get_digest_item",

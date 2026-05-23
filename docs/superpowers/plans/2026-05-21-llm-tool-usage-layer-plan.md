@@ -113,7 +113,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 - Bounded LangGraph Tool Agent
 
-- [ ] **Do:** Create the LangGraph tool-calling runner used by follow-up chat. The runner should bind tools to the model, route model tool calls to a tool execution node, cap tool-call iterations, log tool call start/end/failure, and return a final grounded answer or graceful fallback.
+- [X] **Do:** Create the LangGraph tool-calling runner used by follow-up chat. The runner should bind tools to the model, route model tool calls to a tool execution node, cap tool-call iterations, log tool call start/end/failure, and return a final grounded answer or graceful fallback.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py`
