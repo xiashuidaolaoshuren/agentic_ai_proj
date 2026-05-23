@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
 from ai_news_agent.tools.followup import (
     get_digest_item,
@@ -11,6 +9,7 @@ from ai_news_agent.tools.followup import (
     get_source_trace,
     load_latest_digest,
 )
+from ai_news_agent.tools.registry import ToolDefinition, ToolRegistry, build_tool_registry
 from ai_news_agent.tools.schemas import (
     SearchQueryInput,
     ToolObservation,
@@ -21,8 +20,10 @@ from ai_news_agent.tools.schemas import (
 
 __all__ = [
     "SearchQueryInput",
+    "ToolDefinition",
     "ToolObservation",
     "ToolObservationStatus",
+    "ToolRegistry",
     "build_tool_registry",
     "encode_tool_value",
     "get_digest_item",
@@ -33,8 +34,3 @@ __all__ = [
     "search_github_ai_news",
     "tool_observation_to_dict",
 ]
-
-
-def build_tool_registry(*args: Any, **kwargs: Any) -> Any:
-    """Assemble tool definitions with injected dependencies (implemented in T4)."""
-    raise NotImplementedError("build_tool_registry is implemented in Milestone 2 T4")
