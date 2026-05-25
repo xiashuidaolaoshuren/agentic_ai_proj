@@ -33,6 +33,22 @@ def build_chat_model(
     return OpenAIChatModel(client=client, model=model_name)
 
 
+def build_tool_chat_model(
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> Any:
+    from langchain_openai import ChatOpenAI
+
+    key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise ValueError("OPENAI_API_KEY is not set and no api_key was provided")
+    url = base_url if base_url is not None else os.environ.get("OPENAI_BASE_URL")
+    model_name = model if model is not None else os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    return ChatOpenAI(api_key=key, base_url=url or None, model=model_name)
+
+
 class OpenAIChatModel:
     """Maps digest context to JSON fields via chat completions."""
 

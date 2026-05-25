@@ -121,7 +121,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 - Tool-Capable Model Factory
 
-- [ ] **Do:** Add a model factory for Milestone 2 tool calling while preserving the current summarization model contract. Prefer a small new factory over changing `build_chat_model()` behavior in place.
+- [X] **Do:** Add a model factory for Milestone 2 tool calling while preserving the current summarization model contract. Prefer a small new factory over changing `build_chat_model()` behavior in place.
 - **TDD suitable:** partial - factory/import behavior is testable; live provider compatibility remains manual or smoke-tested with real credentials.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py tests/test_summarizer.py` and optional manual run with configured `OPENAI_*`

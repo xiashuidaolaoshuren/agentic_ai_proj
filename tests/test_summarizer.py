@@ -308,3 +308,31 @@ def test_build_chat_model_requires_api_key_when_unset() -> None:
     finally:
         if backup is not None:
             os.environ["OPENAI_API_KEY"] = backup
+
+
+def test_build_tool_chat_model_importable() -> None:
+    from ai_news_agent.llm import build_tool_chat_model  # noqa: F401
+
+
+def test_build_tool_chat_model_requires_api_key_when_unset() -> None:
+    from ai_news_agent.llm import build_tool_chat_model
+
+    backup = os.environ.pop("OPENAI_API_KEY", None)
+    try:
+        try:
+            build_tool_chat_model()
+        except ValueError as exc:
+            assert "OPENAI_API_KEY" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        if backup is not None:
+            os.environ["OPENAI_API_KEY"] = backup
+
+
+def test_build_tool_chat_model_satisfies_tool_call_model_protocol() -> None:
+    from ai_news_agent.llm import build_tool_chat_model
+    from ai_news_agent.tools.agent import ToolCallModel
+
+    result = build_tool_chat_model(api_key="fake-key-for-protocol-check")
+    assert isinstance(result, ToolCallModel)
