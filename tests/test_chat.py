@@ -572,3 +572,175 @@ def test_chat_streaming_follow_up_yields_multiple_chunks(tmp_path) -> None:
 
     assert len(chunks) >= 2
     assert chunks[-1].startswith("No saved digest")
+
+
+class _FakeToolAgentRunner:
+    def __init__(self, reply: str = "AGENT_SAYS") -> None:
+        self.calls: list[str] = []
+        self._reply = reply
+
+    async def run(self, question: str) -> str:
+        self.calls.append(question)
+        return self._reply
+
+
+def test_chat_tool_agent_runner_accepted_as_constructor_arg(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-init.db")
+    store.init_schema()
+    runner = _FakeToolAgentRunner()
+
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    assert svc is not None
+
+
+def _save_minimal_digest(store: DigestStore, *, db_name: str = "ctx") -> None:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe=None,
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(run_id, [])
+    store.save_digest(run_id, digest)
+
+
+def test_chat_open_ended_follow_up_routes_to_tool_agent_when_configured(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-route.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner(reply="Grounded tool answer.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Why does this repo matter?"
+    reply = asyncio.run(svc.handle_message_async(question))
+
+    assert runner.calls == [question]
+    assert reply == "Grounded tool answer."
+
+
+def test_chat_streaming_follow_up_uses_tool_agent_when_configured(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-stream.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner(reply="Streaming tool answer.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Explain the tradeoffs abstractly"
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            question,
+            chunk_size=10,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert runner.calls == [question]
+    assert chunks[-1] == "Streaming tool answer."
+
+
+def test_chat_tool_agent_not_called_for_structured_followup(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-structured.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("Please show sources"))
+
+    assert "https://example.com/r1" in reply
+    assert runner.calls == []
+
+
+def test_chat_tool_agent_not_called_for_digest_request(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="from-workflow\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "tool-agent-digest.db")
+    store.init_schema()
+    runner = _FakeToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("Give me today's AI digest"))
+
+    assert reply == "from-workflow\n"
+    assert len(captured) == 1
+    assert runner.calls == []

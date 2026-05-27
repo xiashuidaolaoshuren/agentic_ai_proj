@@ -129,7 +129,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 - ChatService Integration
 
-- [ ] **Do:** Add optional tool-agent injection to `ChatService`. Digest requests still use the deterministic workflow; existing structured follow-ups may remain fast deterministic answers; open-ended follow-ups and source-exploration questions use the tool agent when configured, then fall back to the existing LLM/fallback path.
+- [X] **Do:** Add optional tool-agent injection to `ChatService`. Digest requests still use the deterministic workflow; existing structured follow-ups may remain fast deterministic answers; open-ended follow-ups and source-exploration questions use the tool agent when configured, then fall back to the existing LLM/fallback path.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_chat.py tests/test_streaming.py`

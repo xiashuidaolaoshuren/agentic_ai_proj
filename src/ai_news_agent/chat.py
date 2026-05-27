@@ -46,11 +46,13 @@ class ChatService:
         workflow_runner: WorkflowRunner,
         streaming_workflow_runner: StreamingWorkflowRunner | None = None,
         chat_model: Any | None = None,
+        tool_agent_runner: Any | None = None,
     ) -> None:
         self._store = store
         self._workflow_runner = workflow_runner
         self._streaming_workflow_runner = streaming_workflow_runner
         self._chat_model = chat_model
+        self._tool_agent_runner = tool_agent_runner
 
     def handle_message(
         self,
@@ -90,9 +92,9 @@ class ChatService:
             _log_digest_result(result, elapsed=elapsed)
             return result.text
 
-        return self._handle_followup_message(message)
+        return await self._handle_followup_message_async(message)
 
-    def _handle_followup_message(self, message: str) -> str:
+    async def _handle_followup_message_async(self, message: str) -> str:
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
             logger.info("follow-up path=no_saved_digest")
@@ -102,6 +104,10 @@ class ChatService:
         if structured is not None:
             logger.info("follow-up path=structured")
             return structured
+
+        if self._tool_agent_runner is not None:
+            logger.info("follow-up path=tool_agent")
+            return await self._tool_agent_runner.run(message)
 
         llm_text = _try_llm_followup(self._chat_model, message, ctx)
         if llm_text is not None:
@@ -163,7 +169,7 @@ class ChatService:
                 yield chunk
             return
 
-        text = self._handle_followup_message(message)
+        text = await self._handle_followup_message_async(message)
         async for chunk in iter_text_chunks(
             text,
             chunk_size=chunk_size,
