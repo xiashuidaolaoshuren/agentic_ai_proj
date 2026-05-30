@@ -137,7 +137,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 - Gradio Wiring
 
-- [ ] **Do:** Construct the Milestone 2 tool registry/agent in `_build_service()` and inject it into `ChatService` while preserving streaming digest behavior, source toggles, and fake mode. Fake mode may use a deterministic fake tool agent instead of a real tool-calling model.
+- [X] **Do:** Construct the Milestone 2 tool registry/agent in `_build_service()` and inject it into `ChatService` while preserving streaming digest behavior, source toggles, and fake mode. Fake mode may use a deterministic fake tool agent instead of a real tool-calling model.
 - **TDD suitable:** partial - service construction and routing are testable; visual/UI behavior remains a smoke/manual check.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_gradio_app.py tests/test_chat.py`
