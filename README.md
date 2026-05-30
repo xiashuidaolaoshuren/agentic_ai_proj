@@ -6,6 +6,8 @@ Design details: [AI News Research Agent design](docs/superpowers/specs/2026-05-0
 
 **Milestone 1 (Local Digest MVP)** is complete: LangGraph workflow, storage, connectors, ranking, summarization, chat follow-ups, CLI smoke mode, Gradio UI, and tests.
 
+**Milestone 2 (LLM tool usage layer)** is complete: bounded tool-calling for follow-up inspection and connector search; Gradio wires a tool agent in live and fake modes. Plan: [Milestone 2 implementation plan](docs/superpowers/plans/2026-05-21-llm-tool-usage-layer-plan.md).
+
 ## Prerequisites
 
 - Python **3.11+** (see [.python-version](.python-version) for the pinned dev version)
@@ -36,8 +38,8 @@ Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never c
 
 | Variable | When needed | Purpose |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | Live digest / chat LLM follow-ups | Summarization via OpenAI-compatible API ([`llm.py`](src/ai_news_agent/llm.py)) |
-| `OPENAI_BASE_URL` | Optional | Custom gateway / compatible endpoint |
+| `OPENAI_API_KEY` | Live digest + live Gradio tool follow-ups | Digest summarization (`build_chat_model`) and tool-calling follow-ups (`build_tool_chat_model`) via [`llm.py`](src/ai_news_agent/llm.py) |
+| `OPENAI_BASE_URL` | Optional | Custom gateway / compatible endpoint (applies to both summarization and tool agent) |
 | `OPENAI_MODEL` | Optional | Model name (default `gpt-4o-mini`) |
 | `GITHUB_TOKEN` | Optional | Higher GitHub API rate limits ([`connectors/github.py`](src/ai_news_agent/connectors/github.py)) |
 | `BILIBILI_SESSDATA` | Optional | Bilibili session token ([`env.py`](src/ai_news_agent/env.py)) |
@@ -66,7 +68,7 @@ Gradio chat UI in offline mode:
 uv run python -m ai_news_agent.app.gradio_app --fake
 ```
 
-Open the printed URL (default port **7860**). Try **“Give me today's AI digest”**, then **“show sources”**.
+Open the printed URL (default port **7860**). Try **“Give me today's AI digest”**, then **“show sources”** (structured follow-up). Try an open-ended question such as **“Why does the top item matter?”** to see fake tool-agent behavior (fixed offline reply, not live search).
 
 ## Live digest (network + LLM)
 
@@ -100,9 +102,50 @@ Offline:
 uv run python -m ai_news_agent.app.gradio_app --fake --port 7860 --db-path ./digest.sqlite
 ```
 
-The UI delegates to [`ChatService`](src/ai_news_agent/chat.py): digest phrases trigger the workflow; follow-ups such as listing **sources**, **ranking/top pick**, or **caveats** use persisted traces. Open-ended follow-ups need a configured model with `generate_followup_reply` where implemented.
+The UI delegates to [`ChatService`](src/ai_news_agent/chat.py):
+
+- **Digest requests** (phrases like “digest”, URLs, source toggles) run the **deterministic LangGraph workflow** — collect, rank, summarize, persist — with streaming progress, then stream the final digest text.
+- **Follow-ups** use the latest saved digest from SQLite. Routing order:
+  1. **Structured** prompts → instant answers from persisted traces (no LLM tools): sources, ranking / study-first, caveats.
+  2. **Open-ended** or source-exploration questions → **bounded tool agent** when configured (Gradio live and fake modes inject `tool_agent_runner` in [`gradio_app.py`](src/ai_news_agent/app/gradio_app.py)).
+  3. **Legacy fallback** → `chat_model.generate_followup_reply` only if no tool agent is configured (not used by default live Gradio).
+  4. **Guidance** message if neither tool agent nor chat model is available.
 
 Example prompts live in a collapsible **Example prompts** panel below the chat. Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
+
+### Milestone 2 — Follow-up tools (Gradio / ChatService)
+
+**Deterministic digest** (unchanged): LangGraph path for digest keywords, targeted URLs/channels, and session source toggles.
+
+**Follow-up modes** after a digest is saved:
+
+| Mode | What it does | Example |
+|------|----------------|---------|
+| Structured | Fast answers from SQLite traces | `show sources`, `Which item should I study first?`, `Any confidence caveats?` |
+| Tool agent | Bounded LangGraph loop over six registry tools | `Why does the top item matter for RAG agents?`, `Search GitHub for langgraph agents` |
+| Legacy LLM | Grounded reply via `generate_followup_reply` | Only when `tool_agent_runner` is not set |
+| Guidance | Static hint to use structured prompts | When no model or tool agent is configured |
+
+Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source_trace`, `get_ranking_explanation`, `search_github_ai_news`, `search_bilibili_ai_news` (see [`tools/registry.py`](src/ai_news_agent/tools/registry.py)).
+
+**Fake mode (`--fake`):**
+
+- Digest: `FakeDigestModel` + fake GitHub/Bilibili connectors (no API keys).
+- Structured follow-ups: work as in live mode (deterministic from stored traces).
+- Open-ended follow-ups: return a **fixed offline message** from the fake tool agent (no real tool-calling model, no connector search). Use structured prompts for reliable offline demos.
+
+**Live Gradio:** requires `OPENAI_API_KEY` for both digest summarization and tool-calling follow-ups (`build_chat_model` + `build_tool_chat_model`).
+
+### Example prompts (after a digest)
+
+| Category | Example |
+|----------|---------|
+| Digest | `Give me today's AI digest` |
+| Structured | `show sources`, `Which item should I study first?`, `Any confidence caveats?` |
+| Open-ended | `Why does the top item matter for RAG agents?` |
+| Source exploration | `Search GitHub for langgraph agents`, `Search Bilibili for RAG tutorials` |
+
+In **fake mode**, open-ended and source-exploration prompts return the offline tool-agent guidance string, not live search results.
 
 ### Source toggles and selection
 
@@ -114,7 +157,7 @@ You can override the toggles for a single request with natural-language phrases:
 - `bilibili only digest today`
 - `use github and bilibili for today's digest`
 
-CLI and Gradio share the canonical source registry in [`sources.py`](src/ai_news_agent/sources.py). Future interfaces (including Milestone 2 OpenClaw) should map tool arguments to the same `DigestRequest.connector_names` field.
+CLI and Gradio share the canonical source registry in [`sources.py`](src/ai_news_agent/sources.py). Future interfaces (including Milestone 3 OpenClaw) should map tool arguments to the same `DigestRequest.connector_names` field.
 
 ### Targeted digests (URLs and channels)
 
@@ -165,12 +208,20 @@ RUN_LIVE_BILIBILI=1 uv run pytest -m live tests/test_connectors_bilibili_live.py
 
 Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if the live test reports HTTP 412.
 
-## Known MVP limits
+## Known limits
+
+**Connectors (Milestone 1):**
 
 - **Bilibili** is **metadata-first** (title, description, views, etc. via public APIs). There is **no** transcript or deep video understanding; items are labeled lower confidence when content is thin (see [`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)).
-- **Out of scope for Milestone 1:** OpenClaw adapter, scheduled runs, cloud deployment, arXiv / Hugging Face / RSS connectors, vector RAG (see design spec milestones).
+
+**Milestone 2 tool layer:**
+
+- Tool agent has a **bounded iteration cap**; very complex multi-step questions may hit the fallback message.
+- **Fake mode** does not run a real tool-calling model or live connector search for open-ended prompts.
+- **Out of scope:** OpenClaw adapter (Milestone 3), scheduled runs, cloud deployment, arXiv / Hugging Face / RSS connectors, vector RAG (see design spec milestones).
 
 ## Documentation
 
-- [Implementation plan (T1–T14)](docs/superpowers/plans/2026-05-02-ai-news-research-agent-plan.md)
+- [Implementation plan (T1–T14, Milestone 1)](docs/superpowers/plans/2026-05-02-ai-news-research-agent-plan.md)
+- [Milestone 2 LLM tool usage layer plan](docs/superpowers/plans/2026-05-21-llm-tool-usage-layer-plan.md)
 - [Design spec](docs/superpowers/specs/2026-05-02-ai-news-research-agent-design.md)
