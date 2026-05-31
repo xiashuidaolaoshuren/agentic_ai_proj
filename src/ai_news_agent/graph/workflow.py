@@ -110,7 +110,6 @@ async def run_digest_streaming(
         now_provider=now_provider,
     )
     start_ts = now_provider() if now_provider is not None else utcnow()
-    progress_lines: list[str] = []
     seen_nodes: set[str] = set()
     final_state: DigestGraphState | None = None
 
@@ -125,8 +124,7 @@ async def run_digest_streaming(
             if node_name not in _STAGE_LABELS or node_name in seen_nodes:
                 continue
             seen_nodes.add(node_name)
-            progress_lines.append(_STAGE_LABELS[node_name])
-            yield "\n".join(progress_lines), False, None
+            yield _STAGE_LABELS[node_name], False, None
 
     if final_state is None:
         return

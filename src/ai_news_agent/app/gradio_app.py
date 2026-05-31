@@ -54,6 +54,14 @@ class _FakeToolAgentRunner:
     async def run(self, question: str) -> str:  # noqa: ARG002
         return _FAKE_TOOL_AGENT_REPLY
 
+    async def run_streaming(
+        self, question: str
+    ) -> AsyncIterator[tuple[str, bool, str | None]]:
+        del question
+        yield "Calling load_latest_digest…", False, None
+        yield "Done load_latest_digest: Loaded latest digest.", False, None
+        yield "", True, _FAKE_TOOL_AGENT_REPLY
+
 
 async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
     for c in connectors:

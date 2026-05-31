@@ -948,8 +948,10 @@ def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> N
     finals = [result for _, done, result in events if done]
 
     assert progress
-    assert "Collecting from sources" in progress[-1]
-    assert "Rendering digest" in progress[-1]
+    assert progress[0] == "Parsing request…"
+    assert all("\n" not in line for line in progress)
+    assert any("Collecting from sources" in line for line in progress)
+    assert progress[-1] == "Rendering digest…"
     assert len(finals) == 1
 
     store_compare = DigestStore(tmp_path / "stream-compare.db")

@@ -149,6 +149,82 @@ def test_tool_agent_runner_survives_tool_execute_exception() -> None:
     assert answer == "Recovered after tool failure."
 
 
+async def _collect_tool_agent_stream(
+    runner: ToolAgentRunner, question: str
+) -> list[tuple[str, bool, str | None]]:
+    events: list[tuple[str, bool, str | None]] = []
+    async for event in runner.run_streaming(question):
+        events.append(event)
+    return events
+
+
+def test_tool_agent_run_streaming_emits_ordered_tool_progress_then_done() -> None:
+    async def _execute() -> ToolObservation:
+        return ToolObservation(
+            status=ToolObservationStatus.OK,
+            summary="Loaded digest with 1 entry.",
+        )
+
+    registry = _sample_registry(execute=_execute)
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "load_latest_digest",
+                        "args": {},
+                        "id": "call-stream-1",
+                    }
+                ],
+            ),
+            AIMessage(content="The latest digest has one entry."),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    events = asyncio.run(
+        _collect_tool_agent_stream(runner, "Summarize the latest digest.")
+    )
+
+    progress_lines = [text for text, done, _answer in events if not done and text]
+    assert progress_lines == [
+        "Calling load_latest_digest…",
+        "Done load_latest_digest: Loaded digest with 1 entry.",
+    ]
+    assert events[-1] == ("", True, "The latest digest has one entry.")
+
+
+def test_tool_agent_run_streaming_emits_failure_progress_line() -> None:
+    async def _boom() -> ToolObservation:
+        raise RuntimeError("boom")
+
+    registry = _sample_registry(execute=_boom)
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "load_latest_digest",
+                        "args": {},
+                        "id": "call-stream-fail",
+                    }
+                ],
+            ),
+            AIMessage(content="Recovered after tool failure."),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    events = asyncio.run(_collect_tool_agent_stream(runner, "Try loading the digest."))
+
+    progress_lines = [text for text, done, _answer in events if not done and text]
+    assert progress_lines[0] == "Calling load_latest_digest…"
+    assert progress_lines[1].startswith("Tool failed load_latest_digest:")
+    assert events[-1] == ("", True, "Recovered after tool failure.")
+
+
 def test_build_tool_agent_runner_import_from_tools_package() -> None:
     from ai_news_agent.tools import ToolAgentRunner as PackageToolAgentRunner
     from ai_news_agent.tools import build_tool_agent_runner as package_build_tool_agent_runner

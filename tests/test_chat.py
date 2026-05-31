@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 from ai_news_agent.chat import ChatService
-from ai_news_agent.connectors.base import ConnectorResult
+from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.models import (
     ConnectorWarning,
@@ -507,6 +507,77 @@ async def _collect_streaming(service: ChatService, message: str, **kwargs) -> li
     return chunks
 
 
+class _DigestStreamFakeConnector:
+    def __init__(self, *, name: str, items: list[NewsItem]) -> None:
+        self._name = name
+        self._items = items
+
+    def name(self) -> str:
+        return self._name
+
+    async def collect(self, _request: ConnectorRequest) -> ConnectorResult:
+        return ConnectorResult(items=list(self._items), warnings=[])
+
+
+class _DigestStreamFakeModel:
+    def generate_entry_fields(self, context: dict) -> dict:  # noqa: ARG002
+        return {
+            "summary": "Test summary",
+            "why_it_matters": "Because",
+            "background_knowledge": "Bg",
+            "follow_up_action": "read",
+        }
+
+
+def _digest_stream_news_item(source_id: str) -> NewsItem:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    return NewsItem(
+        source=SourceKind.GITHUB,
+        source_id=source_id,
+        url=f"https://example.com/{source_id}",
+        title=f"item-{source_id}",
+        collected_at=now,
+    )
+
+
+def test_chat_digest_stream_each_progress_is_single_stage_not_cumulative(
+    tmp_path,
+) -> None:
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    store = DigestStore(tmp_path / "digest-stream-ephemeral.db")
+    store.init_schema()
+    connectors = [
+        _DigestStreamFakeConnector(
+            name="github",
+            items=[_digest_stream_news_item("r1")],
+        )
+    ]
+
+    async def collect_progress() -> list[str]:
+        lines: list[str] = []
+        async for progress, done, _result in run_digest_streaming(
+            req,
+            connectors=connectors,
+            model=_DigestStreamFakeModel(),
+            store=store,
+            now_provider=lambda: now,
+        ):
+            if not done and progress:
+                lines.append(progress)
+        return lines
+
+    progress_lines = asyncio.run(collect_progress())
+
+    assert progress_lines
+    for line in progress_lines:
+        assert "\n" not in line
+    assert progress_lines[0] == "Parsing request…"
+    assert "Parsing request" not in progress_lines[-1]
+
+
 def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
     now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
 
@@ -547,6 +618,7 @@ def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
 
     assert chunks[0] == "Parsing request…"
     assert chunks[-1] == "ABCDEFGHIJ"
+    assert "Parsing request" not in chunks[-1]
     assert len(chunks) > 2
 
 
@@ -582,6 +654,14 @@ class _FakeToolAgentRunner:
     async def run(self, question: str) -> str:
         self.calls.append(question)
         return self._reply
+
+
+class _StreamingFakeToolAgentRunner(_FakeToolAgentRunner):
+    async def run_streaming(self, question: str):  # noqa: ANN201
+        self.calls.append(question)
+        yield "Calling load_latest_digest…", False, None
+        yield "Done load_latest_digest: Loaded digest with 1 entry.", False, None
+        yield "", True, self._reply
 
 
 def test_chat_tool_agent_runner_accepted_as_constructor_arg(tmp_path) -> None:
@@ -688,6 +768,40 @@ def test_chat_streaming_follow_up_uses_tool_agent_when_configured(tmp_path) -> N
 
     assert runner.calls == [question]
     assert chunks[-1] == "Streaming tool answer."
+
+
+def test_chat_streaming_follow_up_emits_tool_progress_then_ephemeral_final_answer(
+    tmp_path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-stream-ephemeral.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _StreamingFakeToolAgentRunner(reply="Final grounded answer only.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Why does this repo matter?"
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            question,
+            chunk_size=12,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert runner.calls == [question]
+    assert any("Calling load_latest_digest" in chunk for chunk in chunks)
+    assert chunks[-1] == "Final grounded answer only."
+    assert "Calling" not in chunks[-1]
+    assert "Done load_latest_digest" not in chunks[-1]
 
 
 def test_chat_tool_agent_not_called_for_structured_followup(tmp_path) -> None:
