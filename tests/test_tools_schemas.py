@@ -65,5 +65,5 @@ def test_search_query_input_defaults_and_validation() -> None:
 def test_tools_package_exports_build_tool_registry() -> None:
     from ai_news_agent.tools import build_tool_registry
 
-    with pytest.raises(NotImplementedError, match="T4"):
+    with pytest.raises(TypeError):
         build_tool_registry()

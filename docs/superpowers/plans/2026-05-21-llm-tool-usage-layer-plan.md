@@ -145,7 +145,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T9 - Documentation And Examples
 
-- [ ] **Do:** Update README usage notes with Milestone 2 behavior, example prompts, fake-mode limitations, and the distinction between deterministic digest generation and tool-using follow-up/source exploration.
+- [X] **Do:** Update README usage notes with Milestone 2 behavior, example prompts, fake-mode limitations, and the distinction between deterministic digest generation and tool-using follow-up/source exploration.
 - **TDD suitable:** no - documentation-only work.
 - **Plan mode:** skip
 - **Verification:** Review rendered markdown and run `uv run pytest tests/test_mvp_smoke.py`
@@ -153,7 +153,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10 - Milestone 2 Regression Sweep
 
-- [ ] **Do:** Run the focused Milestone 2 tests plus the existing MVP regression suite. Fix any plan gaps discovered by integration, updating this plan before continuing if the file map or task order changes.
+- [X] **Do:** Run the focused Milestone 2 tests plus the existing MVP regression suite. Fix any plan gaps discovered by integration, updating this plan before continuing if the file map or task order changes.
 - **TDD suitable:** no - verification and stabilization pass.
 - **Plan mode:** skip
 - **Verification:** `uv run pytest`
@@ -164,3 +164,4 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 | Date | Change |
 | --- | --- |
 | 2026-05-21 | Initial Milestone 2 implementation plan for hybrid LLM tool usage layer |
+| 2026-05-29 | T10 regression sweep: Stage A (94 passed), full `pytest` (221 passed, 2 skipped); fixed stale `test_tools_package_exports_build_tool_registry` in `test_tools_schemas.py`. `test_mvp_smoke.py` remains M1-focused (digest + structured follow-up); M2 tool-agent routing covered by `test_chat.py` and `test_gradio_app.py`. T9 README updated. |
