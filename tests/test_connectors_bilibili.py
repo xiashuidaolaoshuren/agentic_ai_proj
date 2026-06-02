@@ -407,6 +407,56 @@ def test_timeframe_last_30_days_maps_to_date_window() -> None:
     assert end == fixed_today.isoformat()
 
 
+def test_video_row_timestamp_parses_ctime_field() -> None:
+    from ai_news_agent.connectors.bilibili import _video_row_to_news_item
+
+    ts = int(datetime(2026, 6, 2, 8, 0, tzinfo=UTC).timestamp())
+    row = {
+        "bvid": "BVctime01",
+        "title": "Uses ctime",
+        "ctime": ts,
+    }
+    item = _video_row_to_news_item(row, [], datetime(2026, 6, 2, 12, 0, tzinfo=UTC))
+
+    assert item is not None
+    assert item.published_at is not None
+    assert item.published_at == datetime.fromtimestamp(ts, tz=UTC)
+
+
+def test_video_row_timestamp_parses_numeric_string_pubdate() -> None:
+    from ai_news_agent.connectors.bilibili import _video_row_to_news_item
+
+    ts = int(datetime(2026, 6, 2, 9, 0, tzinfo=UTC).timestamp())
+    row = {
+        "bvid": "BVstrts01",
+        "title": "String epoch",
+        "pubdate": str(ts),
+    }
+    item = _video_row_to_news_item(row, [], datetime(2026, 6, 2, 12, 0, tzinfo=UTC))
+
+    assert item is not None
+    assert item.published_at is not None
+    assert item.published_at == datetime.fromtimestamp(ts, tz=UTC)
+
+
+def test_view_data_timestamp_parses_ctime_fallback() -> None:
+    from ai_news_agent.connectors.bilibili import _view_data_to_news_item
+
+    ts = int(datetime(2026, 6, 2, 10, 0, tzinfo=UTC).timestamp())
+    data = {
+        "bvid": "BVview01",
+        "title": "View ctime",
+        "ctime": ts,
+        "owner": {"name": "Owner"},
+        "stat": {"view": 1},
+    }
+    item = _view_data_to_news_item(data, [], datetime(2026, 6, 2, 12, 0, tzinfo=UTC))
+
+    assert item is not None
+    assert item.published_at is not None
+    assert item.published_at == datetime.fromtimestamp(ts, tz=UTC)
+
+
 def test_timeframe_today_start_before_end() -> None:
     from ai_news_agent.connectors.bilibili import _timeframe_to_dates
 

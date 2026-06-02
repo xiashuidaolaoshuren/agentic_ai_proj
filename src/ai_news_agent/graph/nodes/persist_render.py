@@ -106,8 +106,12 @@ def make_render_digest_node(
                     WorkflowError(stage="render", message="missing Digest in state")
                 ]
             }
+        warnings = list(state.get("warnings") or [])
         try:
-            return {"markdown": md_fn(digest), "text": txt_fn(digest)}
+            return {
+                "markdown": md_fn(digest, warnings=warnings),
+                "text": txt_fn(digest, warnings=warnings),
+            }
         except Exception as exc:  # noqa: BLE001 - surface as workflow error
             return {
                 "errors": [

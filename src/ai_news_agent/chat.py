@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.logging_setup import get_logger
+from ai_news_agent.rendering import format_connector_warnings_notice
 from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
@@ -92,7 +93,7 @@ class ChatService:
             result = await self._workflow_runner(req)
             elapsed = time.perf_counter() - t0
             _log_digest_result(result, elapsed=elapsed)
-            return result.text
+            return _user_facing_digest_text(result)
 
         return await self._handle_followup_message_async(message)
 
@@ -159,7 +160,7 @@ class ChatService:
                     _digest_events(),
                     chunk_size=chunk_size,
                     chunk_delay_s=chunk_delay_s,
-                    extract_final_text=lambda result: result.text,
+                    extract_final_text=_user_facing_digest_text,
                 ):
                     yield chunk
                 if final_result is not None:
@@ -173,7 +174,7 @@ class ChatService:
             elapsed = time.perf_counter() - t0
             _log_digest_result(result, elapsed=elapsed)
             async for chunk in iter_text_chunks(
-                result.text,
+                _user_facing_digest_text(result),
                 chunk_size=chunk_size,
                 delay_s=chunk_delay_s,
             ):
@@ -265,6 +266,15 @@ async def _stream_ephemeral_progress_then_chunks(
             delay_s=chunk_delay_s,
         ):
             yield chunk
+
+
+def _user_facing_digest_text(result: DigestResult) -> str:
+    notice = format_connector_warnings_notice(result.warnings, result.errors)
+    if not notice:
+        return result.text
+    if notice in result.text:
+        return result.text
+    return f"{notice}\n\n{result.text}"
 
 
 def _resolve_digest_request(

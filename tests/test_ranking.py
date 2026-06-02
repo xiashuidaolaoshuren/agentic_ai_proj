@@ -289,3 +289,157 @@ def test_tie_breaker_uses_source_id_when_scores_equal() -> None:
     ranked = rank_items([second, first], top_n=5, now=now)
     assert ranked[0].item.source_id == "a"
     assert ranked[0].score_total == ranked[1].score_total
+
+
+def test_newest_in_window_bilibili_candidate_picks_latest_publish_time() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.models import RankedItem
+    from ai_news_agent.ranking import find_newest_in_window_bilibili_candidate
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    def _bili(source_id: str, *, hours_ago: int) -> RankedItem:
+        item = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id=source_id,
+            url=f"https://www.bilibili.com/video/{source_id}",
+            title=source_id,
+            published_at=now - timedelta(hours=hours_ago),
+            collected_at=now,
+            metadata_completeness=0.4,
+            topic_matches=[],
+            content_confidence=ConfidenceLevel.LOW,
+            stars_or_views=1,
+            raw_snippet="x",
+        )
+        return RankedItem(
+            item=item,
+            score_total=1.0,
+            score_breakdown={},
+            selected=False,
+            selection_reason="",
+        )
+
+    ranked = [
+        _bili("BVolder", hours_ago=48),
+        _bili("BVnewest", hours_ago=2),
+        RankedItem(
+            item=NewsItem(
+                source=SourceKind.GITHUB,
+                source_id="gh1",
+                url="https://github.com/o/gh1",
+                title="gh1",
+                published_at=now - timedelta(hours=1),
+                collected_at=now,
+                metadata_completeness=0.9,
+                topic_matches=["AI"],
+                content_confidence=ConfidenceLevel.MEDIUM,
+                stars_or_views=100,
+                raw_snippet="x",
+            ),
+            score_total=9.0,
+            score_breakdown={},
+            selected=True,
+            selection_reason="",
+        ),
+    ]
+
+    candidate = find_newest_in_window_bilibili_candidate(
+        ranked,
+        timeframe="last_7_days",
+        now=now,
+    )
+
+    assert candidate is not None
+    assert candidate.item.source_id == "BVnewest"
+
+
+def test_rank_items_bilibili_guarantees_newest_in_window_when_timeframe_set() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.ranking import rank_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVjune2new",
+        url="https://www.bilibili.com/video/BVjune2new",
+        title="June 2 newest",
+        published_at=now - timedelta(hours=2),
+        collected_at=now,
+        metadata_completeness=0.25,
+        topic_matches=[],
+        content_confidence=ConfidenceLevel.LOW,
+        stars_or_views=1,
+        raw_snippet=None,
+    )
+    github_items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id=f"gh{i}",
+            url=f"https://github.com/o/gh{i}",
+            title=f"repo{i}",
+            published_at=now - timedelta(days=i + 1),
+            collected_at=now,
+            metadata_completeness=0.95,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            stars_or_views=5000 + i,
+            raw_snippet="readme body",
+        )
+        for i in range(6)
+    ]
+
+    ranked = rank_items(
+        github_items + [bilibili_newest],
+        top_n=5,
+        now=now,
+        timeframe="last_7_days",
+    )
+    selected_ids = {r.item.source_id for r in ranked if r.selected}
+
+    assert "BVjune2new" in selected_ids
+    assert len(selected_ids) == 5
+
+
+def test_rank_items_without_timeframe_does_not_force_bilibili_inclusion() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.ranking import rank_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVonlybili",
+        url="https://www.bilibili.com/video/BVonlybili",
+        title="Only bilibili",
+        published_at=now - timedelta(hours=1),
+        collected_at=now,
+        metadata_completeness=0.25,
+        topic_matches=[],
+        content_confidence=ConfidenceLevel.LOW,
+        stars_or_views=1,
+        raw_snippet=None,
+    )
+    github_items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id=f"gh{i}",
+            url=f"https://github.com/o/gh{i}",
+            title=f"repo{i}",
+            published_at=now - timedelta(days=i + 1),
+            collected_at=now,
+            metadata_completeness=0.95,
+            topic_matches=["AI"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            stars_or_views=9000 + i,
+            raw_snippet="readme",
+        )
+        for i in range(5)
+    ]
+
+    ranked = rank_items(github_items + [bilibili_newest], top_n=5, now=now)
+    selected_ids = {r.item.source_id for r in ranked if r.selected}
+
+    assert "BVonlybili" not in selected_ids

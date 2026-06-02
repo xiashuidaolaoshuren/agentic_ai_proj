@@ -15,6 +15,7 @@ from ai_news_agent.models import (
     SourceKind,
     utcnow,
 )
+from ai_news_agent.ranking import order_selected_for_digest
 
 
 def summarize_ranked_items(
@@ -29,7 +30,11 @@ def summarize_ranked_items(
     ts = generated_at if generated_at is not None else utcnow()
     topics_list = list(topics) if topics is not None else []
 
-    selected = [r for r in ranked_items if r.selected]
+    selected = order_selected_for_digest(
+        ranked_items,
+        timeframe=timeframe,
+        now=ts,
+    )
     if not selected:
         return Digest(
             generated_at=ts,

@@ -651,6 +651,27 @@ def _extract_bvid(text: str) -> str | None:
     return extract_bvid(text)
 
 
+def _parse_publish_timestamp(row: dict[str, Any]) -> datetime | None:
+    """Parse Bilibili publish time from common API field variants."""
+    for key in ("created", "pubdate", "ctime"):
+        raw = row.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, (int, float)):
+            value = float(raw)
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                value = float(raw.strip())
+            except ValueError:
+                continue
+        else:
+            continue
+        if value <= 0:
+            continue
+        return datetime.fromtimestamp(value, tz=UTC)
+    return None
+
+
 def _topic_matches(request_topics: list[str], title: str, snippet: str, author: str) -> list[str]:
     hay = f"{title} {snippet} {author}".lower()
     matched: list[str] = []
@@ -695,10 +716,7 @@ def _video_row_to_news_item(
     except (TypeError, ValueError):
         stars = None
 
-    published_at: datetime | None = None
-    ct = row.get("created") or row.get("pubdate")
-    if isinstance(ct, (int, float)):
-        published_at = datetime.fromtimestamp(float(ct), tz=UTC)
+    published_at = _parse_publish_timestamp(row)
 
     completeness = 0.5 if desc else 0.25
     topic_matches = _topic_matches(request_topics, title, desc or "", author or "")
@@ -750,10 +768,7 @@ def _view_data_to_news_item(
     except (TypeError, ValueError):
         stars = None
 
-    pub = data.get("pubdate")
-    published_at: datetime | None = None
-    if isinstance(pub, (int, float)):
-        published_at = datetime.fromtimestamp(float(pub), tz=UTC)
+    published_at = _parse_publish_timestamp(data)
 
     completeness = 0.55 if desc else 0.3
     topic_matches = _topic_matches(request_topics, title, desc or "", author or "")

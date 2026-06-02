@@ -578,6 +578,128 @@ def test_chat_digest_stream_each_progress_is_single_stage_not_cumulative(
     assert "Parsing request" not in progress_lines[-1]
 
 
+def _bilibili_anti_bot_warning() -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="bilibili",
+        code="anti_bot_blocked",
+        message=(
+            "Bilibili keyword search blocked (anti-bot). "
+            "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
+            "in .env, or use video URLs/channels."
+        ),
+    )
+
+
+def test_chat_digest_sync_includes_anti_bot_warning(tmp_path) -> None:
+    warning = _bilibili_anti_bot_warning()
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="digest-body\n",
+            ranked_items=[],
+            warnings=[warning],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "anti-bot-sync.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    reply = asyncio.run(
+        svc.handle_message_async(
+            "ignored",
+            digest_request=DigestRequest(topics=["AI"]),
+        )
+    )
+
+    assert "BILIBILI_SESSDATA" in reply
+    assert "digest-body" in reply
+    assert reply.index("BILIBILI_SESSDATA") < reply.index("digest-body")
+
+
+def test_chat_digest_streaming_includes_anti_bot_warning(tmp_path) -> None:
+    warning = _bilibili_anti_bot_warning()
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    async def fake_streaming_runner(req: DigestRequest):
+        yield "Collecting…", False, None
+        yield "", True, DigestResult(
+            request=req,
+            digest=None,
+            run_id=1,
+            markdown="",
+            text="digest-body",
+            ranked_items=[],
+            warnings=[warning],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("sync runner should not be used")
+
+    store = DigestStore(tmp_path / "anti-bot-stream.db")
+    store.init_schema()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        streaming_workflow_runner=fake_streaming_runner,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            "Give me today's AI digest",
+            chunk_size=80,
+            chunk_delay_s=0,
+        )
+    )
+
+    full = "".join(chunks)
+    assert "BILIBILI_SESSDATA" in full
+    assert "digest-body" in full
+    assert full.index("BILIBILI_SESSDATA") < full.index("digest-body")
+
+
+def test_chat_digest_warning_banner_absent_without_warnings(tmp_path) -> None:
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="digest-body\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "no-warning-banner.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    reply = asyncio.run(
+        svc.handle_message_async(
+            "ignored",
+            digest_request=DigestRequest(topics=["AI"]),
+        )
+    )
+
+    assert reply == "digest-body\n"
+    assert "BILIBILI_SESSDATA" not in reply
+
+
 def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
     now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
 
