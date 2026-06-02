@@ -858,3 +858,31 @@ def test_chat_tool_agent_not_called_for_digest_request(tmp_path) -> None:
     assert reply == "from-workflow\n"
     assert len(captured) == 1
     assert runner.calls == []
+
+
+def test_resolve_digest_request_timeframe_defaults_last_7_days_for_bilibili_channel() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest bilibili channel 123456789")
+
+    assert req.bilibili_target_channels == ["123456789"]
+    assert req.timeframe == "last_7_days"
+
+
+def test_resolve_digest_request_preserves_explicit_timeframe_for_bilibili_channel() -> (
+    None
+):
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest bilibili channel 123456789 last 30 days")
+
+    assert req.timeframe == "last_30_days"
+
+
+def test_resolve_digest_request_no_timeframe_default_for_github_channel() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest github user acme")
+
+    assert req.github_target_channels == ["acme"]
+    assert req.timeframe is None

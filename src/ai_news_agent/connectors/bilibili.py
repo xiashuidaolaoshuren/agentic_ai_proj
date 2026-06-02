@@ -46,13 +46,69 @@ def _timeframe_to_dates(timeframe: str | None) -> tuple[str | None, str | None]:
         start = today.isoformat()
         time_end = (today + timedelta(days=1)).isoformat()
         return start, time_end
-    if key in ("this week", "week"):
+    if key in ("this week", "week", "last_7_days"):
         start = (today - timedelta(days=7)).isoformat()
         return start, end
-    if key in ("this month", "month"):
+    if key in ("this month", "month", "last_30_days"):
         start = (today - timedelta(days=30)).isoformat()
         return start, end
     return None, None
+
+
+def _timeframe_bounds(
+    timeframe: str | None,
+) -> tuple[datetime | None, datetime | None]:
+    """Return UTC ``(start_inclusive, end_exclusive)`` for item recency filtering."""
+    if not timeframe:
+        return None, None
+    key = timeframe.strip().lower()
+    today = datetime.now(UTC).date()
+    if key in ("today",):
+        start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
+        return start, start + timedelta(days=1)
+    if key in ("this week", "week", "last_7_days"):
+        start_date = today - timedelta(days=7)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+        end_exclusive = datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        )
+        return start, end_exclusive
+    if key in ("this month", "month", "last_30_days"):
+        start_date = today - timedelta(days=30)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+        end_exclusive = datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        )
+        return start, end_exclusive
+    return None, None
+
+
+def _merge_news_item(existing: NewsItem | None, incoming: NewsItem) -> NewsItem:
+    """Prefer the row with a publish time; when both have one, keep the newer."""
+    if existing is None:
+        return incoming
+    if existing.published_at is None:
+        return incoming
+    if incoming.published_at is None:
+        return existing
+    if incoming.published_at >= existing.published_at:
+        return incoming
+    return existing
+
+
+def _news_item_sort_key(item: NewsItem) -> tuple[float, str]:
+    if item.published_at is None:
+        return (float("-inf"), item.source_id)
+    return (item.published_at.timestamp(), item.source_id)
+
+
+def _item_within_timeframe(item: NewsItem, timeframe: str | None) -> bool:
+    start, end_exclusive = _timeframe_bounds(timeframe)
+    if start is None or end_exclusive is None:
+        return True
+    if item.published_at is None:
+        return False
+    return start <= item.published_at < end_exclusive
 
 
 def _unwrap_payload(payload: Any) -> tuple[dict[str, Any], int, str | None]:
@@ -190,30 +246,28 @@ class BilibiliConnector:
             raw_total += n_raw
             warnings.extend(ws)
             for it in items:
-                by_bvid[it.source_id] = it
+                by_bvid[it.source_id] = _merge_news_item(by_bvid.get(it.source_id), it)
 
         for channel in bili_channels:
             items, n_raw, ws = await self._uploader_videos(request, channel, now)
             raw_total += n_raw
             warnings.extend(ws)
             for it in items:
-                by_bvid[it.source_id] = it
+                by_bvid[it.source_id] = _merge_news_item(by_bvid.get(it.source_id), it)
 
         for url in bili_urls:
-            item, n_raw, ws = await self._manual_url_item(url, request.topics, now)
+            item, n_raw, ws = await self._manual_url_item(
+                url, request.topics, now, timeframe=request.timeframe
+            )
             raw_total += n_raw
             warnings.extend(ws)
             if item is not None:
-                by_bvid[item.source_id] = item
+                by_bvid[item.source_id] = _merge_news_item(
+                    by_bvid.get(item.source_id), item
+                )
 
         merged = list(by_bvid.values())
-
-        def _sort_key(it: NewsItem) -> float:
-            if it.published_at is None:
-                return 0.0
-            return it.published_at.timestamp()
-
-        merged.sort(key=_sort_key, reverse=True)
+        merged.sort(key=_news_item_sort_key, reverse=True)
         merged = merged[: request.max_items]
 
         return ConnectorResult(
@@ -352,7 +406,8 @@ class BilibiliConnector:
                     )
                 )
                 continue
-            items.append(it)
+            if _item_within_timeframe(it, request.timeframe):
+                items.append(it)
 
         return items, raw_count, local_warnings
 
@@ -425,7 +480,8 @@ class BilibiliConnector:
                     )
                 )
                 continue
-            items.append(it)
+            if _item_within_timeframe(it, request.timeframe):
+                items.append(it)
 
         return items, raw_count, warnings
 
@@ -499,6 +555,8 @@ class BilibiliConnector:
         url: str,
         topics: list[str],
         collected_at: datetime,
+        *,
+        timeframe: str | None = None,
     ) -> tuple[NewsItem | None, int, list[ConnectorWarning]]:
         warnings: list[ConnectorWarning] = []
         bvid = extract_bvid(url)
@@ -558,6 +616,9 @@ class BilibiliConnector:
                     message=f"Skipped view payload missing fields for {bvid}",
                 )
             )
+            return None, 1, warnings
+
+        if not _item_within_timeframe(it, timeframe):
             return None, 1, warnings
 
         return it, 1, warnings

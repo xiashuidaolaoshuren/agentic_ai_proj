@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,8 +42,8 @@ def test_collect_keyword_search_maps_fixture() -> None:
         assert all(i.source is SourceKind.BILIBILI for i in out.items)
         assert all(i.content_confidence is ConfidenceLevel.LOW for i in out.items)
         assert any(w.code == "metadata_limited" for w in out.warnings)
-        first = out.items[0]
-        assert first.source_id == "BV1demo0001"
+        by_id = {i.source_id: i for i in out.items}
+        first = by_id["BV1demo0001"]
         assert "Multimodal" in first.title
         assert first.url == "https://www.bilibili.com/video/BV1demo0001"
         assert first.author == "AILabChannel"
@@ -64,6 +65,97 @@ def test_collect_empty_inputs_returns_warning() -> None:
         assert out.items == []
         assert out.raw_count == 0
         assert any(w.code == "no_input" for w in out.warnings)
+
+    asyncio.run(main())
+
+
+def test_channel_collect_filters_videos_outside_last_7_days() -> None:
+    recent_ts = int(datetime(2026, 6, 1, 12, 0, tzinfo=UTC).timestamp())
+    old_ts = int(datetime(2026, 5, 1, 12, 0, tzinfo=UTC).timestamp())
+    feed_data = {
+        "list": {
+            "vlist": [
+                {
+                    "bvid": "BVoldfeed",
+                    "title": "Old upload",
+                    "author": "Uploader",
+                    "play": 1,
+                    "created": old_ts,
+                },
+                {
+                    "bvid": "BVnewfeed",
+                    "title": "Recent upload",
+                    "author": "Uploader",
+                    "play": 2,
+                    "created": recent_ts,
+                },
+            ]
+        }
+    }
+
+    async def main() -> None:
+        mock_user = MagicMock()
+        mock_user.get_videos = AsyncMock(return_value=feed_data)
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.datetime",
+                wraps=datetime,
+            ) as mock_dt,
+            patch(
+                "ai_news_agent.connectors.bilibili.user.User",
+                return_value=mock_user,
+            ),
+        ):
+            mock_dt.now.return_value = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    target_channels=["123456789"],
+                    timeframe="last_7_days",
+                    max_items=10,
+                ),
+            )
+        assert [i.source_id for i in out.items] == ["BVnewfeed"]
+
+    asyncio.run(main())
+
+
+def test_channel_manual_url_filters_video_outside_last_7_days() -> None:
+    old_ts = int(datetime(2026, 5, 1, 12, 0, tzinfo=UTC).timestamp())
+    view_data = {
+        "bvid": "BVmanualold",
+        "title": "Old manual video",
+        "desc": "x",
+        "pubdate": old_ts,
+        "owner": {"name": "OwnerX", "mid": 1},
+        "stat": {"view": 1},
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value=view_data)
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.datetime",
+                wraps=datetime,
+            ) as mock_dt,
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            mock_dt.now.return_value = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    manual_urls=["https://www.bilibili.com/video/BVmanualold"],
+                    timeframe="last_7_days",
+                    max_items=5,
+                ),
+            )
+        assert out.items == []
 
     asyncio.run(main())
 
@@ -277,6 +369,44 @@ def test_collect_search_http_failure_warns() -> None:
     asyncio.run(main())
 
 
+def test_timeframe_last_7_days_maps_to_date_window() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ai_news_agent.connectors.bilibili import _timeframe_to_dates
+
+    fixed_today = datetime(2026, 6, 2, 12, 0, tzinfo=UTC).date()
+    with patch(
+        "ai_news_agent.connectors.bilibili.datetime",
+        wraps=datetime,
+    ) as mock_dt:
+        mock_dt.now.return_value = datetime(
+            2026, 6, 2, 12, 0, tzinfo=UTC
+        )
+        start, end = _timeframe_to_dates("last_7_days")
+
+    assert start == (fixed_today - timedelta(days=7)).isoformat()
+    assert end == fixed_today.isoformat()
+
+
+def test_timeframe_last_30_days_maps_to_date_window() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ai_news_agent.connectors.bilibili import _timeframe_to_dates
+
+    fixed_today = datetime(2026, 6, 2, 12, 0, tzinfo=UTC).date()
+    with patch(
+        "ai_news_agent.connectors.bilibili.datetime",
+        wraps=datetime,
+    ) as mock_dt:
+        mock_dt.now.return_value = datetime(
+            2026, 6, 2, 12, 0, tzinfo=UTC
+        )
+        start, end = _timeframe_to_dates("last_30_days")
+
+    assert start == (fixed_today - timedelta(days=30)).isoformat()
+    assert end == fixed_today.isoformat()
+
+
 def test_timeframe_today_start_before_end() -> None:
     from ai_news_agent.connectors.bilibili import _timeframe_to_dates
 
@@ -316,6 +446,105 @@ def test_keyword_search_today_passes_dates_to_library() -> None:
 
 def test_bilibili_connector_name() -> None:
     assert BilibiliConnector().name() == "bilibili"
+
+
+def test_sort_channel_collect_orders_newest_first_missing_timestamp_last() -> None:
+    ts_new = int(datetime(2026, 6, 1, 12, 0, tzinfo=UTC).timestamp())
+    ts_old = int(datetime(2026, 5, 20, 12, 0, tzinfo=UTC).timestamp())
+    feed_data = {
+        "list": {
+            "vlist": [
+                {
+                    "bvid": "BVnotimestamp",
+                    "title": "No timestamp",
+                    "author": "U",
+                    "play": 1,
+                },
+                {
+                    "bvid": "BVolder",
+                    "title": "Older",
+                    "author": "U",
+                    "play": 1,
+                    "created": ts_old,
+                },
+                {
+                    "bvid": "BVnewer",
+                    "title": "Newer",
+                    "author": "U",
+                    "play": 2,
+                    "created": ts_new,
+                },
+            ]
+        }
+    }
+
+    async def main() -> None:
+        mock_user = MagicMock()
+        mock_user.get_videos = AsyncMock(return_value=feed_data)
+        with patch(
+            "ai_news_agent.connectors.bilibili.user.User",
+            return_value=mock_user,
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=[],
+                    target_channels=["999"],
+                    max_items=10,
+                ),
+            )
+        assert [i.source_id for i in out.items] == [
+            "BVnewer",
+            "BVolder",
+            "BVnotimestamp",
+        ]
+
+    asyncio.run(main())
+
+
+def test_sort_dedupe_keeps_published_at_when_channel_row_lacks_timestamp() -> None:
+    search_data = _load_fixture("bilibili_search_sample.json")
+    search_data["data"]["result"][0]["pubdate"] = int(
+        datetime(2026, 6, 1, 12, 0, tzinfo=UTC).timestamp()
+    )
+    feed_data = {
+        "list": {
+            "vlist": [
+                {
+                    "bvid": "BV1demo0001",
+                    "title": "Channel row without date",
+                    "author": "Uploader",
+                    "play": 1,
+                }
+            ]
+        }
+    }
+
+    async def main() -> None:
+        mock_user = MagicMock()
+        mock_user.get_videos = AsyncMock(return_value=feed_data)
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=search_data),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.user.User",
+                return_value=mock_user,
+            ),
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(
+                    topics=["RAG"],
+                    target_channels=["123456789"],
+                    max_items=10,
+                ),
+            )
+        item = next(i for i in out.items if i.source_id == "BV1demo0001")
+        assert item.published_at is not None
+
+    asyncio.run(main())
 
 
 def test_collect_dedupes_bvid_across_paths() -> None:
