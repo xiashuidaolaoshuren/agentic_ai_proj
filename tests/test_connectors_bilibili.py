@@ -18,6 +18,12 @@ from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
+def _mock_ass_subtitle_object(segments: list[dict] | None = None) -> MagicMock:
+    obj = MagicMock()
+    obj.to_simple_json.return_value = segments or []
+    return obj
+
+
 def _load_fixture(name: str) -> dict:
     path = FIXTURES / name
     assert path.is_file(), f"missing fixture {path}"
@@ -339,7 +345,7 @@ def test_enrich_news_item_adds_tags_pages_related_snippet() -> None:
                 {"title": "Related agent video", "bvid": "BVrelated01"},
             ]
         )
-        mock_video.get_subtitle = AsyncMock(return_value={})
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
         baseline = NewsItem(
             source=SourceKind.BILIBILI,
             source_id="BV1demo00001",
@@ -350,9 +356,16 @@ def test_enrich_news_item_adds_tags_pages_related_snippet() -> None:
             tags=["bilibili", "video"],
             content_confidence=ConfidenceLevel.LOW,
         )
-        with patch(
-            "ai_news_agent.connectors.bilibili.video.Video",
-            return_value=mock_video,
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
         ):
             conn = BilibiliConnector()
             enriched, warnings = await conn.enrich_news_item(baseline, ["RAG"])
@@ -380,7 +393,7 @@ def test_enrich_partial_failure_still_returns_item_with_warning() -> None:
         mock_video.get_tags = AsyncMock(side_effect=NetworkException(503, "tags down"))
         mock_video.get_pages = AsyncMock(return_value=[])
         mock_video.get_related = AsyncMock(return_value=[])
-        mock_video.get_subtitle = AsyncMock(return_value={})
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
 
         baseline = NewsItem(
             source=SourceKind.BILIBILI,
@@ -392,15 +405,171 @@ def test_enrich_partial_failure_still_returns_item_with_warning() -> None:
             tags=["bilibili", "video"],
             content_confidence=ConfidenceLevel.LOW,
         )
-        with patch(
-            "ai_news_agent.connectors.bilibili.video.Video",
-            return_value=mock_video,
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
         ):
             conn = BilibiliConnector()
             item, warnings = await conn.enrich_news_item(baseline, ["RAG"])
 
         assert item.source_id == "BV1demo00001"
         assert any(w.code == "enrichment_partial" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_full_transcript_populates_snippet() -> None:
+    segments = [
+        {"cnt": 1, "start_time": 0.0, "end_time": 2.0, "content": "OpenAI Codex plugins"},
+        {"cnt": 2, "start_time": 2.0, "end_time": 5.0, "content": "GitHub Copilot and Claude Code"},
+    ]
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="AI news roundup",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="Short desc",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(segments),
+            ),
+        ):
+            conn = BilibiliConnector()
+            enriched, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert not warnings
+        snippet = enriched.raw_snippet or ""
+        assert "GitHub Copilot and Claude Code" in snippet
+        assert "Transcript:" in snippet
+        assert enriched.metadata_completeness >= 0.75
+
+    asyncio.run(main())
+
+
+def test_enrich_ai_conclusion_populates_snippet() -> None:
+    ai_payload = {
+        "data": {
+            "model_result": {
+                "summary": "Covers Codex plugins and knowledge-work report.",
+                "outline": [
+                    {
+                        "title": "Codex update",
+                        "part_outline": [{"content": "Six business plugins"}],
+                    },
+                ],
+            }
+        }
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value=ai_payload)
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="AI news roundup",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="Short desc",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
+        ):
+            conn = BilibiliConnector()
+            enriched, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert not warnings
+        snippet = enriched.raw_snippet or ""
+        assert "Covers Codex plugins and knowledge-work report" in snippet
+        assert "AI summary:" in snippet
+        assert "Six business plugins" in snippet
+
+    asyncio.run(main())
+
+
+def test_enrich_subtitle_api_failure_graceful() -> None:
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[{"tag_name": "AI"}])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=NetworkException(503, "subtitle down"),
+            ),
+        ):
+            conn = BilibiliConnector()
+            item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert item.source_id == "BV1demo00001"
+        assert any(w.code == "enrichment_partial" for w in warnings)
+        assert "Tags:" in (item.raw_snippet or "")
 
     asyncio.run(main())
 
@@ -422,7 +591,7 @@ def test_enriched_snippet_is_length_bounded() -> None:
         mock_video.get_tags = AsyncMock(return_value=[{"tag_name": "AI"}])
         mock_video.get_pages = AsyncMock(return_value=[])
         mock_video.get_related = AsyncMock(return_value=[])
-        mock_video.get_subtitle = AsyncMock(return_value={})
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
 
         baseline = NewsItem(
             source=SourceKind.BILIBILI,
@@ -434,15 +603,22 @@ def test_enriched_snippet_is_length_bounded() -> None:
             tags=["bilibili", "video"],
             content_confidence=ConfidenceLevel.LOW,
         )
-        with patch(
-            "ai_news_agent.connectors.bilibili.video.Video",
-            return_value=mock_video,
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
         ):
             conn = BilibiliConnector()
             item, _warnings = await conn.enrich_news_item(baseline, ["AI"])
 
         assert item.raw_snippet is not None
-        assert len(item.raw_snippet) <= 2000
+        assert len(item.raw_snippet) <= 6000
 
     asyncio.run(main())
 

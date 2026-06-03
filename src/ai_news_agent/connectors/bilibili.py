@@ -1,7 +1,7 @@
 """Bilibili metadata connector via bilibili-api-python.
 
-Keyword search, uploader feeds, and manual BV/URL resolution. Metadata-first;
-subtitle/transcript hooks reserved for a later milestone.
+Keyword search, uploader feeds, and manual BV/URL resolution. Follow-up
+enrichment adds tags, pages, related videos, full transcripts, and AI summaries.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from bilibili_api import Credential, search, user, video
+from bilibili_api import Credential, ass, search, user, video
 from bilibili_api.exceptions import ArgsException, NetworkException, ResponseCodeException
 from bilibili_api.search import SearchObjectType
 from bilibili_api.video_zone import VideoZoneTypes
@@ -24,7 +24,8 @@ _BVID_IN_TEXT = re.compile(r"(BV[0-9A-Za-z]{8,14})", re.IGNORECASE)
 # bilibili-api-python requires BV + exactly 10 alphanumeric characters (12 total).
 _BVID_API_PATTERN = re.compile(r"^BV[0-9A-Za-z]{10}$", re.IGNORECASE)
 
-_RAW_SNIPPET_MAX_LEN = 2000
+_RAW_SNIPPET_MAX_LEN = 6000
+_TRANSCRIPT_MAX_CHARS = 3000
 
 
 def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]:
@@ -740,11 +741,18 @@ class BilibiliConnector:
                 )
             )
 
-        subtitle_preview: str | None = None
+        transcript: str | None = None
         if cid is not None:
             try:
-                raw_sub = await v.get_subtitle(cid=cid)
-                subtitle_preview = _extract_subtitle_preview(raw_sub)
+                subtitle_obj = await ass.request_subtitle(
+                    obj=v,
+                    cid=cid,
+                    lan_code="ai-zh",
+                    credential=self._credential,
+                )
+                segments = subtitle_obj.to_simple_json()
+                if isinstance(segments, list):
+                    transcript = _extract_transcript_text(segments)
             except Exception as exc:
                 warnings.append(
                     _warning_from_exception(
@@ -754,12 +762,27 @@ class BilibiliConnector:
                     )
                 )
 
+        ai_conclusion: str | None = None
+        if cid is not None:
+            try:
+                raw_ai = await v.get_ai_conclusion(cid=cid)
+                ai_conclusion = _extract_ai_conclusion_text(raw_ai)
+            except Exception as exc:
+                warnings.append(
+                    _warning_from_exception(
+                        exc,
+                        operation=f"enrich ai_conclusion ({bvid})",
+                        failure_code="enrichment_partial",
+                    )
+                )
+
         enriched_any = bool(
             info_data
             or tag_names
             or pages_summary
             or related_summary
-            or subtitle_preview
+            or transcript
+            or ai_conclusion
         )
         if not enriched_any:
             return item, warnings
@@ -769,7 +792,8 @@ class BilibiliConnector:
             tag_names=tag_names,
             pages_summary=pages_summary,
             related_summary=related_summary,
-            subtitle_preview=subtitle_preview,
+            transcript=transcript,
+            ai_conclusion=ai_conclusion,
         )
         merged_tags = list(dict.fromkeys(["bilibili", "video", *tag_names]))
         completeness, confidence = _enrichment_scores(
@@ -777,7 +801,8 @@ class BilibiliConnector:
             tag_count=len(tag_names),
             has_pages=bool(pages_summary),
             has_related=bool(related_summary),
-            has_subtitle_text=bool(subtitle_preview),
+            has_transcript=bool(transcript),
+            has_ai_conclusion=bool(ai_conclusion),
         )
         topic_matches = _topic_matches(
             request_topics,
@@ -922,29 +947,18 @@ def _format_related_summary(raw: Any, *, limit: int = 3) -> str:
     return "; ".join(parts)
 
 
-def _extract_subtitle_preview(raw: Any, *, max_chars: int = 400) -> str | None:
-    if not isinstance(raw, dict):
-        return None
-
+def _extract_transcript_text(
+    segments: list[dict[str, Any]],
+    *,
+    max_chars: int = _TRANSCRIPT_MAX_CHARS,
+) -> str | None:
     lines: list[str] = []
-    subtitles = raw.get("subtitles")
-    if isinstance(subtitles, list):
-        for block in subtitles:
-            if not isinstance(block, dict):
-                continue
-            content = block.get("content")
-            if content:
-                lines.append(str(content).strip())
-
-    body = raw.get("body")
-    if isinstance(body, list):
-        for entry in body:
-            if not isinstance(entry, dict):
-                continue
-            content = entry.get("content")
-            if content:
-                lines.append(str(content).strip())
-
+    for seg in segments:
+        if not isinstance(seg, dict):
+            continue
+        content = seg.get("content")
+        if content:
+            lines.append(str(content).strip())
     if not lines:
         return None
     text = " ".join(lines)
@@ -954,15 +968,61 @@ def _extract_subtitle_preview(raw: Any, *, max_chars: int = 400) -> str | None:
     return text[:max_chars]
 
 
+def _extract_ai_conclusion_text(raw: Any) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+
+    data = raw.get("data")
+    if not isinstance(data, dict):
+        data = raw
+
+    model_result = data.get("model_result")
+    if not isinstance(model_result, dict):
+        return None
+
+    sections: list[str] = []
+    summary = model_result.get("summary")
+    if summary:
+        sections.append(str(summary).strip())
+
+    outline = model_result.get("outline")
+    if isinstance(outline, list):
+        for part in outline:
+            if not isinstance(part, dict):
+                continue
+            title = str(part.get("title") or "").strip()
+            if title:
+                sections.append(title)
+            part_outline = part.get("part_outline")
+            if isinstance(part_outline, list):
+                for entry in part_outline:
+                    if not isinstance(entry, dict):
+                        continue
+                    content = entry.get("content")
+                    if content:
+                        sections.append(str(content).strip())
+
+    if not sections:
+        return None
+    text = "\n".join(sections)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[: _TRANSCRIPT_MAX_CHARS] if text else None
+
+
 def _compose_enriched_snippet(
     base_desc: str,
     *,
     tag_names: list[str],
     pages_summary: str,
     related_summary: str,
-    subtitle_preview: str | None,
+    transcript: str | None,
+    ai_conclusion: str | None,
 ) -> str:
     sections: list[str] = []
+    if ai_conclusion:
+        sections.append("AI summary: " + ai_conclusion)
+    if transcript:
+        sections.append("Transcript: " + transcript)
     desc = base_desc.strip()
     if desc:
         sections.append(desc)
@@ -972,8 +1032,6 @@ def _compose_enriched_snippet(
         sections.append("Parts: " + pages_summary)
     if related_summary:
         sections.append("Related: " + related_summary)
-    if subtitle_preview:
-        sections.append("Subtitles: " + subtitle_preview)
     if not sections:
         return ""
     text = "\n".join(sections)
@@ -988,7 +1046,8 @@ def _enrichment_scores(
     tag_count: int,
     has_pages: bool,
     has_related: bool,
-    has_subtitle_text: bool,
+    has_transcript: bool,
+    has_ai_conclusion: bool,
 ) -> tuple[float, ConfidenceLevel]:
     score = 0.25
     if has_desc:
@@ -999,7 +1058,9 @@ def _enrichment_scores(
         score += 0.1
     if has_related:
         score += 0.1
-    if has_subtitle_text:
+    if has_transcript:
+        score += 0.25
+    if has_ai_conclusion:
         score += 0.2
     score = min(score, 1.0)
     if score >= 0.8:
