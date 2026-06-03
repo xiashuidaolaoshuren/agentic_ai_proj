@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ai_news_agent.models import (
     ConnectorWarning,
     DigestEntry,
@@ -16,6 +18,9 @@ from ai_news_agent.models import (
 )
 from ai_news_agent.storage import DigestStore, FollowupContext
 from ai_news_agent.tools.schemas import ToolObservation, ToolObservationStatus
+
+if TYPE_CHECKING:
+    from ai_news_agent.connectors.bilibili import BilibiliConnector
 
 
 def load_latest_digest(*, store: DigestStore) -> ToolObservation:
@@ -81,11 +86,12 @@ def get_digest_item(
     )
 
 
-def get_source_trace(
+async def get_source_trace(
     *,
     store: DigestStore,
     rank: int | None = None,
     source_id: str | None = None,
+    bilibili_connector: BilibiliConnector | None = None,
 ) -> ToolObservation:
     ctx = store.get_latest_followup_context()
     if ctx.run_id is None and ctx.digest is None:
@@ -104,6 +110,20 @@ def get_source_trace(
             caveats=caveats + ["Digest entry exists but no matching news item was persisted."],
         )
 
+    enrich_caveats: list[str] = []
+    if (
+        entry.source_kind is SourceKind.BILIBILI
+        and bilibili_connector is not None
+    ):
+        topics = list(ctx.digest.topics) if ctx.digest is not None else []
+        news_item, enrich_ws = await bilibili_connector.enrich_news_item(
+            news_item,
+            topics,
+        )
+        enrich_caveats = _warning_caveats(enrich_ws)
+        if ctx.run_id is not None:
+            store.upsert_news_item(ctx.run_id, news_item)
+
     warnings = _matching_warnings(ctx, entry.source_kind)
     resolved_rank = rank if rank is not None else _entry_rank(ctx, entry)
     return ToolObservation(
@@ -115,7 +135,7 @@ def get_source_trace(
             "news_item": news_item_to_dict(news_item),
             "warnings": [connector_warning_to_dict(w) for w in warnings],
         },
-        caveats=caveats + _entry_caveats(entry) + _warning_caveats(warnings),
+        caveats=caveats + _entry_caveats(entry) + _warning_caveats(warnings) + enrich_caveats,
     )
 
 

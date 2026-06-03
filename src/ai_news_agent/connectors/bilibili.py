@@ -24,8 +24,6 @@ _BVID_IN_TEXT = re.compile(r"(BV[0-9A-Za-z]{8,14})", re.IGNORECASE)
 # bilibili-api-python requires BV + exactly 10 alphanumeric characters (12 total).
 _BVID_API_PATTERN = re.compile(r"^BV[0-9A-Za-z]{10}$", re.IGNORECASE)
 
-# Enrich top-K collected items with Video detail APIs (tags/pages/related/subtitle).
-_ENRICH_MAX_ITEMS = 5
 _RAW_SNIPPET_MAX_LEN = 2000
 
 
@@ -276,18 +274,20 @@ class BilibiliConnector:
         merged.sort(key=_news_item_sort_key, reverse=True)
         merged = merged[: request.max_items]
 
-        enriched_items: list[NewsItem] = []
-        for idx, it in enumerate(merged):
-            if idx < _ENRICH_MAX_ITEMS:
-                it, enrich_ws = await self._enrich_news_item(it, request.topics)
-                warnings.extend(enrich_ws)
-            enriched_items.append(it)
-
         return ConnectorResult(
-            items=enriched_items,
+            items=merged,
             warnings=_dedupe_warnings(warnings),
             raw_count=raw_total,
         )
+
+    async def enrich_news_item(
+        self,
+        item: NewsItem,
+        request_topics: list[str] | None = None,
+    ) -> tuple[NewsItem, list[ConnectorWarning]]:
+        """Hydrate one Bilibili item via Video APIs (for follow-up source trace)."""
+        topics = list(request_topics or [])
+        return await self._enrich_news_item(item, topics)
 
     async def _keyword_search(
         self,

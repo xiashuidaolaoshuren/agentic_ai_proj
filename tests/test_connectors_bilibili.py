@@ -13,7 +13,7 @@ from bilibili_api.search import SearchObjectType
 
 from ai_news_agent.connectors.base import ConnectorRequest
 from ai_news_agent.connectors.bilibili import BilibiliConnector
-from ai_news_agent.models import ConfidenceLevel, SourceKind
+from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -253,7 +253,49 @@ def test_collect_target_channel_name_resolved_via_user_search() -> None:
     asyncio.run(main())
 
 
-def test_collect_enriches_keyword_items_with_tags_pages_related_snippet() -> None:
+def test_collect_does_not_bulk_enrich_keyword_items() -> None:
+    data = _load_fixture("bilibili_search_sample.json")
+    data = {
+        **data,
+        "data": {
+            **data["data"],
+            "result": [
+                {
+                    **data["data"]["result"][0],
+                    "bvid": "BV1demo00001",
+                },
+                *data["data"]["result"][1:],
+            ],
+        },
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_tags = AsyncMock()
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=data),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(topics=["RAG"], max_items=10),
+            )
+
+        item = next(i for i in out.items if i.source_id == "BV1demo00001")
+        assert item.content_confidence is ConfidenceLevel.LOW
+        assert "Tags:" not in (item.raw_snippet or "")
+        mock_video.get_tags.assert_not_called()
+
+    asyncio.run(main())
+
+
+def test_enrich_news_item_adds_tags_pages_related_snippet() -> None:
     data = _load_fixture("bilibili_search_sample.json")
     data = {
         **data,
@@ -298,22 +340,24 @@ def test_collect_enriches_keyword_items_with_tags_pages_related_snippet() -> Non
             ]
         )
         mock_video.get_subtitle = AsyncMock(return_value={})
-        with (
-            patch(
-                "ai_news_agent.connectors.bilibili.search.search_by_type",
-                new=AsyncMock(return_value=data),
-            ),
-            patch(
-                "ai_news_agent.connectors.bilibili.video.Video",
-                return_value=mock_video,
-            ),
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="Multimodal RAG in 15 minutes",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="Overview of retrieval patterns for multimodal inputs.",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with patch(
+            "ai_news_agent.connectors.bilibili.video.Video",
+            return_value=mock_video,
         ):
             conn = BilibiliConnector()
-            out = await conn.collect(
-                ConnectorRequest(topics=["RAG"], max_items=10),
-            )
+            enriched, warnings = await conn.enrich_news_item(baseline, ["RAG"])
 
-        enriched = next(i for i in out.items if i.source_id == "BV1demo00001")
+        assert not warnings
         assert enriched.metadata_completeness >= 0.55
         assert enriched.content_confidence is ConfidenceLevel.MEDIUM
         assert "RAG" in enriched.tags
@@ -328,20 +372,6 @@ def test_collect_enriches_keyword_items_with_tags_pages_related_snippet() -> Non
 
 
 def test_enrich_partial_failure_still_returns_item_with_warning() -> None:
-    data = _load_fixture("bilibili_search_sample.json")
-    data = {
-        **data,
-        "data": {
-            **data["data"],
-            "result": [
-                {
-                    **data["data"]["result"][0],
-                    "bvid": "BV1demo00001",
-                }
-            ],
-        },
-    }
-
     async def main() -> None:
         mock_video = MagicMock()
         mock_video.get_info = AsyncMock(
@@ -352,45 +382,31 @@ def test_enrich_partial_failure_still_returns_item_with_warning() -> None:
         mock_video.get_related = AsyncMock(return_value=[])
         mock_video.get_subtitle = AsyncMock(return_value={})
 
-        with (
-            patch(
-                "ai_news_agent.connectors.bilibili.search.search_by_type",
-                new=AsyncMock(return_value=data),
-            ),
-            patch(
-                "ai_news_agent.connectors.bilibili.video.Video",
-                return_value=mock_video,
-            ),
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with patch(
+            "ai_news_agent.connectors.bilibili.video.Video",
+            return_value=mock_video,
         ):
             conn = BilibiliConnector()
-            out = await conn.collect(
-                ConnectorRequest(topics=["RAG"], max_items=10),
-            )
+            item, warnings = await conn.enrich_news_item(baseline, ["RAG"])
 
-        assert len(out.items) >= 1
-        assert any(w.code == "enrichment_partial" for w in out.warnings)
-        first = out.items[0]
-        assert first.source_id.startswith("BV")
+        assert item.source_id == "BV1demo00001"
+        assert any(w.code == "enrichment_partial" for w in warnings)
 
     asyncio.run(main())
 
 
 def test_enriched_snippet_is_length_bounded() -> None:
     long_desc = "x" * 5000
-    data = {
-        "code": 0,
-        "data": {
-            "result": [
-                {
-                    "bvid": "BV0000000001",
-                    "title": "Long desc video",
-                    "author": "Author",
-                    "play": 1,
-                    "description": long_desc,
-                }
-            ]
-        },
-    }
 
     async def main() -> None:
         mock_video = MagicMock()
@@ -408,20 +424,23 @@ def test_enriched_snippet_is_length_bounded() -> None:
         mock_video.get_related = AsyncMock(return_value=[])
         mock_video.get_subtitle = AsyncMock(return_value={})
 
-        with (
-            patch(
-                "ai_news_agent.connectors.bilibili.search.search_by_type",
-                new=AsyncMock(return_value=data),
-            ),
-            patch(
-                "ai_news_agent.connectors.bilibili.video.Video",
-                return_value=mock_video,
-            ),
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV0000000001",
+            url="https://www.bilibili.com/video/BV0000000001",
+            title="Long desc video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet=long_desc,
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with patch(
+            "ai_news_agent.connectors.bilibili.video.Video",
+            return_value=mock_video,
         ):
             conn = BilibiliConnector()
-            out = await conn.collect(ConnectorRequest(topics=["AI"], max_items=5))
+            item, _warnings = await conn.enrich_news_item(baseline, ["AI"])
 
-        item = out.items[0]
         assert item.raw_snippet is not None
         assert len(item.raw_snippet) <= 2000
 

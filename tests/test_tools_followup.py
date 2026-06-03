@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.models import (
@@ -186,7 +188,7 @@ def test_get_digest_item_requires_selector(tmp_path: Path) -> None:
 def test_get_source_trace_not_found_rank(tmp_path: Path) -> None:
     store, _ = _seed_full_followup_store(tmp_path)
 
-    obs = get_source_trace(store=store, rank=5)
+    obs = asyncio.run(get_source_trace(store=store, rank=5))
 
     assert obs.status is ToolObservationStatus.NOT_FOUND
     assert obs.data["rank"] == 5
@@ -195,7 +197,7 @@ def test_get_source_trace_not_found_rank(tmp_path: Path) -> None:
 def test_get_source_trace_ok_includes_metadata_and_warnings(tmp_path: Path) -> None:
     store, _ = _seed_full_followup_store(tmp_path)
 
-    obs = get_source_trace(store=store, rank=1)
+    obs = asyncio.run(get_source_trace(store=store, rank=1))
 
     assert obs.status is ToolObservationStatus.OK
     assert obs.data["news_item"]["raw_snippet"] == "desc"
@@ -204,6 +206,134 @@ def test_get_source_trace_ok_includes_metadata_and_warnings(tmp_path: Path) -> N
     assert obs.data["warnings"][0]["code"] == "rate"
     assert "caveat" in obs.caveats
     json.dumps(tool_observation_to_dict(obs))
+
+
+def _seed_bilibili_followup_store(tmp_path: Path) -> tuple[DigestStore, int]:
+    store = DigestStore(tmp_path / "bili-followup.db")
+    store.init_schema()
+    collected = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=collected,
+        author="Uploader",
+        metadata_completeness=0.25,
+        raw_snippet="thin search description",
+        tags=["bilibili", "video"],
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="last_7_days",
+        topics=["RAG"],
+        connector_names=["bilibili"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(
+        run_id,
+        [
+            RankedItem(
+                item=item,
+                score_total=3.0,
+                score_breakdown={"freshness": 1.0},
+                selected=True,
+                selection_reason="rank #1",
+            )
+        ],
+    )
+    store.save_digest(
+        run_id,
+        Digest(
+            generated_at=collected,
+            entries=[
+                DigestEntry(
+                    source_kind=SourceKind.BILIBILI,
+                    source_id="BV1demo00001",
+                    title="Bilibili video",
+                    source_name="Bilibili",
+                    source_url=item.url,
+                    summary="S",
+                    why_it_matters="W",
+                    background_knowledge="B",
+                    follow_up_action=FollowUpAction.WATCH,
+                )
+            ],
+            topics=["RAG"],
+            timeframe="last_7_days",
+        ),
+    )
+    return store, run_id
+
+
+def test_get_source_trace_lazy_enriches_bilibili_item(tmp_path: Path) -> None:
+    store, run_id = _seed_bilibili_followup_store(tmp_path)
+    enriched = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        author="Uploader",
+        metadata_completeness=0.7,
+        raw_snippet="thin search description\nTags: RAG, Agents\nParts: P1: Intro",
+        tags=["bilibili", "video", "RAG"],
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(enriched, []))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="BV1demo00001",
+            bilibili_connector=mock_connector,
+        )
+    )
+
+    mock_connector.enrich_news_item.assert_awaited_once()
+    assert obs.status is ToolObservationStatus.OK
+    assert "Tags:" in obs.data["news_item"]["raw_snippet"]
+    ctx = store.get_latest_followup_context()
+    stored = next(i for i in ctx.news_items if i.source_id == "BV1demo00001")
+    assert "Tags:" in (stored.raw_snippet or "")
+    assert run_id == ctx.run_id
+
+
+def test_get_source_trace_lazy_enrich_partial_failure_surfaces_caveats(
+    tmp_path: Path,
+) -> None:
+    store, _ = _seed_bilibili_followup_store(tmp_path)
+    baseline = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        raw_snippet="thin search description",
+        tags=["bilibili", "video"],
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    warning = ConnectorWarning(
+        connector="bilibili",
+        code="enrichment_partial",
+        message="Bilibili enrich tags (BV1demo00001) request failed",
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(baseline, [warning]))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="BV1demo00001",
+            bilibili_connector=mock_connector,
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert obs.data["news_item"]["raw_snippet"] == "thin search description"
+    assert any("enrichment_partial" in c for c in obs.caveats)
 
 
 def test_get_ranking_explanation_empty_store(tmp_path: Path) -> None:

@@ -102,7 +102,16 @@ def build_tool_registry(
         rank: int | None = None,
         source_id: str | None = None,
     ) -> ToolObservation:
-        return get_source_trace(store=store, rank=rank, source_id=source_id)
+        from ai_news_agent.connectors.bilibili import BilibiliConnector
+
+        connector = bilibili_factory()
+        bilibili = connector if isinstance(connector, BilibiliConnector) else None
+        return await get_source_trace(
+            store=store,
+            rank=rank,
+            source_id=source_id,
+            bilibili_connector=bilibili,
+        )
 
     async def _get_ranking_explanation_execute(
         *,
