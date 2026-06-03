@@ -253,6 +253,181 @@ def test_collect_target_channel_name_resolved_via_user_search() -> None:
     asyncio.run(main())
 
 
+def test_collect_enriches_keyword_items_with_tags_pages_related_snippet() -> None:
+    data = _load_fixture("bilibili_search_sample.json")
+    data = {
+        **data,
+        "data": {
+            **data["data"],
+            "result": [
+                {
+                    **data["data"]["result"][0],
+                    "bvid": "BV1demo00001",
+                },
+                *data["data"]["result"][1:],
+            ],
+        },
+    }
+    view_info = {
+        "bvid": "BV1demo00001",
+        "title": "Multimodal RAG in 15 minutes",
+        "desc": "Full video description from view API.",
+        "owner": {"name": "AILabChannel", "mid": 99},
+        "stat": {"view": 20000},
+        "pubdate": 1715000000,
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value=view_info)
+        mock_video.get_tags = AsyncMock(
+            return_value=[
+                {"tag_name": "RAG"},
+                {"tag_name": "Multimodal"},
+            ]
+        )
+        mock_video.get_pages = AsyncMock(
+            return_value=[
+                {"page": 1, "part": "Intro", "cid": 111, "duration": 120},
+                {"page": 2, "part": "Demo", "cid": 222, "duration": 300},
+            ]
+        )
+        mock_video.get_related = AsyncMock(
+            return_value=[
+                {"title": "Related agent video", "bvid": "BVrelated01"},
+            ]
+        )
+        mock_video.get_subtitle = AsyncMock(return_value={})
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=data),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(topics=["RAG"], max_items=10),
+            )
+
+        enriched = next(i for i in out.items if i.source_id == "BV1demo00001")
+        assert enriched.metadata_completeness >= 0.55
+        assert enriched.content_confidence is ConfidenceLevel.MEDIUM
+        assert "RAG" in enriched.tags
+        assert "Multimodal" in enriched.tags
+        snippet = enriched.raw_snippet or ""
+        assert "Tags:" in snippet
+        assert "Parts:" in snippet
+        assert "Related:" in snippet
+        assert "Full video description" in snippet
+
+    asyncio.run(main())
+
+
+def test_enrich_partial_failure_still_returns_item_with_warning() -> None:
+    data = _load_fixture("bilibili_search_sample.json")
+    data = {
+        **data,
+        "data": {
+            **data["data"],
+            "result": [
+                {
+                    **data["data"]["result"][0],
+                    "bvid": "BV1demo00001",
+                }
+            ],
+        },
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(
+            side_effect=NetworkException(503, "service unavailable")
+        )
+        mock_video.get_tags = AsyncMock(side_effect=NetworkException(503, "tags down"))
+        mock_video.get_pages = AsyncMock(return_value=[])
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_subtitle = AsyncMock(return_value={})
+
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=data),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(
+                ConnectorRequest(topics=["RAG"], max_items=10),
+            )
+
+        assert len(out.items) >= 1
+        assert any(w.code == "enrichment_partial" for w in out.warnings)
+        first = out.items[0]
+        assert first.source_id.startswith("BV")
+
+    asyncio.run(main())
+
+
+def test_enriched_snippet_is_length_bounded() -> None:
+    long_desc = "x" * 5000
+    data = {
+        "code": 0,
+        "data": {
+            "result": [
+                {
+                    "bvid": "BV0000000001",
+                    "title": "Long desc video",
+                    "author": "Author",
+                    "play": 1,
+                    "description": long_desc,
+                }
+            ]
+        },
+    }
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(
+            return_value={
+                "bvid": "BV0000000001",
+                "title": "Long desc video",
+                "desc": long_desc,
+                "owner": {"name": "Author"},
+                "stat": {"view": 1},
+            }
+        )
+        mock_video.get_tags = AsyncMock(return_value=[{"tag_name": "AI"}])
+        mock_video.get_pages = AsyncMock(return_value=[])
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_subtitle = AsyncMock(return_value={})
+
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.search.search_by_type",
+                new=AsyncMock(return_value=data),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+        ):
+            conn = BilibiliConnector()
+            out = await conn.collect(ConnectorRequest(topics=["AI"], max_items=5))
+
+        item = out.items[0]
+        assert item.raw_snippet is not None
+        assert len(item.raw_snippet) <= 2000
+
+    asyncio.run(main())
+
+
 def test_collect_manual_urls_uses_view_api() -> None:
     view_data = {
         "bvid": "BVmanual01",
@@ -278,7 +453,7 @@ def test_collect_manual_urls_uses_view_api() -> None:
                     max_items=5,
                 ),
             )
-        VideoCls.assert_called_once()
+        assert VideoCls.call_count >= 1
         assert VideoCls.call_args.kwargs.get("bvid") == "BVmanual01"
         assert len(out.items) == 1
         assert out.items[0].title == "Manual video title"

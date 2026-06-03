@@ -21,6 +21,12 @@ from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, So
 
 # Real BV ids are typically 12 chars (e.g. BV1…); allow short test-style ids.
 _BVID_IN_TEXT = re.compile(r"(BV[0-9A-Za-z]{8,14})", re.IGNORECASE)
+# bilibili-api-python requires BV + exactly 10 alphanumeric characters (12 total).
+_BVID_API_PATTERN = re.compile(r"^BV[0-9A-Za-z]{10}$", re.IGNORECASE)
+
+# Enrich top-K collected items with Video detail APIs (tags/pages/related/subtitle).
+_ENRICH_MAX_ITEMS = 5
+_RAW_SNIPPET_MAX_LEN = 2000
 
 
 def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]:
@@ -270,8 +276,15 @@ class BilibiliConnector:
         merged.sort(key=_news_item_sort_key, reverse=True)
         merged = merged[: request.max_items]
 
+        enriched_items: list[NewsItem] = []
+        for idx, it in enumerate(merged):
+            if idx < _ENRICH_MAX_ITEMS:
+                it, enrich_ws = await self._enrich_news_item(it, request.topics)
+                warnings.extend(enrich_ws)
+            enriched_items.append(it)
+
         return ConnectorResult(
-            items=merged,
+            items=enriched_items,
             warnings=_dedupe_warnings(warnings),
             raw_count=raw_total,
         )
@@ -623,6 +636,174 @@ class BilibiliConnector:
 
         return it, 1, warnings
 
+    async def _enrich_news_item(
+        self,
+        item: NewsItem,
+        request_topics: list[str],
+    ) -> tuple[NewsItem, list[ConnectorWarning]]:
+        """Best-effort hydration via Video APIs; never raises."""
+        warnings: list[ConnectorWarning] = []
+        bvid = item.source_id
+        if not _bvid_valid_for_video_api(bvid):
+            return item, warnings
+
+        try:
+            v = video.Video(bvid=bvid, credential=self._credential)
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"enrich init ({bvid})",
+                    failure_code="enrichment_partial",
+                )
+            )
+            return item, warnings
+
+        base = item
+        info_data: dict[str, Any] | None = None
+        try:
+            raw_info = await v.get_info()
+            if isinstance(raw_info, dict) and "code" in raw_info and "data" in raw_info:
+                inner, code, message = _unwrap_payload(raw_info)
+                if code != 0:
+                    warnings.append(
+                        ConnectorWarning(
+                            connector=self.name(),
+                            code="enrichment_partial",
+                            message=f"Bilibili enrich get_info returned code={code!r} for {bvid}",
+                            detail=message,
+                        )
+                    )
+                else:
+                    info_data = inner
+            elif isinstance(raw_info, dict):
+                info_data = raw_info
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"enrich info ({bvid})",
+                    failure_code="enrichment_partial",
+                )
+            )
+
+        if info_data:
+            upgraded = _view_data_to_news_item(
+                info_data,
+                request_topics,
+                item.collected_at,
+            )
+            if upgraded is not None:
+                base = _merge_news_item(item, upgraded)
+
+        tag_names: list[str] = []
+        try:
+            raw_tags = await v.get_tags()
+            tag_names = _parse_tag_names(raw_tags)
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"enrich tags ({bvid})",
+                    failure_code="enrichment_partial",
+                )
+            )
+
+        pages_summary = ""
+        cid: int | None = None
+        try:
+            pages = await v.get_pages()
+            if isinstance(pages, list):
+                pages_summary = _format_pages_summary(pages)
+                first = pages[0] if pages else None
+                if isinstance(first, dict) and first.get("cid") is not None:
+                    cid = int(first["cid"])
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"enrich pages ({bvid})",
+                    failure_code="enrichment_partial",
+                )
+            )
+
+        related_summary = ""
+        try:
+            raw_related = await v.get_related()
+            related_summary = _format_related_summary(raw_related)
+        except Exception as exc:
+            warnings.append(
+                _warning_from_exception(
+                    exc,
+                    operation=f"enrich related ({bvid})",
+                    failure_code="enrichment_partial",
+                )
+            )
+
+        subtitle_preview: str | None = None
+        if cid is not None:
+            try:
+                raw_sub = await v.get_subtitle(cid=cid)
+                subtitle_preview = _extract_subtitle_preview(raw_sub)
+            except Exception as exc:
+                warnings.append(
+                    _warning_from_exception(
+                        exc,
+                        operation=f"enrich subtitle ({bvid})",
+                        failure_code="enrichment_partial",
+                    )
+                )
+
+        enriched_any = bool(
+            info_data
+            or tag_names
+            or pages_summary
+            or related_summary
+            or subtitle_preview
+        )
+        if not enriched_any:
+            return item, warnings
+
+        snippet = _compose_enriched_snippet(
+            base.raw_snippet or "",
+            tag_names=tag_names,
+            pages_summary=pages_summary,
+            related_summary=related_summary,
+            subtitle_preview=subtitle_preview,
+        )
+        merged_tags = list(dict.fromkeys(["bilibili", "video", *tag_names]))
+        completeness, confidence = _enrichment_scores(
+            has_desc=bool((base.raw_snippet or "").strip() or snippet),
+            tag_count=len(tag_names),
+            has_pages=bool(pages_summary),
+            has_related=bool(related_summary),
+            has_subtitle_text=bool(subtitle_preview),
+        )
+        topic_matches = _topic_matches(
+            request_topics,
+            base.title,
+            snippet,
+            base.author or "",
+        )
+
+        enriched = NewsItem(
+            source=base.source,
+            source_id=base.source_id,
+            url=base.url,
+            title=base.title,
+            published_at=base.published_at,
+            collected_at=base.collected_at,
+            author=base.author,
+            stars_or_views=base.stars_or_views,
+            language=base.language,
+            metadata_completeness=completeness,
+            raw_snippet=snippet or base.raw_snippet,
+            tags=merged_tags,
+            topic_matches=topic_matches or base.topic_matches,
+            content_confidence=confidence,
+        )
+        return enriched, warnings
+
     async def _get_cid(self, bvid: str) -> int | None:
         """Resolve first-page CID for future subtitle/transcript work."""
         try:
@@ -636,6 +817,10 @@ class BilibiliConnector:
         except Exception:
             return None
         return None
+
+
+def _bvid_valid_for_video_api(bvid: str) -> bool:
+    return bool(_BVID_API_PATTERN.match(bvid.strip()))
 
 
 def extract_bvid(text: str) -> str | None:
@@ -670,6 +855,160 @@ def _parse_publish_timestamp(row: dict[str, Any]) -> datetime | None:
             continue
         return datetime.fromtimestamp(value, tz=UTC)
     return None
+
+
+def _parse_tag_names(raw_tags: Any) -> list[str]:
+    if isinstance(raw_tags, dict):
+        if "data" in raw_tags:
+            return _parse_tag_names(raw_tags["data"])
+        if "tags" in raw_tags:
+            return _parse_tag_names(raw_tags["tags"])
+        return []
+    if not isinstance(raw_tags, list):
+        return []
+    names: list[str] = []
+    for tag in raw_tags:
+        if isinstance(tag, dict):
+            name = tag.get("tag_name") or tag.get("name")
+            if name:
+                names.append(str(name).strip())
+        elif isinstance(tag, str) and tag.strip():
+            names.append(tag.strip())
+    return names
+
+
+def _format_pages_summary(pages: list[Any], *, limit: int = 6) -> str:
+    parts: list[str] = []
+    for page in pages[:limit]:
+        if not isinstance(page, dict):
+            continue
+        title = page.get("part") or page.get("title") or ""
+        page_num = page.get("page")
+        duration = page.get("duration")
+        segment = f"P{page_num}: {title}" if page_num is not None else str(title)
+        if duration is not None:
+            segment = f"{segment} ({duration}s)"
+        segment = segment.strip()
+        if segment:
+            parts.append(segment)
+    return "; ".join(parts)
+
+
+def _format_related_summary(raw: Any, *, limit: int = 3) -> str:
+    videos: list[Any]
+    if isinstance(raw, dict):
+        if "archives" in raw:
+            videos = list(raw.get("archives") or [])
+        elif "list" in raw:
+            videos = list(raw.get("list") or [])
+        elif "data" in raw:
+            return _format_related_summary(raw.get("data"), limit=limit)
+        else:
+            videos = []
+    elif isinstance(raw, list):
+        videos = raw
+    else:
+        return ""
+
+    parts: list[str] = []
+    for row in videos[:limit]:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip()
+        bvid = str(row.get("bvid") or "").strip()
+        if not title:
+            continue
+        parts.append(f"{title} ({bvid})" if bvid else title)
+    return "; ".join(parts)
+
+
+def _extract_subtitle_preview(raw: Any, *, max_chars: int = 400) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+
+    lines: list[str] = []
+    subtitles = raw.get("subtitles")
+    if isinstance(subtitles, list):
+        for block in subtitles:
+            if not isinstance(block, dict):
+                continue
+            content = block.get("content")
+            if content:
+                lines.append(str(content).strip())
+
+    body = raw.get("body")
+    if isinstance(body, list):
+        for entry in body:
+            if not isinstance(entry, dict):
+                continue
+            content = entry.get("content")
+            if content:
+                lines.append(str(content).strip())
+
+    if not lines:
+        return None
+    text = " ".join(lines)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    return text[:max_chars]
+
+
+def _compose_enriched_snippet(
+    base_desc: str,
+    *,
+    tag_names: list[str],
+    pages_summary: str,
+    related_summary: str,
+    subtitle_preview: str | None,
+) -> str:
+    sections: list[str] = []
+    desc = base_desc.strip()
+    if desc:
+        sections.append(desc)
+    if tag_names:
+        sections.append("Tags: " + ", ".join(tag_names[:12]))
+    if pages_summary:
+        sections.append("Parts: " + pages_summary)
+    if related_summary:
+        sections.append("Related: " + related_summary)
+    if subtitle_preview:
+        sections.append("Subtitles: " + subtitle_preview)
+    if not sections:
+        return ""
+    text = "\n".join(sections)
+    if len(text) <= _RAW_SNIPPET_MAX_LEN:
+        return text
+    return text[: _RAW_SNIPPET_MAX_LEN - 3].rstrip() + "..."
+
+
+def _enrichment_scores(
+    *,
+    has_desc: bool,
+    tag_count: int,
+    has_pages: bool,
+    has_related: bool,
+    has_subtitle_text: bool,
+) -> tuple[float, ConfidenceLevel]:
+    score = 0.25
+    if has_desc:
+        score += 0.15
+    if tag_count:
+        score += min(0.15, 0.05 * tag_count)
+    if has_pages:
+        score += 0.1
+    if has_related:
+        score += 0.1
+    if has_subtitle_text:
+        score += 0.2
+    score = min(score, 1.0)
+    if score >= 0.8:
+        confidence = ConfidenceLevel.HIGH
+    elif score >= 0.55:
+        confidence = ConfidenceLevel.MEDIUM
+    else:
+        confidence = ConfidenceLevel.LOW
+    return round(score, 3), confidence
 
 
 def _topic_matches(request_topics: list[str], title: str, snippet: str, author: str) -> list[str]:
