@@ -185,6 +185,7 @@ If Bilibili requests fail with HTTP 412:
    - `BILIBILI_PROXY_URL=http://127.0.0.1:7890` (or your proxy)
 4. Prefer specific video URLs when channel feeds are blocked.
 5. After a run, ask **show caveats** to distinguish `auth_required_*` (login) vs `anti_bot_blocked` (WAF/fingerprint).
+6. Some videos have **no CC/AI subtitles** at all; follow-up enrichment will show `subtitle_unavailable` (not a network or login failure).
 
 ### Logging
 
@@ -225,7 +226,7 @@ Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if
 
 **Connectors (Milestone 1):**
 
-- **Bilibili** is **metadata-first** (title, description, views, etc. via public APIs). There is **no** transcript or deep video understanding; items are labeled lower confidence when content is thin (see [`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)).
+- **Bilibili** is **metadata-first** at digest time; follow-up enrichment can add transcripts when subtitle tracks exist. Many videos have no published CC/AI subtitles (`subtitle_unavailable`). Items are labeled lower confidence when content is thin (see [`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)).
 
 **Milestone 2 tool layer:**
 

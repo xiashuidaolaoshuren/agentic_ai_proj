@@ -371,6 +371,39 @@ def test_get_source_trace_auth_required_caveat_is_actionable(tmp_path: Path) -> 
     assert any("digest-time metadata only" in c.lower() for c in obs.caveats)
 
 
+def test_get_source_trace_subtitle_unavailable_caveat_is_explicit(tmp_path: Path) -> None:
+    store, _ = _seed_bilibili_followup_store(tmp_path)
+    baseline = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        raw_snippet="thin search description",
+        tags=["bilibili", "video"],
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    warning = ConnectorWarning(
+        connector="bilibili",
+        code="subtitle_unavailable",
+        message="Bilibili enrich subtitle (BV1demo00001): this video has no published subtitle/CC tracks.",
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(baseline, [warning]))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="BV1demo00001",
+            bilibili_connector=mock_connector,
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert any("no published subtitle/CC tracks" in c for c in obs.caveats)
+    assert any("not a proxy, WAF, or login issue" in c for c in obs.caveats)
+
+
 def test_get_source_trace_anti_bot_caveat_is_actionable(tmp_path: Path) -> None:
     store, _ = _seed_bilibili_followup_store(tmp_path)
     baseline = NewsItem(

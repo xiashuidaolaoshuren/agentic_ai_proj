@@ -283,6 +283,17 @@ def _format_warning_caveat(warning: ConnectorWarning) -> str:
             "Bilibili request failed because the configured HTTP proxy is unreachable. "
             f"{warning.message}"
         )
+    if warning.code == "subtitle_unavailable":
+        return (
+            "Bilibili transcript unavailable: the video has no published subtitle/CC "
+            f"tracks at source (not a proxy, WAF, or login issue). {warning.message} "
+            f"{ranking_note}"
+        )
+    if warning.code == "subtitle_fetch_failed":
+        return (
+            "Bilibili transcript unavailable: subtitle tracks were listed but download "
+            f"or parsing failed. {warning.message} {ranking_note}"
+        )
     if warning.code == "cookies_not_loaded":
         return f"{warning.connector}:{warning.code} — {warning.message}"
     return f"{warning.connector}:{warning.code} — {warning.message}"

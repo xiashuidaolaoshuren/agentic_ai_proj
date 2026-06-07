@@ -532,6 +532,19 @@ def test_enrich_ai_conclusion_populates_snippet() -> None:
     asyncio.run(main())
 
 
+def test_pick_subtitle_track_url_supports_subtitles_key() -> None:
+    from ai_news_agent.connectors.bilibili import _pick_subtitle_track_url
+
+    url = _pick_subtitle_track_url(
+        {
+            "subtitles": [
+                {"lan": "ai-zh", "subtitle_url": "//example.com/sub.json"},
+            ]
+        }
+    )
+    assert url == "https://example.com/sub.json"
+
+
 def test_enrich_subtitle_api_failure_graceful() -> None:
     async def main() -> None:
         mock_video = MagicMock()
@@ -542,6 +555,7 @@ def test_enrich_subtitle_api_failure_graceful() -> None:
         )
         mock_video.get_related = AsyncMock(return_value=[])
         mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(return_value={"subtitles": []})
 
         baseline = NewsItem(
             source=SourceKind.BILIBILI,
@@ -568,7 +582,7 @@ def test_enrich_subtitle_api_failure_graceful() -> None:
             item, warnings = await conn.enrich_news_item(baseline, ["AI"])
 
         assert item.source_id == "BV1demo00001"
-        assert any(w.code == "enrichment_partial" for w in warnings)
+        assert any(w.code == "subtitle_unavailable" for w in warnings)
         assert "Tags:" in (item.raw_snippet or "")
 
     asyncio.run(main())
@@ -716,6 +730,147 @@ def test_enrich_subtitle_fallback_without_cookies_uses_track_url() -> None:
 
         assert not any(w.code.startswith("auth_required") for w in warnings)
         assert "GitHub Copilot and Claude Code" in (item.raw_snippet or "")
+
+    asyncio.run(main())
+
+
+def test_enrich_subtitle_fallback_uses_subtitles_key() -> None:
+    body = [{"from": 0.0, "to": 2.0, "content": "NVIDIA Nemotron release notes"}]
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(
+            return_value={
+                "subtitles": [
+                    {
+                        "lan": "ai-zh",
+                        "subtitle_url": "//example.com/sub.json",
+                    }
+                ]
+            }
+        )
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1aJ7z6yEad",
+            url="https://www.bilibili.com/video/BV1aJ7z6yEad",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=ArgsException("没有找到指定字幕"),
+            ),
+            patch("ai_news_agent.connectors.bilibili.Api") as mock_api_cls,
+        ):
+            mock_api = MagicMock()
+            mock_api.request = AsyncMock(return_value={"body": body})
+            mock_api_cls.return_value = mock_api
+            conn = BilibiliConnector(credential=None)
+            item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert "NVIDIA Nemotron release notes" in (item.raw_snippet or "")
+        assert not any(w.code == "subtitle_unavailable" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_subtitle_unavailable_when_no_tracks() -> None:
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(return_value={"subtitles": []})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1Wu7m6WEQ6",
+            url="https://www.bilibili.com/video/BV1Wu7m6WEQ6",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=ArgsException("没有找到指定字幕"),
+            ),
+        ):
+            conn = BilibiliConnector()
+            _item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert any(w.code == "subtitle_unavailable" for w in warnings)
+        assert not any(w.code == "enrichment_partial" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_subtitle_fetch_failed_when_tracks_present() -> None:
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(
+            return_value={
+                "subtitles": [
+                    {"lan": "ai-zh", "subtitle_url": "//example.com/sub.json"},
+                ]
+            }
+        )
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1demo00001",
+            url="https://www.bilibili.com/video/BV1demo00001",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=NetworkException(503, "subtitle down"),
+            ),
+            patch("ai_news_agent.connectors.bilibili.Api") as mock_api_cls,
+        ):
+            mock_api = MagicMock()
+            mock_api.request = AsyncMock(side_effect=NetworkException(503, "download failed"))
+            mock_api_cls.return_value = mock_api
+            conn = BilibiliConnector()
+            _item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert any(w.code == "subtitle_fetch_failed" for w in warnings)
 
     asyncio.run(main())
 

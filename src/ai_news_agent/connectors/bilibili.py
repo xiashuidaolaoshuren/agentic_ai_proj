@@ -978,6 +978,8 @@ class BilibiliConnector:
         cid: int,
         bvid: str,
     ) -> tuple[str | None, ConnectorWarning | None]:
+        operation = f"enrich subtitle ({bvid})"
+        ass_exc: BaseException | None = None
         try:
             subtitle_obj = await ass.request_subtitle(
                 obj=v,
@@ -991,19 +993,32 @@ class BilibiliConnector:
                 if transcript:
                     return transcript, None
         except Exception as exc:
-            fallback = await _fetch_transcript_from_track_url(v, cid=cid)
-            if fallback:
-                return fallback, None
-            return None, _warning_from_exception(
-                exc,
-                operation=f"enrich subtitle ({bvid})",
-                failure_code="enrichment_partial",
-            )
+            ass_exc = exc
 
         fallback = await _fetch_transcript_from_track_url(v, cid=cid)
         if fallback:
             return fallback, None
-        return None, None
+
+        if ass_exc is None:
+            return None, None
+
+        tracks = await _load_subtitle_tracks(v, cid=cid)
+        detail = str(ass_exc)[:300]
+        if _is_auth_required_error(ass_exc) and not tracks:
+            return None, _warning_from_exception(
+                ass_exc,
+                operation=operation,
+                failure_code="enrichment_partial",
+            )
+        if not tracks:
+            return None, _subtitle_unavailable_warning(
+                operation=operation,
+                detail=detail,
+            )
+        return None, _subtitle_fetch_failed_warning(
+            operation=operation,
+            detail=detail,
+        )
 
     async def _get_cid(self, bvid: str) -> int | None:
         """Resolve first-page CID for future subtitle/transcript work."""
@@ -1123,6 +1138,45 @@ def _format_related_summary(raw: Any, *, limit: int = 3) -> str:
     return "; ".join(parts)
 
 
+async def _load_subtitle_tracks(v: video.Video, *, cid: int) -> list[dict[str, Any]]:
+    try:
+        raw_sub = await v.get_subtitle(cid=cid)
+    except Exception:
+        return []
+    return _subtitle_tracks_from_payload(raw_sub)
+
+
+def _subtitle_unavailable_warning(
+    *,
+    operation: str,
+    detail: str | None = None,
+) -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="bilibili",
+        code="subtitle_unavailable",
+        message=(
+            f"Bilibili {operation}: this video has no published subtitle/CC tracks."
+        ),
+        detail=detail,
+    )
+
+
+def _subtitle_fetch_failed_warning(
+    *,
+    operation: str,
+    detail: str | None = None,
+) -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="bilibili",
+        code="subtitle_fetch_failed",
+        message=(
+            f"Bilibili {operation}: subtitle tracks were listed but transcript download "
+            "or parsing failed. Retry later or try another video."
+        ),
+        detail=detail,
+    )
+
+
 async def _fetch_transcript_from_track_url(v: video.Video, *, cid: int) -> str | None:
     """Fallback transcript fetch via public subtitle track URL (no login cookies)."""
     try:
@@ -1144,27 +1198,35 @@ async def _fetch_transcript_from_track_url(v: video.Video, *, cid: int) -> str |
     return _extract_transcript_text(body)
 
 
-def _pick_subtitle_track_url(raw_sub: Any) -> str | None:
+def _subtitle_tracks_from_payload(raw_sub: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_sub, dict):
-        return None
-    tracks = raw_sub.get("list")
-    if not isinstance(tracks, list) or not tracks:
+        return []
+    for key in ("subtitles", "list"):
+        raw_tracks = raw_sub.get(key)
+        if not isinstance(raw_tracks, list) or not raw_tracks:
+            continue
+        tracks = [track for track in raw_tracks if isinstance(track, dict)]
+        if tracks:
+            return tracks
+    return []
+
+
+def _pick_subtitle_track_url(raw_sub: Any) -> str | None:
+    tracks = _subtitle_tracks_from_payload(raw_sub)
+    if not tracks:
         return None
 
     preferred_codes = ("ai-zh", "zh-CN", "zh-Hans", "zh")
     chosen: dict[str, Any] | None = None
     for code in preferred_codes:
         for track in tracks:
-            if isinstance(track, dict) and track.get("lan") == code:
+            if track.get("lan") == code:
                 chosen = track
                 break
         if chosen is not None:
             break
     if chosen is None:
-        first = tracks[0]
-        chosen = first if isinstance(first, dict) else None
-    if chosen is None:
-        return None
+        chosen = tracks[0]
 
     url = str(chosen.get("subtitle_url") or "").strip()
     if not url:
