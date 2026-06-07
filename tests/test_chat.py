@@ -985,9 +985,9 @@ def test_chat_tool_agent_not_called_for_digest_request(tmp_path) -> None:
 def test_resolve_digest_request_timeframe_defaults_last_7_days_for_bilibili_channel() -> None:
     from ai_news_agent.digest_request_builder import resolve_digest_request
 
-    req = resolve_digest_request("Digest bilibili channel 123456789")
+    req = resolve_digest_request("Digest bilibili channel 285286947")
 
-    assert req.bilibili_target_channels == ["123456789"]
+    assert req.bilibili_target_channels == ["285286947"]
     assert req.timeframe == "last_7_days"
 
 
@@ -996,7 +996,7 @@ def test_resolve_digest_request_preserves_explicit_timeframe_for_bilibili_channe
 ):
     from ai_news_agent.digest_request_builder import resolve_digest_request
 
-    req = resolve_digest_request("Digest bilibili channel 123456789 last 30 days")
+    req = resolve_digest_request("Digest bilibili channel 285286947 last 30 days")
 
     assert req.timeframe == "last_30_days"
 

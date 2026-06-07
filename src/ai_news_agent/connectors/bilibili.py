@@ -13,6 +13,7 @@ from typing import Any
 from bilibili_api import Credential, ass, search, user, video
 from bilibili_api.exceptions import ArgsException, NetworkException, ResponseCodeException
 from bilibili_api.search import SearchObjectType
+from bilibili_api.utils.network import Api
 from bilibili_api.video_zone import VideoZoneTypes
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
@@ -26,6 +27,10 @@ _BVID_API_PATTERN = re.compile(r"^BV[0-9A-Za-z]{10}$", re.IGNORECASE)
 
 _RAW_SNIPPET_MAX_LEN = 6000
 _TRANSCRIPT_MAX_CHARS = 3000
+_BILIBILI_AUTH_ENV_HINT = (
+    "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 in .env "
+    "(browser cookies from bilibili.com)."
+)
 
 
 def _dedupe_warnings(warnings: list[ConnectorWarning]) -> list[ConnectorWarning]:
@@ -116,6 +121,118 @@ def _item_within_timeframe(item: NewsItem, timeframe: str | None) -> bool:
     return start <= item.published_at < end_exclusive
 
 
+def _is_auth_required_error(exc: BaseException) -> bool:
+    if isinstance(exc, ResponseCodeException):
+        code = getattr(exc, "code", None)
+        if code in (-101, 101):
+            return True
+        msg = str(getattr(exc, "msg", exc) or exc)
+        if "未登录" in msg or "not login" in msg.lower():
+            return True
+    if isinstance(exc, ArgsException):
+        text = str(exc)
+        if "sessdata" in text.lower() or "credential" in text.lower():
+            return True
+    text = str(exc)
+    lower = text.lower()
+    return "sessdata" in lower or "未登录" in text or "not login" in lower
+
+
+def _is_proxy_connection_error(text: str) -> bool:
+    lower = text.lower()
+    if "failed to connect" not in lower and "could not connect" not in lower:
+        return False
+    return (
+        "proxy" in lower
+        or "127.0.0.1" in text
+        or "localhost" in lower
+        or "curl: (7)" in lower
+        or re.search(r"port \d+", lower) is not None
+    )
+
+
+def _proxy_connection_warning(
+    *,
+    operation: str,
+    detail: str | None = None,
+) -> ConnectorWarning:
+    import os
+
+    proxy = os.environ.get("BILIBILI_PROXY_URL", "").strip()
+    proxy_hint = f"Configured BILIBILI_PROXY_URL={proxy!r}. " if proxy else ""
+    return ConnectorWarning(
+        connector="bilibili",
+        code="proxy_connection_failed",
+        message=(
+            f"Bilibili {operation} could not connect via the HTTP proxy. "
+            f"{proxy_hint}"
+            "Start your proxy (e.g. Clash/V2Ray on that host:port) or remove "
+            "BILIBILI_PROXY_URL from .env and restart Gradio."
+        ),
+        detail=detail,
+    )
+
+
+def _anti_bot_blocked_warning(
+    *,
+    operation: str,
+    detail: str | None = None,
+) -> ConnectorWarning:
+    from ai_news_agent.env import bilibili_env_diagnostics
+
+    diag = bilibili_env_diagnostics()
+    cred_loaded = bool(diag.get("credential_available"))
+    network_hint = (
+        "Try BILIBILI_HTTP_CLIENT=curl_cffi, BILIBILI_IMPERSONATE=chrome131, "
+        "and/or BILIBILI_PROXY_URL in .env."
+    )
+    if cred_loaded:
+        message = (
+            f"Bilibili {operation} hit anti-bot/WAF challenge (HTTP 412 or HTML). "
+            "Login cookies appear loaded; this is likely network fingerprint or IP trust. "
+            f"{network_hint}"
+        )
+    else:
+        message = (
+            f"Bilibili {operation} blocked (anti-bot). "
+            "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 in .env, "
+            f"or use video URLs/channels. {network_hint}"
+        )
+    return ConnectorWarning(
+        connector="bilibili",
+        code="anti_bot_blocked",
+        message=message,
+        detail=detail,
+    )
+
+
+def _auth_required_warning(
+    *,
+    operation: str,
+    detail: str | None = None,
+    missing_cookies: bool,
+) -> ConnectorWarning:
+    if missing_cookies:
+        return ConnectorWarning(
+            connector="bilibili",
+            code="auth_required_missing",
+            message=(
+                f"Bilibili {operation} needs login cookies but none were loaded from the "
+                f"environment. {_BILIBILI_AUTH_ENV_HINT}"
+            ),
+            detail=detail,
+        )
+    return ConnectorWarning(
+        connector="bilibili",
+        code="auth_required_rejected",
+        message=(
+            f"Bilibili {operation}: login cookies were loaded but Bilibili rejected the "
+            "session (expired, invalid, or not logged in)."
+        ),
+        detail=detail,
+    )
+
+
 def _unwrap_payload(payload: Any) -> tuple[dict[str, Any], int, str | None]:
     """Normalize library/API dicts to ``(data, code, message)``."""
     if not isinstance(payload, dict):
@@ -140,14 +257,8 @@ def _warning_from_exception(
         msg = str(getattr(exc, "msg", exc) or exc)
         detail = str(getattr(exc, "raw", "") or "")[:300] or None
         if code in (-412, 412) or "412" in msg:
-            return ConnectorWarning(
-                connector="bilibili",
-                code="anti_bot_blocked",
-                message=(
-                    f"Bilibili {operation} blocked (anti-bot). "
-                    "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
-                    "in .env, or use video URLs/channels."
-                ),
+            return _anti_bot_blocked_warning(
+                operation=operation,
                 detail=detail or msg,
             )
         if code in (-429, 429):
@@ -157,24 +268,35 @@ def _warning_from_exception(
                 message=f"Bilibili {operation} rate limited",
                 detail=detail or msg,
             )
+        if code in (-101, 101) or "未登录" in msg or "not login" in msg.lower():
+            return _auth_required_warning(
+                operation=operation,
+                detail=detail or msg,
+                missing_cookies=False,
+            )
         return ConnectorWarning(
             connector="bilibili",
             code=failure_code,
             message=f"Bilibili {operation} returned code={code!r}",
             detail=detail or msg,
         )
+    if isinstance(exc, ArgsException) and _is_auth_required_error(exc):
+        return _auth_required_warning(
+            operation=operation,
+            detail=str(exc)[:300],
+            missing_cookies=True,
+        )
+    text = str(exc)
+    if _is_proxy_connection_error(text):
+        return _proxy_connection_warning(
+            operation=operation,
+            detail=text[:300],
+        )
     if isinstance(exc, NetworkException):
-        text = str(exc)
         lower = text.lower()
-        if "html" in lower or text.lstrip().startswith("<"):
-            return ConnectorWarning(
-                connector="bilibili",
-                code="anti_bot_blocked",
-                message=(
-                    f"Bilibili {operation} returned non-JSON (likely HTML challenge). "
-                    "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
-                    "in .env, or use video URLs/channels."
-                ),
+        if "html" in lower or text.lstrip().startswith("<") or "412" in text:
+            return _anti_bot_blocked_warning(
+                operation=operation,
                 detail=text[:300],
             )
         return ConnectorWarning(
@@ -182,6 +304,12 @@ def _warning_from_exception(
             code=failure_code,
             message=f"Bilibili {operation} request failed",
             detail=text[:300],
+        )
+    if _is_auth_required_error(exc):
+        return _auth_required_warning(
+            operation=operation,
+            detail=str(exc)[:300],
+            missing_cookies=True,
         )
     return ConnectorWarning(
         connector="bilibili",
@@ -225,6 +353,22 @@ class BilibiliConnector:
 
     async def collect(self, request: ConnectorRequest) -> ConnectorResult:
         warnings: list[ConnectorWarning] = []
+        if self._credential is None:
+            from ai_news_agent.env import bilibili_env_diagnostics
+
+            diag = bilibili_env_diagnostics()
+            warnings.append(
+                ConnectorWarning(
+                    connector=self.name(),
+                    code="cookies_not_loaded",
+                    message=(
+                        "Bilibili login cookies are not loaded from the environment "
+                        f"(dotenv_loaded={diag['dotenv_loaded']}, "
+                        f"dotenv_path={diag['dotenv_path']!r}, vars={diag['vars']}). "
+                        f"{_BILIBILI_AUTH_ENV_HINT}"
+                    ),
+                )
+            )
         bili_urls = list(request.bilibili_manual_urls) or list(request.manual_urls)
         bili_channels = list(request.bilibili_target_channels) or list(
             request.target_channels
@@ -743,30 +887,28 @@ class BilibiliConnector:
 
         transcript: str | None = None
         if cid is not None:
-            try:
-                subtitle_obj = await ass.request_subtitle(
-                    obj=v,
-                    cid=cid,
-                    lan_code="ai-zh",
-                    credential=self._credential,
-                )
-                segments = subtitle_obj.to_simple_json()
-                if isinstance(segments, list):
-                    transcript = _extract_transcript_text(segments)
-            except Exception as exc:
-                warnings.append(
-                    _warning_from_exception(
-                        exc,
-                        operation=f"enrich subtitle ({bvid})",
-                        failure_code="enrichment_partial",
-                    )
-                )
+            transcript, subtitle_warning = await self._fetch_transcript(
+                v,
+                cid=cid,
+                bvid=bvid,
+            )
+            if subtitle_warning is not None and transcript is None:
+                warnings.append(subtitle_warning)
 
         ai_conclusion: str | None = None
         if cid is not None:
             try:
                 raw_ai = await v.get_ai_conclusion(cid=cid)
-                ai_conclusion = _extract_ai_conclusion_text(raw_ai)
+                if isinstance(raw_ai, dict) and int(raw_ai.get("code", 0)) in (-101, 101):
+                    warnings.append(
+                        _auth_required_warning(
+                            operation=f"enrich ai_conclusion ({bvid})",
+                            detail=str(raw_ai.get("message") or raw_ai)[:300],
+                            missing_cookies=self._credential is None,
+                        )
+                    )
+                else:
+                    ai_conclusion = _extract_ai_conclusion_text(raw_ai)
             except Exception as exc:
                 warnings.append(
                     _warning_from_exception(
@@ -828,6 +970,40 @@ class BilibiliConnector:
             content_confidence=confidence,
         )
         return enriched, warnings
+
+    async def _fetch_transcript(
+        self,
+        v: video.Video,
+        *,
+        cid: int,
+        bvid: str,
+    ) -> tuple[str | None, ConnectorWarning | None]:
+        try:
+            subtitle_obj = await ass.request_subtitle(
+                obj=v,
+                cid=cid,
+                lan_code="ai-zh",
+                credential=self._credential,
+            )
+            segments = subtitle_obj.to_simple_json()
+            if isinstance(segments, list):
+                transcript = _extract_transcript_text(segments)
+                if transcript:
+                    return transcript, None
+        except Exception as exc:
+            fallback = await _fetch_transcript_from_track_url(v, cid=cid)
+            if fallback:
+                return fallback, None
+            return None, _warning_from_exception(
+                exc,
+                operation=f"enrich subtitle ({bvid})",
+                failure_code="enrichment_partial",
+            )
+
+        fallback = await _fetch_transcript_from_track_url(v, cid=cid)
+        if fallback:
+            return fallback, None
+        return None, None
 
     async def _get_cid(self, bvid: str) -> int | None:
         """Resolve first-page CID for future subtitle/transcript work."""
@@ -945,6 +1121,59 @@ def _format_related_summary(raw: Any, *, limit: int = 3) -> str:
             continue
         parts.append(f"{title} ({bvid})" if bvid else title)
     return "; ".join(parts)
+
+
+async def _fetch_transcript_from_track_url(v: video.Video, *, cid: int) -> str | None:
+    """Fallback transcript fetch via public subtitle track URL (no login cookies)."""
+    try:
+        raw_sub = await v.get_subtitle(cid=cid)
+    except Exception:
+        return None
+    subtitle_url = _pick_subtitle_track_url(raw_sub)
+    if not subtitle_url:
+        return None
+    try:
+        payload = await Api(url=subtitle_url, method="GET").request(raw=True)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    body = payload.get("body")
+    if not isinstance(body, list):
+        return None
+    return _extract_transcript_text(body)
+
+
+def _pick_subtitle_track_url(raw_sub: Any) -> str | None:
+    if not isinstance(raw_sub, dict):
+        return None
+    tracks = raw_sub.get("list")
+    if not isinstance(tracks, list) or not tracks:
+        return None
+
+    preferred_codes = ("ai-zh", "zh-CN", "zh-Hans", "zh")
+    chosen: dict[str, Any] | None = None
+    for code in preferred_codes:
+        for track in tracks:
+            if isinstance(track, dict) and track.get("lan") == code:
+                chosen = track
+                break
+        if chosen is not None:
+            break
+    if chosen is None:
+        first = tracks[0]
+        chosen = first if isinstance(first, dict) else None
+    if chosen is None:
+        return None
+
+    url = str(chosen.get("subtitle_url") or "").strip()
+    if not url:
+        return None
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return "https://" + url.lstrip("/")
 
 
 def _extract_transcript_text(

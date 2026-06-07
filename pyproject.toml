@@ -27,6 +27,7 @@ dependencies = [
   "langgraph>=1.0,<2.0",
   "gradio>=4.0",
   "python-dotenv>=1.0",
+  "curl-cffi>=0.15.0",
 ]
 
 [project.scripts]

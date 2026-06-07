@@ -121,6 +121,11 @@ async def get_source_trace(
             topics,
         )
         enrich_caveats = _warning_caveats(enrich_ws)
+        if enrich_caveats:
+            enrich_caveats.append(
+                "Ranking confidence adjustments (e.g. confidence_adj in score breakdown) "
+                "reflect digest-time metadata only; follow-up enrichment does not re-rank items."
+            )
         if ctx.run_id is not None:
             store.upsert_news_item(ctx.run_id, news_item)
 
@@ -245,7 +250,42 @@ def _not_found_summary(*, rank: int | None, source_id: str | None) -> str:
 
 
 def _warning_caveats(warnings: list[ConnectorWarning]) -> list[str]:
-    return [f"{w.connector}:{w.code} — {w.message}" for w in warnings]
+    caveats: list[str] = []
+    for warning in warnings:
+        caveats.append(_format_warning_caveat(warning))
+    return caveats
+
+
+def _format_warning_caveat(warning: ConnectorWarning) -> str:
+    ranking_note = (
+        "Digest ranking confidence scores are from collection time and are not "
+        "updated by follow-up enrichment."
+    )
+    if warning.code == "auth_required_missing":
+        return (
+            "Bilibili subtitle/AI summary unavailable: login cookies were not loaded "
+            f"from the environment. {warning.message} {ranking_note}"
+        )
+    if warning.code in ("auth_required_rejected", "auth_required"):
+        return (
+            "Bilibili subtitle/AI summary unavailable: login cookies were loaded but "
+            f"Bilibili rejected the session (expired or invalid). {warning.message} "
+            f"{ranking_note}"
+        )
+    if warning.code == "anti_bot_blocked":
+        return (
+            "Bilibili anti-bot/WAF challenge blocked this request. "
+            f"{warning.message} "
+            "This can occur even when login cookies are configured."
+        )
+    if warning.code == "proxy_connection_failed":
+        return (
+            "Bilibili request failed because the configured HTTP proxy is unreachable. "
+            f"{warning.message}"
+        )
+    if warning.code == "cookies_not_loaded":
+        return f"{warning.connector}:{warning.code} — {warning.message}"
+    return f"{warning.connector}:{warning.code} — {warning.message}"
 
 
 def _resolve_entry(

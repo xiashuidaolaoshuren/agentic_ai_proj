@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_news_agent.connectors.base import SourceConnector
+from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
 from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
 from ai_news_agent.tools.followup import (
@@ -104,6 +105,8 @@ def build_tool_registry(
     ) -> ToolObservation:
         from ai_news_agent.connectors.bilibili import BilibiliConnector
 
+        load_local_env(force_reload=True)
+        configure_bilibili_network_from_env()
         connector = bilibili_factory()
         bilibili = connector if isinstance(connector, BilibiliConnector) else None
         return await get_source_trace(
@@ -139,6 +142,8 @@ def build_tool_registry(
         max_results: int = 5,
         timeframe: str | None = None,
     ) -> ToolObservation:
+        load_local_env(force_reload=True)
+        configure_bilibili_network_from_env()
         connector = bilibili_factory()
         return await search_bilibili_ai_news(
             connector=connector,

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bilibili_api.exceptions import NetworkException, ResponseCodeException
+from bilibili_api.exceptions import ArgsException, NetworkException, ResponseCodeException
 from bilibili_api.search import SearchObjectType
 
 from ai_news_agent.connectors.base import ConnectorRequest
@@ -619,6 +619,190 @@ def test_enriched_snippet_is_length_bounded() -> None:
 
         assert item.raw_snippet is not None
         assert len(item.raw_snippet) <= 6000
+
+    asyncio.run(main())
+
+
+
+
+def test_enrich_subtitle_auth_required_maps_to_auth_required_code() -> None:
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(return_value={"list": []})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1aJ7z6yEad",
+            url="https://www.bilibili.com/video/BV1aJ7z6yEad",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=ArgsException("Credential missing sessdata"),
+            ),
+        ):
+            conn = BilibiliConnector(credential=None)
+            item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert item.source_id == "BV1aJ7z6yEad"
+        assert any(w.code == "auth_required_missing" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_subtitle_fallback_without_cookies_uses_track_url() -> None:
+    body = [{"from": 0.0, "to": 2.0, "content": "GitHub Copilot and Claude Code"}]
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={})
+        mock_video.get_subtitle = AsyncMock(
+            return_value={
+                "list": [
+                    {
+                        "lan": "ai-zh",
+                        "subtitle_url": "//example.com/sub.json",
+                    }
+                ]
+            }
+        )
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1aJ7z6yEad",
+            url="https://www.bilibili.com/video/BV1aJ7z6yEad",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                side_effect=ArgsException("Credential missing sessdata"),
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.Api",
+            ) as mock_api_cls,
+        ):
+            mock_api = MagicMock()
+            mock_api.request = AsyncMock(return_value={"body": body})
+            mock_api_cls.return_value = mock_api
+            conn = BilibiliConnector(credential=None)
+            item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert not any(w.code.startswith("auth_required") for w in warnings)
+        assert "GitHub Copilot and Claude Code" in (item.raw_snippet or "")
+
+    asyncio.run(main())
+
+
+def test_enrich_ai_conclusion_auth_required_from_response_code(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("BILIBILI_SESSDATA", raising=False)
+    monkeypatch.delenv("BILIBILI_BILI_JCT", raising=False)
+    monkeypatch.delenv("BILIBILI_BUVID3", raising=False)
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={"code": -101, "message": "未登录"})
+        mock_video.get_subtitle = AsyncMock(return_value={"list": []})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1aJ7z6yEad",
+            url="https://www.bilibili.com/video/BV1aJ7z6yEad",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        with (
+            patch("ai_news_agent.connectors.bilibili.video.Video", return_value=mock_video),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
+        ):
+            conn = BilibiliConnector(credential=None)
+            _item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert any(w.code == "auth_required_missing" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_ai_conclusion_rejected_when_credential_present() -> None:
+    from bilibili_api import Credential
+
+    async def main() -> None:
+        mock_video = MagicMock()
+        mock_video.get_info = AsyncMock(return_value={})
+        mock_video.get_tags = AsyncMock(return_value=[])
+        mock_video.get_pages = AsyncMock(
+            return_value=[{"page": 1, "part": "Main", "cid": 111, "duration": 600}]
+        )
+        mock_video.get_related = AsyncMock(return_value=[])
+        mock_video.get_ai_conclusion = AsyncMock(return_value={"code": -101, "message": "未登录"})
+
+        baseline = NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1aJ7z6yEad",
+            url="https://www.bilibili.com/video/BV1aJ7z6yEad",
+            title="Video",
+            collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+            raw_snippet="thin",
+            tags=["bilibili", "video"],
+            content_confidence=ConfidenceLevel.LOW,
+        )
+        cred = Credential(sessdata="s", bili_jct="j", buvid3="b")
+        with (
+            patch(
+                "ai_news_agent.connectors.bilibili.video.Video",
+                return_value=mock_video,
+            ),
+            patch(
+                "ai_news_agent.connectors.bilibili.ass.request_subtitle",
+                new_callable=AsyncMock,
+                return_value=_mock_ass_subtitle_object(),
+            ),
+        ):
+            conn = BilibiliConnector(credential=cred)
+            _item, warnings = await conn.enrich_news_item(baseline, ["AI"])
+
+        assert any(w.code == "auth_required_rejected" for w in warnings)
 
     asyncio.run(main())
 

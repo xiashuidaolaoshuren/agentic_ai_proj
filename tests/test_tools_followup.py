@@ -336,6 +336,77 @@ def test_get_source_trace_lazy_enrich_partial_failure_surfaces_caveats(
     assert any("enrichment_partial" in c for c in obs.caveats)
 
 
+
+
+def test_get_source_trace_auth_required_caveat_is_actionable(tmp_path: Path) -> None:
+    store, _ = _seed_bilibili_followup_store(tmp_path)
+    baseline = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        raw_snippet="thin search description",
+        tags=["bilibili", "video"],
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    warning = ConnectorWarning(
+        connector="bilibili",
+        code="auth_required_missing",
+        message="Bilibili enrich ai_conclusion (BV1demo00001) needs login cookies but none were loaded.",
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(baseline, [warning]))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="BV1demo00001",
+            bilibili_connector=mock_connector,
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert any("cookies were not loaded from the environment" in c for c in obs.caveats)
+    assert any("digest-time metadata only" in c.lower() for c in obs.caveats)
+
+
+def test_get_source_trace_anti_bot_caveat_is_actionable(tmp_path: Path) -> None:
+    store, _ = _seed_bilibili_followup_store(tmp_path)
+    baseline = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1demo00001",
+        url="https://www.bilibili.com/video/BV1demo00001",
+        title="Bilibili video",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        raw_snippet="thin search description",
+        tags=["bilibili", "video"],
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    warning = ConnectorWarning(
+        connector="bilibili",
+        code="anti_bot_blocked",
+        message=(
+            "Bilibili uploader videos hit anti-bot/WAF challenge. "
+            "Try BILIBILI_HTTP_CLIENT=curl_cffi and BILIBILI_PROXY_URL."
+        ),
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(baseline, [warning]))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="BV1demo00001",
+            bilibili_connector=mock_connector,
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert any("anti-bot/WAF challenge" in c for c in obs.caveats)
+    assert any("even when login cookies are configured" in c for c in obs.caveats)
+
+
 def test_get_ranking_explanation_empty_store(tmp_path: Path) -> None:
     store = DigestStore(tmp_path / "rank-empty.db")
     store.init_schema()

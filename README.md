@@ -45,6 +45,10 @@ Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never c
 | `BILIBILI_SESSDATA` | Optional | Bilibili session token ([`env.py`](src/ai_news_agent/env.py)) |
 | `BILIBILI_BILI_JCT` | Optional | Bilibili CSRF token (often required with `SESSDATA`) |
 | `BILIBILI_BUVID3` | Optional | Bilibili device id cookie (helps avoid HTTP 412) |
+| `BILIBILI_HTTP_CLIENT` | Optional | `curl_cffi`, `httpx`, or `aiohttp` (if installed in bilibili-api) |
+| `BILIBILI_PROXY_URL` | Optional | HTTP proxy for bilibili-api requests |
+| `BILIBILI_IMPERSONATE` | Optional | Browser TLS fingerprint for `curl_cffi` (e.g. `chrome131`) |
+| `BILIBILI_TIMEOUT_SECONDS` | Optional | Request timeout override for bilibili-api |
 
 SQLite defaults to `./digest.sqlite` in the current working directory unless you pass `--db-path`. Database files matching `*.db` are gitignored.
 
@@ -167,11 +171,20 @@ Examples:
 
 - `Digest https://github.com/langchain-ai/langgraph`
 - `Digest https://www.bilibili.com/video/BV1xxxxx`
-- `Digest bilibili channel 123456789`
+- `Digest bilibili channel 285286947`
 - `Digest github user openai and https://www.bilibili.com/video/BV1demo0001`
 - `Give me today's AI digest` (default topics + timeframe when mentioned)
 
-If Bilibili requests fail with HTTP 412, set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` (from browser cookies), restart Gradio, or prefer specific video URLs. After a run, ask **show caveats** to see connector warnings.
+If Bilibili requests fail with HTTP 412:
+
+1. Confirm startup log shows `bilibili env: ... credential_available=True`.
+2. If cookies are missing, set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` (from browser cookies).
+3. If cookies are loaded but you still see `anti_bot_blocked`, tune network settings:
+   - `BILIBILI_HTTP_CLIENT=curl_cffi` (when installed)
+   - `BILIBILI_IMPERSONATE=chrome131`
+   - `BILIBILI_PROXY_URL=http://127.0.0.1:7890` (or your proxy)
+4. Prefer specific video URLs when channel feeds are blocked.
+5. After a run, ask **show caveats** to distinguish `auth_required_*` (login) vs `anti_bot_blocked` (WAF/fingerprint).
 
 ### Logging
 
