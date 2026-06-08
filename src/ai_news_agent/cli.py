@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ai_news_agent.connectors.base import SourceConnector
-from ai_news_agent.env import load_local_env
+from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
@@ -162,6 +162,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     """CLI entry. Returns process exit code."""
     load_local_env()
+    configure_bilibili_network_from_env()
     configure_logging()
     out = stdout or sys.stdout
     args = argv if argv is not None else sys.argv[1:]

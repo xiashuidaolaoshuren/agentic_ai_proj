@@ -11,19 +11,25 @@ from typing import Any
 import gradio as gr
 
 from ai_news_agent.chat import ChatService
-from ai_news_agent.env import load_local_env
+from ai_news_agent.env import (
+    configure_bilibili_network_from_env,
+    load_local_env,
+    log_bilibili_env_diagnostics,
+)
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest, run_digest_streaming
-from ai_news_agent.llm import build_chat_model
+from ai_news_agent.llm import build_chat_model, build_tool_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     FakeDigestModel,
+    build_connector_factory,
     build_connectors,
 )
 from ai_news_agent.storage import DigestStore
+from ai_news_agent.tools import build_tool_agent_runner, build_tool_registry
 
 _UI_ERROR_MESSAGE = (
     "Something went wrong while processing your request. "
@@ -34,11 +40,31 @@ _EXAMPLE_ROWS: list[list] = [
     ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
     ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
     ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest bilibili channel 123456789", list(DEFAULT_SOURCE_NAMES)],
+    ["Digest bilibili channel 285286947", list(DEFAULT_SOURCE_NAMES)],
     ["show sources", list(DEFAULT_SOURCE_NAMES)],
 ]
 
 logger = get_logger("gradio")
+
+_FAKE_TOOL_AGENT_REPLY = (
+    "Offline fake tool agent: use structured prompts like "
+    '"show sources", "study first", or "show caveats".'
+)
+
+
+class _FakeToolAgentRunner:
+    """Deterministic tool agent for Gradio --fake mode (no tool-calling model)."""
+
+    async def run(self, question: str) -> str:  # noqa: ARG002
+        return _FAKE_TOOL_AGENT_REPLY
+
+    async def run_streaming(
+        self, question: str
+    ) -> AsyncIterator[tuple[str, bool, str | None]]:
+        del question
+        yield "Calling load_latest_digest…", False, None
+        yield "Done load_latest_digest: Loaded latest digest.", False, None
+        yield "", True, _FAKE_TOOL_AGENT_REPLY
 
 
 async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
@@ -91,16 +117,30 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
 
     if fake:
         model: Any = FakeDigestModel()
+        tool_agent_runner: Any = _FakeToolAgentRunner()
     else:
         model = build_chat_model()
+        registry = build_tool_registry(
+            store=store,
+            github_factory=build_connector_factory(fake=fake, name="github"),
+            bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
+        )
+        tool_model = build_tool_chat_model()
+        tool_agent_runner = build_tool_agent_runner(registry=registry, model=tool_model)
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
+        if not fake:
+            load_local_env(force_reload=True)
+            configure_bilibili_network_from_env(logger)
         connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
     async def streaming_workflow_runner(
         req: DigestRequest,
     ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+        if not fake:
+            load_local_env(force_reload=True)
+            configure_bilibili_network_from_env(logger)
         connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
         async for event in _run_digest_streaming_async(
             req,
@@ -115,6 +155,7 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         workflow_runner=workflow_runner,
         streaming_workflow_runner=streaming_workflow_runner,
         chat_model=model,
+        tool_agent_runner=tool_agent_runner,
     )
 
 
@@ -205,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
         ns.db_path,
         ns.port,
     )
+    if not ns.fake:
+        log_bilibili_env_diagnostics(logger)
+        configure_bilibili_network_from_env(logger)
 
     try:
         service = _build_service(fake=ns.fake, db_path=ns.db_path)

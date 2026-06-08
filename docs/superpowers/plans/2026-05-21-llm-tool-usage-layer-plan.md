@@ -81,7 +81,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T1 - Dependencies And Tool Schema Foundation
 
-- [ ] **Do:** Add explicit dependencies for the tool-calling implementation and create shared schema/serialization helpers for tool inputs and observations. Keep outputs compact, JSON-safe, and easy for the LLM to quote.
+- [X] **Do:** Add explicit dependencies for the tool-calling implementation and create shared schema/serialization helpers for tool inputs and observations. Keep outputs compact, JSON-safe, and easy for the LLM to quote.
 - **TDD suitable:** partial - schema behavior is testable first; dependency metadata is declarative and verified by import/tests.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_schemas.py` and `uv run python -c "from ai_news_agent.tools import build_tool_registry"`
@@ -89,7 +89,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 - Follow-Up Inspection Tools
 
-- [ ] **Do:** Implement `load_latest_digest`, `get_digest_item`, `get_source_trace`, and `get_ranking_explanation` over `DigestStore.get_latest_followup_context()`. Tools should return structured observations for happy paths, empty store, missing rank/item, and caveat/warning cases.
+- [X] **Do:** Implement `load_latest_digest`, `get_digest_item`, `get_source_trace`, and `get_ranking_explanation` over `DigestStore.get_latest_followup_context()`. Tools should return structured observations for happy paths, empty store, missing rank/item, and caveat/warning cases.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_followup.py tests/test_storage.py`
@@ -97,7 +97,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 - Connector Tool Wrappers
 
-- **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
+- [X] **Do:** Implement `search_github_ai_news` and `search_bilibili_ai_news` wrappers that build `ConnectorRequest`, call the selected connector through the existing protocol, serialize `NewsItem`/warnings, and convert connector exceptions into caveat observations.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_connectors.py tests/test_connector_contracts.py`
@@ -105,7 +105,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 - Tool Registry And Connector Lifecycle
 
-- [ ] **Do:** Build a registry that exposes stable tool names/descriptions/schemas and injects `DigestStore` plus connector factories. Ensure connector tools can create and close connectors per call when needed, so Gradio does not keep stale network clients alive.
+- [X] **Do:** Build a registry that exposes stable tool names/descriptions/schemas and injects `DigestStore` plus connector factories. Ensure connector tools can create and close connectors per call when needed, so Gradio does not keep stale network clients alive.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_registry.py tests/test_sources.py`
@@ -113,7 +113,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 - Bounded LangGraph Tool Agent
 
-- [ ] **Do:** Create the LangGraph tool-calling runner used by follow-up chat. The runner should bind tools to the model, route model tool calls to a tool execution node, cap tool-call iterations, log tool call start/end/failure, and return a final grounded answer or graceful fallback.
+- [X] **Do:** Create the LangGraph tool-calling runner used by follow-up chat. The runner should bind tools to the model, route model tool calls to a tool execution node, cap tool-call iterations, log tool call start/end/failure, and return a final grounded answer or graceful fallback.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py`
@@ -121,7 +121,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 - Tool-Capable Model Factory
 
-- [ ] **Do:** Add a model factory for Milestone 2 tool calling while preserving the current summarization model contract. Prefer a small new factory over changing `build_chat_model()` behavior in place.
+- [X] **Do:** Add a model factory for Milestone 2 tool calling while preserving the current summarization model contract. Prefer a small new factory over changing `build_chat_model()` behavior in place.
 - **TDD suitable:** partial - factory/import behavior is testable; live provider compatibility remains manual or smoke-tested with real credentials.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py tests/test_summarizer.py` and optional manual run with configured `OPENAI_*`
@@ -129,7 +129,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 - ChatService Integration
 
-- [ ] **Do:** Add optional tool-agent injection to `ChatService`. Digest requests still use the deterministic workflow; existing structured follow-ups may remain fast deterministic answers; open-ended follow-ups and source-exploration questions use the tool agent when configured, then fall back to the existing LLM/fallback path.
+- [X] **Do:** Add optional tool-agent injection to `ChatService`. Digest requests still use the deterministic workflow; existing structured follow-ups may remain fast deterministic answers; open-ended follow-ups and source-exploration questions use the tool agent when configured, then fall back to the existing LLM/fallback path.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_chat.py tests/test_streaming.py`
@@ -137,7 +137,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 - Gradio Wiring
 
-- [ ] **Do:** Construct the Milestone 2 tool registry/agent in `_build_service()` and inject it into `ChatService` while preserving streaming digest behavior, source toggles, and fake mode. Fake mode may use a deterministic fake tool agent instead of a real tool-calling model.
+- [X] **Do:** Construct the Milestone 2 tool registry/agent in `_build_service()` and inject it into `ChatService` while preserving streaming digest behavior, source toggles, and fake mode. Fake mode may use a deterministic fake tool agent instead of a real tool-calling model.
 - **TDD suitable:** partial - service construction and routing are testable; visual/UI behavior remains a smoke/manual check.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_gradio_app.py tests/test_chat.py`
@@ -145,7 +145,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T9 - Documentation And Examples
 
-- [ ] **Do:** Update README usage notes with Milestone 2 behavior, example prompts, fake-mode limitations, and the distinction between deterministic digest generation and tool-using follow-up/source exploration.
+- [X] **Do:** Update README usage notes with Milestone 2 behavior, example prompts, fake-mode limitations, and the distinction between deterministic digest generation and tool-using follow-up/source exploration.
 - **TDD suitable:** no - documentation-only work.
 - **Plan mode:** skip
 - **Verification:** Review rendered markdown and run `uv run pytest tests/test_mvp_smoke.py`
@@ -153,7 +153,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10 - Milestone 2 Regression Sweep
 
-- [ ] **Do:** Run the focused Milestone 2 tests plus the existing MVP regression suite. Fix any plan gaps discovered by integration, updating this plan before continuing if the file map or task order changes.
+- [X] **Do:** Run the focused Milestone 2 tests plus the existing MVP regression suite. Fix any plan gaps discovered by integration, updating this plan before continuing if the file map or task order changes.
 - **TDD suitable:** no - verification and stabilization pass.
 - **Plan mode:** skip
 - **Verification:** `uv run pytest`
@@ -164,3 +164,4 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 | Date | Change |
 | --- | --- |
 | 2026-05-21 | Initial Milestone 2 implementation plan for hybrid LLM tool usage layer |
+| 2026-05-29 | T10 regression sweep: Stage A (94 passed), full `pytest` (221 passed, 2 skipped); fixed stale `test_tools_package_exports_build_tool_registry` in `test_tools_schemas.py`. `test_mvp_smoke.py` remains M1-focused (digest + structured follow-up); M2 tool-agent routing covered by `test_chat.py` and `test_gradio_app.py`. T9 README updated. |

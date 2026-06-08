@@ -8,6 +8,17 @@ from ai_news_agent.intent import parse_connector_names_from_message, parse_diges
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import normalize_source_names
 
+_BILIBILI_CHANNEL_DEFAULT_TIMEFRAME = "last_7_days"
+
+
+def _apply_bilibili_channel_timeframe_default(req: DigestRequest) -> DigestRequest:
+    if req.timeframe is not None:
+        return req
+    has_bilibili_channel = bool(req.bilibili_target_channels or req.target_channels)
+    if not has_bilibili_channel:
+        return req
+    return replace(req, timeframe=_BILIBILI_CHANNEL_DEFAULT_TIMEFRAME)
+
 
 def resolve_digest_request(
     message: str,
@@ -34,6 +45,8 @@ def resolve_digest_request(
         connector_names = normalize_source_names(session_connector_names)
     else:
         connector_names = None
+
+    base = _apply_bilibili_channel_timeframe_default(base)
 
     if connector_names == base.connector_names:
         return base

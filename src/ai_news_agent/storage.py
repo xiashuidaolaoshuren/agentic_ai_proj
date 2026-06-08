@@ -198,6 +198,10 @@ class DigestStore:
                     (run_id, w.connector, w.code, w.message, w.detail),
                 )
 
+    def upsert_news_item(self, run_id: int, item: NewsItem) -> None:
+        """Insert or replace a normalized news row for a run."""
+        self._insert_news_item(run_id, item)
+
     def _insert_news_item(self, run_id: int, item: NewsItem) -> None:
         d = news_item_to_dict(item)
         payload_json = json.dumps(d, ensure_ascii=False)

@@ -184,6 +184,137 @@ def test_summarize_keeps_selected_order_aligned_with_input_rank_list() -> None:
     assert digest.entries[1].follow_up_action is FollowUpAction.TRY
 
 
+def test_summarize_order_places_newest_in_window_bilibili_first() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    github = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh1",
+        url="https://github.com/o/gh1",
+        title="GitHub top score",
+        published_at=now - timedelta(days=2),
+        collected_at=now,
+        raw_snippet="readme",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    bilibili_older = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVolder",
+        url="https://www.bilibili.com/video/BVolder",
+        title="Older Bilibili",
+        published_at=now - timedelta(days=3),
+        collected_at=now,
+        raw_snippet="old",
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVnewest",
+        url="https://www.bilibili.com/video/BVnewest",
+        title="Newest Bilibili",
+        published_at=now - timedelta(hours=2),
+        collected_at=now,
+        raw_snippet="new",
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    ranked = [
+        RankedItem(item=github, score_total=9.0, selected=True),
+        RankedItem(item=bilibili_older, score_total=8.0, selected=True),
+        RankedItem(item=bilibili_newest, score_total=1.0, selected=True),
+    ]
+    outs = {
+        (SourceKind.GITHUB, "gh1", "GitHub top score"): {
+            "summary": "GH",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "read",
+        },
+        (SourceKind.BILIBILI, "BVolder", "Older Bilibili"): {
+            "summary": "OLD",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "watch",
+        },
+        (SourceKind.BILIBILI, "BVnewest", "Newest Bilibili"): {
+            "summary": "NEW",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "watch",
+        },
+    }
+    fake = FakeChatModel(per_source=outs)
+    digest = summarize_ranked_items(
+        ranked,
+        generated_at=now,
+        topics=["AI"],
+        timeframe="last_7_days",
+        model=fake,
+    )
+
+    assert digest.entries[0].source_id == "BVnewest"
+    assert digest.entries[0].summary == "NEW"
+    assert [e.source_id for e in digest.entries] == ["BVnewest", "gh1", "BVolder"]
+
+
+def test_summarize_order_no_reorder_without_timeframe() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    github = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh1",
+        url="https://github.com/o/gh1",
+        title="GitHub first",
+        published_at=now - timedelta(days=1),
+        collected_at=now,
+        raw_snippet="readme",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVnewest",
+        url="https://www.bilibili.com/video/BVnewest",
+        title="Newest Bilibili",
+        published_at=now - timedelta(hours=1),
+        collected_at=now,
+        raw_snippet="new",
+        content_confidence=ConfidenceLevel.LOW,
+    )
+    ranked = [
+        RankedItem(item=github, score_total=9.0, selected=True),
+        RankedItem(item=bilibili_newest, score_total=1.0, selected=True),
+    ]
+    outs = {
+        (SourceKind.GITHUB, "gh1", "GitHub first"): {
+            "summary": "GH",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "read",
+        },
+        (SourceKind.BILIBILI, "BVnewest", "Newest Bilibili"): {
+            "summary": "NEW",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "watch",
+        },
+    }
+    fake = FakeChatModel(per_source=outs)
+    digest = summarize_ranked_items(
+        ranked,
+        generated_at=now,
+        topics=["AI"],
+        timeframe=None,
+        model=fake,
+    )
+
+    assert [e.source_id for e in digest.entries] == ["gh1", "BVnewest"]
+
+
 def test_low_confidence_adds_caveat_even_if_model_omits() -> None:
     from ai_news_agent.summarizer import summarize_ranked_items
 
@@ -308,3 +439,31 @@ def test_build_chat_model_requires_api_key_when_unset() -> None:
     finally:
         if backup is not None:
             os.environ["OPENAI_API_KEY"] = backup
+
+
+def test_build_tool_chat_model_importable() -> None:
+    from ai_news_agent.llm import build_tool_chat_model  # noqa: F401
+
+
+def test_build_tool_chat_model_requires_api_key_when_unset() -> None:
+    from ai_news_agent.llm import build_tool_chat_model
+
+    backup = os.environ.pop("OPENAI_API_KEY", None)
+    try:
+        try:
+            build_tool_chat_model()
+        except ValueError as exc:
+            assert "OPENAI_API_KEY" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        if backup is not None:
+            os.environ["OPENAI_API_KEY"] = backup
+
+
+def test_build_tool_chat_model_satisfies_tool_call_model_protocol() -> None:
+    from ai_news_agent.llm import build_tool_chat_model
+    from ai_news_agent.tools.agent import ToolCallModel
+
+    result = build_tool_chat_model(api_key="fake-key-for-protocol-check")
+    assert isinstance(result, ToolCallModel)

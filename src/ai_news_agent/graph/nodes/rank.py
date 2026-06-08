@@ -25,10 +25,13 @@ def make_rank_items_node(*, now_provider: Callable[[], datetime] | None = None):
         items = state.get("collected_items") or []
         if not items:
             return {"ranked_items": []}
+        kwargs: dict[str, object] = {
+            "top_n": req.top_n,
+            "timeframe": req.timeframe,
+        }
         if now_provider is not None:
-            ranked = rank_items(items, top_n=req.top_n, now=now_provider())
-        else:
-            ranked = rank_items(items, top_n=req.top_n)
+            kwargs["now"] = now_provider()
+        ranked = rank_items(items, **kwargs)  # type: ignore[arg-type]
         return {"ranked_items": ranked}
 
     return rank_items_node

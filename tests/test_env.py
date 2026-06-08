@@ -6,6 +6,7 @@ import io
 import os
 
 import pytest
+from unittest.mock import patch
 
 from ai_news_agent import env
 from ai_news_agent.env import load_local_env
@@ -51,6 +52,83 @@ def test_get_bilibili_credential_returns_none_when_unset(monkeypatch) -> None:
     monkeypatch.delenv("BILIBILI_BUVID3", raising=False)
 
     assert env.get_bilibili_credential() is None
+
+
+def test_load_local_env_force_reload_picks_up_file_changes(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("BILIBILI_SESSDATA", raising=False)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("BILIBILI_SESSDATA=first\n", encoding="utf-8")
+
+    assert load_local_env() is True
+    assert os.environ.get("BILIBILI_SESSDATA") == "first"
+
+    dotenv.write_text("BILIBILI_SESSDATA=second\n", encoding="utf-8")
+    assert load_local_env() is True
+    assert os.environ.get("BILIBILI_SESSDATA") == "first"
+
+    assert load_local_env(force_reload=True) is True
+    assert os.environ.get("BILIBILI_SESSDATA") == "second"
+
+
+def test_bilibili_env_diagnostics_reports_presence_not_values(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BILIBILI_SESSDATA", "secret-sess")
+    monkeypatch.delenv("BILIBILI_BILI_JCT", raising=False)
+    monkeypatch.delenv("BILIBILI_BUVID3", raising=False)
+    (tmp_path / ".env").write_text("BILIBILI_BILI_JCT=from-file\n", encoding="utf-8")
+
+    load_local_env(force_reload=True)
+    diag = env.bilibili_env_diagnostics()
+
+    assert diag["vars"]["BILIBILI_SESSDATA"] is True
+    assert diag["vars"]["BILIBILI_BILI_JCT"] is True
+    assert diag["vars"]["BILIBILI_BUVID3"] is False
+    assert diag["any_set"] is True
+    assert diag["credential_available"] is True
+    assert "secret-sess" not in str(diag)
+
+
+def test_configure_bilibili_network_from_env_applies_settings(monkeypatch) -> None:
+    monkeypatch.setenv("BILIBILI_HTTP_CLIENT", "httpx")
+    monkeypatch.setenv("BILIBILI_PROXY_URL", "http://127.0.0.1:7890")
+    monkeypatch.setenv("BILIBILI_TIMEOUT_SECONDS", "20")
+    monkeypatch.setenv("BILIBILI_IMPERSONATE", "chrome131")
+
+    with (
+        patch("bilibili_api.get_registered_clients", return_value={"httpx": object}),
+        patch("bilibili_api.get_selected_client", return_value=("httpx", object)),
+        patch("bilibili_api.select_client") as mock_select,
+        patch("bilibili_api.request_settings") as mock_settings,
+    ):
+        result = env.configure_bilibili_network_from_env()
+
+    mock_select.assert_called_once_with("httpx")
+    mock_settings.set_proxy.assert_called_once_with("http://127.0.0.1:7890")
+    mock_settings.set_timeout.assert_called_once_with(20.0)
+    mock_settings.set.assert_called_once_with("impersonate", "chrome131")
+    assert result["selected_client"] == "httpx"
+    assert result["proxy_configured"] is True
+    assert result["timeout_seconds"] == 20.0
+
+
+def test_configure_bilibili_network_falls_back_when_client_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("BILIBILI_HTTP_CLIENT", "curl_cffi")
+
+    with (
+        patch("bilibili_api.get_registered_clients", return_value={"httpx": object}),
+        patch("bilibili_api.get_selected_client", return_value=("httpx", object)),
+        patch("bilibili_api.request_settings"),
+    ):
+        result = env.configure_bilibili_network_from_env()
+
+    assert result["requested_client"] == "curl_cffi"
+    assert result["client_fallback"] is not None
+    assert "not registered" in result["client_fallback"]
 
 
 def test_get_bilibili_credential_from_separate_env_vars(monkeypatch) -> None:

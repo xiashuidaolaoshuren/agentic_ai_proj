@@ -4,12 +4,109 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
-from ai_news_agent.app.gradio_app import _EXAMPLE_ROWS, create_app
+import pytest
+
+from ai_news_agent.app import gradio_app
+from ai_news_agent.app.gradio_app import _EXAMPLE_ROWS, _build_service, create_app
 from ai_news_agent.chat import ChatService
+from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.graph.state import DigestResult
+from ai_news_agent.models import (
+    Digest,
+    DigestEntry,
+    FollowUpAction,
+    NewsItem,
+    SourceKind,
+)
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
+
+
+def _save_minimal_digest(store: DigestStore) -> None:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe=None,
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(run_id, [])
+    store.save_digest(run_id, digest)
+
+
+async def _collect_stream(service: ChatService, message: str, **kwargs) -> list[str]:  # noqa: ANN003
+    chunks: list[str] = []
+    async for chunk in service.handle_message_streaming_async(
+        message, chunk_delay_s=0, **kwargs
+    ):
+        chunks.append(chunk)
+    return chunks
+
+
+def test_gradio_fake_tool_agent_streaming_emits_progress_then_ephemeral_final(
+    tmp_path,
+) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "gradio-tool-stream.db")
+    store = service._store  # noqa: SLF001
+    _save_minimal_digest(store)
+
+    chunks = asyncio.run(
+        _collect_stream(
+            service,
+            "Why does this repo matter?",
+            chunk_size=12,
+        )
+    )
+
+    assert any("Calling load_latest_digest" in chunk for chunk in chunks)
+    assert chunks[-1] == gradio_app._FAKE_TOOL_AGENT_REPLY
+    assert "Calling" not in chunks[-1]
+
+
+def test_gradio_build_service_digest_stream_ephemeral_final(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "gradio-digest-stream.db")
+
+    chunks = asyncio.run(
+        _collect_stream(
+            service,
+            "Give me today's AI digest",
+            session_connector_names=["github"],
+            chunk_size=8,
+        )
+    )
+
+    assert any("Parsing request" in chunk or "Collecting from sources" in chunk for chunk in chunks)
+    assert chunks[-1]
+    assert "Parsing request" not in chunks[-1]
+    assert "Collecting from sources" not in chunks[-1]
 
 
 def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path) -> None:
@@ -81,6 +178,7 @@ def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path
     stream_chunks = asyncio.run(collect_stream())
     assert stream_chunks[0] == "Collecting from sources…"
     assert stream_chunks[-1] == "ok\n"
+    assert "Collecting from sources" not in stream_chunks[-1]
 
 
 def test_create_app_chat_interface_fn_is_async_generator(tmp_path) -> None:
@@ -93,3 +191,57 @@ def test_create_app_chat_interface_fn_is_async_generator(tmp_path) -> None:
     demo = create_app(svc)
     assert demo is not None
     assert demo.mode == "blocks"
+
+
+def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
+
+    assert getattr(service, "_tool_agent_runner", None) is not None
+
+
+def test_build_service_live_mode_wires_tool_registry_and_agent(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry_calls: list[dict] = []
+    agent_calls: list[dict] = []
+    fake_registry = MagicMock(name="ToolRegistry")
+    fake_runner = MagicMock(name="ToolAgentRunner")
+
+    def spy_build_tool_registry(**kwargs):
+        registry_calls.append(kwargs)
+        return fake_registry
+
+    def spy_build_tool_agent_runner(**kwargs):
+        agent_calls.append(kwargs)
+        return fake_runner
+
+    monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_connector_factory",
+        lambda **kw: MagicMock(name="ConnectorFactory"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_registry",
+        spy_build_tool_registry,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_agent_runner",
+        spy_build_tool_agent_runner,
+        raising=False,
+    )
+
+    service = _build_service(fake=False, db_path=tmp_path / "live-tool-agent.db")
+
+    assert len(registry_calls) == 1
+    assert len(agent_calls) == 1
+    assert agent_calls[0]["registry"] is fake_registry
+    assert getattr(service, "_tool_agent_runner", None) is fake_runner

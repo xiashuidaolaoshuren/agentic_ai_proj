@@ -420,6 +420,58 @@ def test_rank_items_node_uses_top_n_and_populates_ranked_items() -> None:
     assert selected[0].selection_reason
 
 
+def test_rank_items_node_guarantees_newest_bilibili_when_timeframe_set() -> None:
+    from datetime import timedelta
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVworkflownew",
+        url="https://www.bilibili.com/video/BVworkflownew",
+        title="Workflow newest",
+        published_at=now - timedelta(hours=1),
+        collected_at=now,
+        metadata_completeness=0.25,
+        topic_matches=[],
+        content_confidence=ConfidenceLevel.LOW,
+        stars_or_views=1,
+        raw_snippet=None,
+    )
+    github_items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id=f"wfgh{i}",
+            url=f"https://github.com/o/wfgh{i}",
+            title=f"wfgh{i}",
+            published_at=now - timedelta(days=i + 1),
+            collected_at=now,
+            metadata_completeness=0.95,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            stars_or_views=8000 + i,
+            raw_snippet="readme",
+        )
+        for i in range(5)
+    ]
+    req = DigestRequest(
+        topics=[],
+        top_n=5,
+        timeframe="last_7_days",
+        bilibili_target_channels=["123456789"],
+    )
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": github_items + [bilibili_newest],
+    }
+    node = make_rank_items_node(now_provider=lambda: now)
+    out = node(state)
+
+    selected_ids = {r.item.source_id for r in out["ranked_items"] if r.selected}
+    assert "BVworkflownew" in selected_ids
+    assert len(selected_ids) == 5
+
+
 def test_rank_items_node_handles_empty_collected_items() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     req = DigestRequest(topics=["RAG"], top_n=3)
@@ -695,7 +747,8 @@ def test_render_digest_node_catches_renderer_failure() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     digest = Digest(generated_at=now, entries=[], topics=[], timeframe=None)
 
-    def _boom(_: Digest) -> str:
+    def _boom(_: Digest, **kwargs: object) -> str:
+        del kwargs
         raise ValueError("bad render")
 
     node = make_render_digest_node(render_markdown=_boom, render_text=render_digest_text)
@@ -948,8 +1001,10 @@ def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> N
     finals = [result for _, done, result in events if done]
 
     assert progress
-    assert "Collecting from sources" in progress[-1]
-    assert "Rendering digest" in progress[-1]
+    assert progress[0] == "Parsing request…"
+    assert all("\n" not in line for line in progress)
+    assert any("Collecting from sources" in line for line in progress)
+    assert progress[-1] == "Rendering digest…"
     assert len(finals) == 1
 
     store_compare = DigestStore(tmp_path / "stream-compare.db")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -98,12 +98,23 @@ def build_connectors(*, fake: bool, names: Sequence[str]) -> list[SourceConnecto
     return [factories[name] for name in selected]
 
 
+def build_connector_factory(*, fake: bool, name: str) -> Callable[[], SourceConnector]:
+    """Return a zero-arg factory that builds a fresh connector per call."""
+    validated = normalize_source_names([name])[0]
+
+    def _factory() -> SourceConnector:
+        return build_connectors(fake=fake, names=[validated])[0]
+
+    return _factory
+
+
 __all__ = [
     "ALLOWED_SOURCES",
     "DEFAULT_SOURCE_NAMES",
     "FakeBilibiliConnector",
     "FakeDigestModel",
     "FakeGitHubConnector",
+    "build_connector_factory",
     "build_connectors",
     "normalize_source_names",
     "parse_sources_csv",

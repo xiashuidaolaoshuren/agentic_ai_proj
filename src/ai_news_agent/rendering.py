@@ -2,7 +2,35 @@
 
 from __future__ import annotations
 
-from ai_news_agent.models import Digest, DigestEntry
+from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry
+
+
+def format_connector_warnings_notice(
+    warnings: list[ConnectorWarning],
+    errors: list[object] | None = None,
+) -> str:
+    """Build a compact user-facing notice for high-signal connector warnings."""
+    del errors
+    if not warnings:
+        return ""
+
+    priority_codes = ("anti_bot_blocked", "rate_limited")
+    lines: list[str] = []
+    seen_messages: set[str] = set()
+
+    for code in priority_codes:
+        for warning in warnings:
+            if warning.connector != "bilibili" or warning.code != code:
+                continue
+            message = warning.message.strip()
+            if not message or message in seen_messages:
+                continue
+            seen_messages.add(message)
+            lines.append(f"⚠ {message}")
+
+    if not lines:
+        return ""
+    return "\n".join(lines)
 
 
 def _escape_markdown_inline(text: str) -> str:
@@ -43,8 +71,16 @@ def _render_entry_markdown(entry: DigestEntry) -> str:
     return "\n".join(parts)
 
 
-def render_digest_markdown(digest: Digest) -> str:
-    blocks: list[str] = [_render_header_markdown(digest), ""]
+def render_digest_markdown(
+    digest: Digest,
+    *,
+    warnings: list[ConnectorWarning] | None = None,
+) -> str:
+    notice = format_connector_warnings_notice(warnings or [], [])
+    blocks: list[str] = []
+    if notice:
+        blocks.extend([notice, ""])
+    blocks.extend([_render_header_markdown(digest), ""])
     if not digest.entries:
         blocks.append("*No entries in this digest.*")
     else:
@@ -78,8 +114,16 @@ def _render_entry_text(entry: DigestEntry) -> str:
     return "\n".join(lines)
 
 
-def render_digest_text(digest: Digest) -> str:
-    parts: list[str] = [_render_header_text(digest), ""]
+def render_digest_text(
+    digest: Digest,
+    *,
+    warnings: list[ConnectorWarning] | None = None,
+) -> str:
+    notice = format_connector_warnings_notice(warnings or [], [])
+    parts: list[str] = []
+    if notice:
+        parts.extend([notice, ""])
+    parts.extend([_render_header_text(digest), ""])
     if not digest.entries:
         parts.append("No entries in this digest.")
     else:

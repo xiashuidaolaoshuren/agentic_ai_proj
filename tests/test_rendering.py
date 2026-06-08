@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from ai_news_agent.models import Digest, DigestEntry, FollowUpAction, SourceKind
+from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, FollowUpAction, SourceKind
 
 
 def _fixture_dt() -> datetime:
@@ -112,6 +112,52 @@ def test_render_digest_text_empty_entries() -> None:
     digest = Digest(generated_at=_fixture_dt(), entries=[], topics=[], timeframe=None)
     text = render_digest_text(digest)
     assert "No entries in this digest." in text
+
+
+def test_format_connector_warnings_notice_empty_warning_banner() -> None:
+    from ai_news_agent.rendering import format_connector_warnings_notice
+
+    assert format_connector_warnings_notice([], []) == ""
+
+
+def test_render_digest_text_warning_banner_unchanged_without_warnings() -> None:
+    from ai_news_agent.rendering import render_digest_text
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_sample_entry(with_caveat=False)],
+        topics=["LLM"],
+        timeframe="last_7_days",
+    )
+    baseline = render_digest_text(digest)
+    with_notice = render_digest_text(digest, warnings=[])
+    assert with_notice == baseline
+    assert "BILIBILI_SESSDATA" not in with_notice
+
+
+def test_render_digest_text_includes_anti_bot_warning_banner() -> None:
+    from ai_news_agent.rendering import render_digest_text
+
+    warning = ConnectorWarning(
+        connector="bilibili",
+        code="anti_bot_blocked",
+        message=(
+            "Bilibili keyword search blocked (anti-bot). "
+            "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
+            "in .env, or use video URLs/channels."
+        ),
+    )
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_sample_entry(with_caveat=False)],
+        topics=["AI"],
+        timeframe="last_7_days",
+    )
+    out = render_digest_text(digest, warnings=[warning])
+    assert out.startswith("⚠")
+    assert "BILIBILI_SESSDATA" in out
+    assert "AI News Digest" in out
+    assert out.index("BILIBILI_SESSDATA") < out.index("AI News Digest")
 
 
 def test_render_digest_markdown_skips_optional_header_lines_when_absent() -> None:

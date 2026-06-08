@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.logging_setup import get_logger
+from ai_news_agent.rendering import format_connector_warnings_notice
 from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
@@ -22,6 +23,8 @@ StreamingWorkflowRunner = Callable[
 ]
 
 logger = get_logger("chat")
+
+_StreamPayloadT = TypeVar("_StreamPayloadT")
 
 _NO_SAVED_DIGEST = (
     "No saved digest yet. Ask for a digest first "
@@ -46,11 +49,13 @@ class ChatService:
         workflow_runner: WorkflowRunner,
         streaming_workflow_runner: StreamingWorkflowRunner | None = None,
         chat_model: Any | None = None,
+        tool_agent_runner: Any | None = None,
     ) -> None:
         self._store = store
         self._workflow_runner = workflow_runner
         self._streaming_workflow_runner = streaming_workflow_runner
         self._chat_model = chat_model
+        self._tool_agent_runner = tool_agent_runner
 
     def handle_message(
         self,
@@ -88,11 +93,11 @@ class ChatService:
             result = await self._workflow_runner(req)
             elapsed = time.perf_counter() - t0
             _log_digest_result(result, elapsed=elapsed)
-            return result.text
+            return _user_facing_digest_text(result)
 
-        return self._handle_followup_message(message)
+        return await self._handle_followup_message_async(message)
 
-    def _handle_followup_message(self, message: str) -> str:
+    async def _handle_followup_message_async(self, message: str) -> str:
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
             logger.info("follow-up path=no_saved_digest")
@@ -102,6 +107,10 @@ class ChatService:
         if structured is not None:
             logger.info("follow-up path=structured")
             return structured
+
+        if self._tool_agent_runner is not None:
+            logger.info("follow-up path=tool_agent")
+            return await self._tool_agent_runner.run(message)
 
         llm_text = _try_llm_followup(self._chat_model, message, ctx)
         if llm_text is not None:
@@ -134,21 +143,30 @@ class ChatService:
             )
             if self._streaming_workflow_runner is not None:
                 t0 = time.perf_counter()
-                async for progress, done, result in self._streaming_workflow_runner(req):
-                    if not done:
-                        if progress:
-                            yield progress
-                        continue
-                    if result is None:
-                        continue
-                    elapsed = time.perf_counter() - t0
-                    _log_digest_result(result, elapsed=elapsed)
-                    async for chunk in iter_text_chunks(
-                        result.text,
-                        chunk_size=chunk_size,
-                        delay_s=chunk_delay_s,
+                final_result: DigestResult | None = None
+
+                async def _digest_events() -> AsyncIterator[
+                    tuple[str, bool, DigestResult | None]
+                ]:
+                    nonlocal final_result
+                    async for progress, done, result in self._streaming_workflow_runner(
+                        req
                     ):
-                        yield chunk
+                        if done and result is not None:
+                            final_result = result
+                        yield progress, done, result
+
+                async for chunk in _stream_ephemeral_progress_then_chunks(
+                    _digest_events(),
+                    chunk_size=chunk_size,
+                    chunk_delay_s=chunk_delay_s,
+                    extract_final_text=_user_facing_digest_text,
+                ):
+                    yield chunk
+                if final_result is not None:
+                    _log_digest_result(
+                        final_result, elapsed=time.perf_counter() - t0
+                    )
                 return
 
             t0 = time.perf_counter()
@@ -156,20 +174,107 @@ class ChatService:
             elapsed = time.perf_counter() - t0
             _log_digest_result(result, elapsed=elapsed)
             async for chunk in iter_text_chunks(
-                result.text,
+                _user_facing_digest_text(result),
                 chunk_size=chunk_size,
                 delay_s=chunk_delay_s,
             ):
                 yield chunk
             return
 
-        text = self._handle_followup_message(message)
+        if self._tool_agent_runner is not None:
+            async for chunk in self._stream_followup_tool_agent_async(
+                message,
+                chunk_size=chunk_size,
+                chunk_delay_s=chunk_delay_s,
+            ):
+                yield chunk
+            return
+
+        text = await self._handle_followup_message_async(message)
         async for chunk in iter_text_chunks(
             text,
             chunk_size=chunk_size,
             delay_s=chunk_delay_s,
         ):
             yield chunk
+
+    async def _stream_followup_tool_agent_async(
+        self,
+        message: str,
+        *,
+        chunk_size: int,
+        chunk_delay_s: float,
+    ) -> AsyncIterator[str]:
+        ctx = self._store.get_latest_followup_context()
+        if ctx.run_id is None and ctx.digest is None:
+            logger.info("follow-up path=no_saved_digest")
+            yield _NO_SAVED_DIGEST
+            return
+
+        structured = _answer_structured_followup(message, ctx)
+        if structured is not None:
+            logger.info("follow-up path=structured")
+            async for chunk in iter_text_chunks(
+                structured,
+                chunk_size=chunk_size,
+                delay_s=chunk_delay_s,
+            ):
+                yield chunk
+            return
+
+        logger.info("follow-up path=tool_agent")
+        runner = self._tool_agent_runner
+        run_streaming = getattr(runner, "run_streaming", None)
+        if callable(run_streaming):
+            async for chunk in _stream_ephemeral_progress_then_chunks(
+                run_streaming(message),
+                chunk_size=chunk_size,
+                chunk_delay_s=chunk_delay_s,
+                extract_final_text=str,
+            ):
+                yield chunk
+            return
+
+        text = await runner.run(message)
+        async for chunk in iter_text_chunks(
+            text,
+            chunk_size=chunk_size,
+            delay_s=chunk_delay_s,
+        ):
+            yield chunk
+
+
+async def _stream_ephemeral_progress_then_chunks(
+    events: AsyncIterator[tuple[str, bool, _StreamPayloadT | None]],
+    *,
+    chunk_size: int,
+    chunk_delay_s: float,
+    extract_final_text: Callable[[_StreamPayloadT], str],
+) -> AsyncIterator[str]:
+    """Yield ephemeral progress lines, then chunked final text without progress."""
+    async for progress, done, payload in events:
+        if not done:
+            if progress:
+                yield progress
+            continue
+        if payload is None:
+            continue
+        text = extract_final_text(payload)
+        async for chunk in iter_text_chunks(
+            text,
+            chunk_size=chunk_size,
+            delay_s=chunk_delay_s,
+        ):
+            yield chunk
+
+
+def _user_facing_digest_text(result: DigestResult) -> str:
+    notice = format_connector_warnings_notice(result.warnings, result.errors)
+    if not notice:
+        return result.text
+    if notice in result.text:
+        return result.text
+    return f"{notice}\n\n{result.text}"
 
 
 def _resolve_digest_request(

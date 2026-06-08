@@ -6,7 +6,7 @@ Scoring is weighted; inspect evidence via :attr:`RankedItem.score_breakdown`.
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 from ai_news_agent.models import ConfidenceLevel, NewsItem, RankedItem, SourceKind, utcnow
@@ -29,6 +29,7 @@ def rank_items(
     *,
     top_n: int,
     now: datetime | None = None,
+    timeframe: str | None = None,
 ) -> list[RankedItem]:
     """Score, deduplicate, and mark top-N candidates.
 
@@ -68,7 +69,138 @@ def rank_items(
             ri.selected = False
             ri.selection_reason = ""
 
+    _apply_newest_bilibili_guarantee(
+        ranked,
+        top_n=top_n,
+        timeframe=timeframe,
+        reference=reference,
+    )
+
     return ranked
+
+
+def _apply_newest_bilibili_guarantee(
+    ranked: list[RankedItem],
+    *,
+    top_n: int,
+    timeframe: str | None,
+    reference: datetime,
+) -> None:
+    if top_n <= 0 or not timeframe:
+        return
+    candidate = find_newest_in_window_bilibili_candidate(
+        ranked,
+        timeframe=timeframe,
+        now=reference,
+    )
+    if candidate is None or candidate.selected:
+        return
+
+    selected = [ri for ri in ranked if ri.selected]
+    if not selected:
+        candidate.selected = True
+        candidate.selection_reason = "guaranteed newest in-window bilibili item"
+        return
+
+    replace_target = min(
+        selected,
+        key=lambda ri: (
+            ri.score_total,
+            _reference_time(ri.item, reference).timestamp(),
+            ri.item.source_id,
+        ),
+    )
+    replace_target.selected = False
+    replace_target.selection_reason = ""
+    candidate.selected = True
+    candidate.selection_reason = "guaranteed newest in-window bilibili item"
+
+
+def find_newest_in_window_bilibili_candidate(
+    ranked: list[RankedItem],
+    *,
+    timeframe: str | None,
+    now: datetime,
+) -> RankedItem | None:
+    """Return the newest Bilibili item with publish time inside the digest timeframe."""
+    if not timeframe:
+        return None
+    reference = _ensure_aware(now)
+    candidates = [
+        ri
+        for ri in ranked
+        if ri.item.source is SourceKind.BILIBILI
+        and ri.item.published_at is not None
+        and _item_published_within_timeframe(ri.item, timeframe, reference)
+    ]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda ri: _ensure_aware(ri.item.published_at).timestamp(),  # type: ignore[arg-type]
+    )
+
+
+def order_selected_for_digest(
+    ranked_items: list[RankedItem],
+    *,
+    timeframe: str | None,
+    now: datetime,
+) -> list[RankedItem]:
+    """Return selected rows in digest iteration order (relevance order with newest Bilibili first)."""
+    selected = [r for r in ranked_items if r.selected]
+    if not timeframe or not selected:
+        return selected
+    newest = find_newest_in_window_bilibili_candidate(
+        ranked_items,
+        timeframe=timeframe,
+        now=now,
+    )
+    if newest is None or not newest.selected:
+        return selected
+    return [newest] + [r for r in selected if r is not newest]
+
+
+def _timeframe_bounds_at(
+    timeframe: str | None,
+    reference: datetime,
+) -> tuple[datetime | None, datetime | None]:
+    if not timeframe:
+        return None, None
+    key = timeframe.strip().lower()
+    today = _ensure_aware(reference).date()
+    if key in ("today",):
+        start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
+        return start, start + timedelta(days=1)
+    if key in ("this week", "week", "last_7_days"):
+        start_date = today - timedelta(days=7)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+        end_exclusive = datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        )
+        return start, end_exclusive
+    if key in ("this month", "month", "last_30_days"):
+        start_date = today - timedelta(days=30)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+        end_exclusive = datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        )
+        return start, end_exclusive
+    return None, None
+
+
+def _item_published_within_timeframe(
+    item: NewsItem,
+    timeframe: str | None,
+    reference: datetime,
+) -> bool:
+    start, end_exclusive = _timeframe_bounds_at(timeframe, reference)
+    if start is None or end_exclusive is None:
+        return True
+    if item.published_at is None:
+        return False
+    published = _ensure_aware(item.published_at)
+    return start <= published < end_exclusive
 
 
 def _ensure_aware(dt: datetime) -> datetime:

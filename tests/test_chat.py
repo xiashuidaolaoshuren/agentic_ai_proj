@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 from ai_news_agent.chat import ChatService
-from ai_news_agent.connectors.base import ConnectorResult
+from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.models import (
     ConnectorWarning,
@@ -507,6 +507,199 @@ async def _collect_streaming(service: ChatService, message: str, **kwargs) -> li
     return chunks
 
 
+class _DigestStreamFakeConnector:
+    def __init__(self, *, name: str, items: list[NewsItem]) -> None:
+        self._name = name
+        self._items = items
+
+    def name(self) -> str:
+        return self._name
+
+    async def collect(self, _request: ConnectorRequest) -> ConnectorResult:
+        return ConnectorResult(items=list(self._items), warnings=[])
+
+
+class _DigestStreamFakeModel:
+    def generate_entry_fields(self, context: dict) -> dict:  # noqa: ARG002
+        return {
+            "summary": "Test summary",
+            "why_it_matters": "Because",
+            "background_knowledge": "Bg",
+            "follow_up_action": "read",
+        }
+
+
+def _digest_stream_news_item(source_id: str) -> NewsItem:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    return NewsItem(
+        source=SourceKind.GITHUB,
+        source_id=source_id,
+        url=f"https://example.com/{source_id}",
+        title=f"item-{source_id}",
+        collected_at=now,
+    )
+
+
+def test_chat_digest_stream_each_progress_is_single_stage_not_cumulative(
+    tmp_path,
+) -> None:
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    store = DigestStore(tmp_path / "digest-stream-ephemeral.db")
+    store.init_schema()
+    connectors = [
+        _DigestStreamFakeConnector(
+            name="github",
+            items=[_digest_stream_news_item("r1")],
+        )
+    ]
+
+    async def collect_progress() -> list[str]:
+        lines: list[str] = []
+        async for progress, done, _result in run_digest_streaming(
+            req,
+            connectors=connectors,
+            model=_DigestStreamFakeModel(),
+            store=store,
+            now_provider=lambda: now,
+        ):
+            if not done and progress:
+                lines.append(progress)
+        return lines
+
+    progress_lines = asyncio.run(collect_progress())
+
+    assert progress_lines
+    for line in progress_lines:
+        assert "\n" not in line
+    assert progress_lines[0] == "Parsing request…"
+    assert "Parsing request" not in progress_lines[-1]
+
+
+def _bilibili_anti_bot_warning() -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="bilibili",
+        code="anti_bot_blocked",
+        message=(
+            "Bilibili keyword search blocked (anti-bot). "
+            "Set BILIBILI_SESSDATA, BILIBILI_BILI_JCT, and BILIBILI_BUVID3 "
+            "in .env, or use video URLs/channels."
+        ),
+    )
+
+
+def test_chat_digest_sync_includes_anti_bot_warning(tmp_path) -> None:
+    warning = _bilibili_anti_bot_warning()
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="digest-body\n",
+            ranked_items=[],
+            warnings=[warning],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "anti-bot-sync.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    reply = asyncio.run(
+        svc.handle_message_async(
+            "ignored",
+            digest_request=DigestRequest(topics=["AI"]),
+        )
+    )
+
+    assert "BILIBILI_SESSDATA" in reply
+    assert "digest-body" in reply
+    assert reply.index("BILIBILI_SESSDATA") < reply.index("digest-body")
+
+
+def test_chat_digest_streaming_includes_anti_bot_warning(tmp_path) -> None:
+    warning = _bilibili_anti_bot_warning()
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    async def fake_streaming_runner(req: DigestRequest):
+        yield "Collecting…", False, None
+        yield "", True, DigestResult(
+            request=req,
+            digest=None,
+            run_id=1,
+            markdown="",
+            text="digest-body",
+            ranked_items=[],
+            warnings=[warning],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("sync runner should not be used")
+
+    store = DigestStore(tmp_path / "anti-bot-stream.db")
+    store.init_schema()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        streaming_workflow_runner=fake_streaming_runner,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            "Give me today's AI digest",
+            chunk_size=80,
+            chunk_delay_s=0,
+        )
+    )
+
+    full = "".join(chunks)
+    assert "BILIBILI_SESSDATA" in full
+    assert "digest-body" in full
+    assert full.index("BILIBILI_SESSDATA") < full.index("digest-body")
+
+
+def test_chat_digest_warning_banner_absent_without_warnings(tmp_path) -> None:
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="digest-body\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "no-warning-banner.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    reply = asyncio.run(
+        svc.handle_message_async(
+            "ignored",
+            digest_request=DigestRequest(topics=["AI"]),
+        )
+    )
+
+    assert reply == "digest-body\n"
+    assert "BILIBILI_SESSDATA" not in reply
+
+
 def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
     now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
 
@@ -547,6 +740,7 @@ def test_chat_streaming_digest_yields_progress_then_chunks(tmp_path) -> None:
 
     assert chunks[0] == "Parsing request…"
     assert chunks[-1] == "ABCDEFGHIJ"
+    assert "Parsing request" not in chunks[-1]
     assert len(chunks) > 2
 
 
@@ -572,3 +766,245 @@ def test_chat_streaming_follow_up_yields_multiple_chunks(tmp_path) -> None:
 
     assert len(chunks) >= 2
     assert chunks[-1].startswith("No saved digest")
+
+
+class _FakeToolAgentRunner:
+    def __init__(self, reply: str = "AGENT_SAYS") -> None:
+        self.calls: list[str] = []
+        self._reply = reply
+
+    async def run(self, question: str) -> str:
+        self.calls.append(question)
+        return self._reply
+
+
+class _StreamingFakeToolAgentRunner(_FakeToolAgentRunner):
+    async def run_streaming(self, question: str):  # noqa: ANN201
+        self.calls.append(question)
+        yield "Calling load_latest_digest…", False, None
+        yield "Done load_latest_digest: Loaded digest with 1 entry.", False, None
+        yield "", True, self._reply
+
+
+def test_chat_tool_agent_runner_accepted_as_constructor_arg(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-init.db")
+    store.init_schema()
+    runner = _FakeToolAgentRunner()
+
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    assert svc is not None
+
+
+def _save_minimal_digest(store: DigestStore, *, db_name: str = "ctx") -> None:
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe=None,
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(run_id, [])
+    store.save_digest(run_id, digest)
+
+
+def test_chat_open_ended_follow_up_routes_to_tool_agent_when_configured(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-route.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner(reply="Grounded tool answer.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Why does this repo matter?"
+    reply = asyncio.run(svc.handle_message_async(question))
+
+    assert runner.calls == [question]
+    assert reply == "Grounded tool answer."
+
+
+def test_chat_streaming_follow_up_uses_tool_agent_when_configured(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-stream.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner(reply="Streaming tool answer.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Explain the tradeoffs abstractly"
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            question,
+            chunk_size=10,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert runner.calls == [question]
+    assert chunks[-1] == "Streaming tool answer."
+
+
+def test_chat_streaming_follow_up_emits_tool_progress_then_ephemeral_final_answer(
+    tmp_path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-stream-ephemeral.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _StreamingFakeToolAgentRunner(reply="Final grounded answer only.")
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Why does this repo matter?"
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            question,
+            chunk_size=12,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert runner.calls == [question]
+    assert any("Calling load_latest_digest" in chunk for chunk in chunks)
+    assert chunks[-1] == "Final grounded answer only."
+    assert "Calling" not in chunks[-1]
+    assert "Done load_latest_digest" not in chunks[-1]
+
+
+def test_chat_tool_agent_not_called_for_structured_followup(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-structured.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _FakeToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("Please show sources"))
+
+    assert "https://example.com/r1" in reply
+    assert runner.calls == []
+
+
+def test_chat_tool_agent_not_called_for_digest_request(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="from-workflow\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "tool-agent-digest.db")
+    store.init_schema()
+    runner = _FakeToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("Give me today's AI digest"))
+
+    assert reply == "from-workflow\n"
+    assert len(captured) == 1
+    assert runner.calls == []
+
+
+def test_resolve_digest_request_timeframe_defaults_last_7_days_for_bilibili_channel() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest bilibili channel 285286947")
+
+    assert req.bilibili_target_channels == ["285286947"]
+    assert req.timeframe == "last_7_days"
+
+
+def test_resolve_digest_request_preserves_explicit_timeframe_for_bilibili_channel() -> (
+    None
+):
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest bilibili channel 285286947 last 30 days")
+
+    assert req.timeframe == "last_30_days"
+
+
+def test_resolve_digest_request_no_timeframe_default_for_github_channel() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("Digest github user acme")
+
+    assert req.github_target_channels == ["acme"]
+    assert req.timeframe is None
