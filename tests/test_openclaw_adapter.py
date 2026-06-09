@@ -89,3 +89,18 @@ def test_build_digest_cli_argv_includes_normalized_options() -> None:
 def test_build_digest_cli_argv_rejects_unknown_source() -> None:
     with pytest.raises(ValueError, match="Unknown source"):
         build_digest_cli_argv(sources_hint="arxiv")
+
+
+def test_adapters_package_exports_public_surface() -> None:
+    from ai_news_agent import adapters
+
+    exported = {
+        "build_digest_cli_argv": adapters.build_digest_cli_argv,
+        "normalize_source_hint": adapters.normalize_source_hint,
+        "normalize_timeframe_hint": adapters.normalize_timeframe_hint,
+        "normalize_topic_hint": adapters.normalize_topic_hint,
+    }
+
+    assert set(adapters.__all__) == set(exported)
+    for name, symbol in exported.items():
+        assert callable(symbol), name
