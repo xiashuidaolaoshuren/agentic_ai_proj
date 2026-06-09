@@ -65,7 +65,7 @@ OpenClaw skill definition, and integration documentation, while preserving curre
 
 ### T1 - Implement OpenClaw Adapter Module
 
-- [ ] **Do:** Add `src/ai_news_agent/adapters/openclaw.py` with helpers to normalize
+- [X] **Do:** Add `src/ai_news_agent/adapters/openclaw.py` with helpers to normalize
   timeframe/source/topic hints and produce safe argv for `ai-news-agent digest`.
 - **TDD suitable:** yes (pure logic and validation boundaries are deterministic)
 - **Plan mode:** high
