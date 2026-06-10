@@ -74,7 +74,7 @@ OpenClaw skill definition, and integration documentation, while preserving curre
 
 ### T2 - Export Adapter Public Surface
 
-- [ ] **Do:** Add `src/ai_news_agent/adapters/__init__.py` to export stable adapter helper APIs.
+- [X] **Do:** Add `src/ai_news_agent/adapters/__init__.py` to export stable adapter helper APIs.
 - **TDD suitable:** partial (lightweight export wiring; behavior validation comes from T1 tests)
 - **Plan mode:** medium
 - **Verification:** `uv run python -c "from ai_news_agent.adapters import build_digest_cli_argv"`
