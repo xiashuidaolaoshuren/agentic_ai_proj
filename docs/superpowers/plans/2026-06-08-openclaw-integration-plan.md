@@ -100,7 +100,7 @@ OpenClaw skill definition, and integration documentation, while preserving curre
 
 ### T5 - Regression Sweep
 
-- [ ] **Do:** Run focused and full tests, then fix any integration regressions discovered.
+- [X] **Do:** Run focused and full tests, then fix any integration regressions discovered.
 - **TDD suitable:** partial (verification/stabilization pass; bug fixes discovered here should be
   test-first where feasible)
 - **Plan mode:** high
