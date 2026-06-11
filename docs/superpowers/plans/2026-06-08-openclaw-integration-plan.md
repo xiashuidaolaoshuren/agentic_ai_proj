@@ -82,7 +82,7 @@ OpenClaw skill definition, and integration documentation, while preserving curre
 
 ### T3 - Create OpenClaw Skill Definition
 
-- [ ] **Do:** Add `openclaw/skills/ai-news-digest/SKILL.md` with natural-language trigger guidance,
+- [X] **Do:** Add `openclaw/skills/ai-news-digest/SKILL.md` with natural-language trigger guidance,
   deterministic `exec` command template, argument mapping rules, and metadata gates.
 - **TDD suitable:** no (declarative skill content; runtime validated by smoke usage)
 - **Plan mode:** medium
@@ -91,7 +91,7 @@ OpenClaw skill definition, and integration documentation, while preserving curre
 
 ### T4 - Update Milestone 3 Setup Docs
 
-- [ ] **Do:** Update `README.md` with local OpenClaw Gateway setup assumptions, skill location/setup,
+- [X] **Do:** Update `README.md` with local OpenClaw Gateway setup assumptions, skill location/setup,
   required env vars, and smoke prompts.
 - **TDD suitable:** no (documentation-only change)
 - **Plan mode:** skip
