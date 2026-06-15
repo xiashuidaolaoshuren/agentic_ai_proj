@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     normalize_source_names,
@@ -66,8 +67,28 @@ def build_digest_cli_argv(
     return argv
 
 
+def build_digest_request_from_hints(
+    *,
+    timeframe_hint: str | None = None,
+    sources_hint: str | None = None,
+    topics_hint: str | None = None,
+) -> DigestRequest:
+    """Build a :class:`~ai_news_agent.request.DigestRequest` from OpenClaw hints."""
+    timeframe = normalize_timeframe_hint(timeframe_hint)
+    sources = normalize_source_hint(sources_hint)
+    topics = normalize_topic_hint(topics_hint)
+    kw: dict[str, object] = {
+        "timeframe": timeframe,
+        "connector_names": sources,
+    }
+    if topics is not None:
+        kw["topics"] = topics
+    return DigestRequest(**kw)
+
+
 __all__ = [
     "build_digest_cli_argv",
+    "build_digest_request_from_hints",
     "normalize_source_hint",
     "normalize_timeframe_hint",
     "normalize_topic_hint",

@@ -220,7 +220,15 @@ Design: [OpenClaw integration design](docs/superpowers/specs/2026-06-08-openclaw
 
 The skill definition lives in this repo at [`openclaw/skills/ai-news-digest/SKILL.md`](openclaw/skills/ai-news-digest/SKILL.md).
 
-Make it visible to your OpenClaw workspace (adjust paths for your OS):
+**Start the warm digest service** (once per session; keeps model and connectors warm):
+
+```bash
+uv run ai-news-agent service --port 8765
+```
+
+Optional: set `AI_NEWS_AGENT_SERVICE_URL` if not using the default `http://127.0.0.1:8765`.
+
+Make the skill visible to your OpenClaw workspace (adjust paths for your OS):
 
 ```bash
 # Example: symlink repo skill into OpenClaw workspace skills directory
@@ -229,7 +237,12 @@ ln -s "$(pwd)/openclaw/skills/ai-news-digest" ~/.openclaw/workspace/skills/ai-ne
 
 After adding or updating the skill, start a new OpenClaw session (e.g. `/new` in chat) or restart the gateway so it reloads skills.
 
-The skill instructs OpenClaw to use the `exec` tool with a **fixed command template** — `uv run ai-news-agent digest ...` — run from this repository root. Argument mapping (timeframe, sources, topics) aligns with [`adapters/openclaw.py`](src/ai_news_agent/adapters/openclaw.py).
+The skill instructs OpenClaw to use the `exec` tool with a **fixed command template** —
+`uv run ai-news-agent openclaw-digest ...` — run from this repository root. The client
+calls the warm local digest service (`ai-news-agent service`). Argument mapping (timeframe,
+sources, topics) aligns with [`adapters/openclaw.py`](src/ai_news_agent/adapters/openclaw.py).
+
+Latency baseline and comparison procedure: [`docs/benchmarks/openclaw-latency-baseline.md`](docs/benchmarks/openclaw-latency-baseline.md).
 
 ### Usage
 
@@ -237,9 +250,15 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 
 | Smoke prompt | Expected CLI shape |
 |--------------|-------------------|
-| Give me today's AI digest. | `--timeframe today --sources github,bilibili` |
-| Give me today's AI digest from GitHub only. | `--timeframe today --sources github` |
-| Give me this week's AI digest on RAG and agents. | `--timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
+| Give me today's AI digest. | `openclaw-digest --timeframe today --sources github,bilibili` |
+| Give me today's AI digest from GitHub only. | `openclaw-digest --timeframe today --sources github` |
+| Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
+
+Full commands (from repo root, service running):
+
+```bash
+uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili
+```
 
 Offline smoke (no API key, no network) — run directly from repo root:
 

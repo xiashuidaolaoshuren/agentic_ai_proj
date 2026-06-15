@@ -91,11 +91,25 @@ def test_build_digest_cli_argv_rejects_unknown_source() -> None:
         build_digest_cli_argv(sources_hint="arxiv")
 
 
+def test_build_digest_request_from_hints_maps_defaults() -> None:
+    from ai_news_agent.adapters.openclaw import build_digest_request_from_hints
+
+    req = build_digest_request_from_hints(
+        timeframe_hint="week",
+        sources_hint="github",
+        topics_hint="RAG, agents",
+    )
+    assert req.timeframe == "last_7_days"
+    assert req.connector_names == ["github"]
+    assert req.topics == ["RAG", "agents"]
+
+
 def test_adapters_package_exports_public_surface() -> None:
     from ai_news_agent import adapters
 
     exported = {
         "build_digest_cli_argv": adapters.build_digest_cli_argv,
+        "build_digest_request_from_hints": adapters.build_digest_request_from_hints,
         "normalize_source_hint": adapters.normalize_source_hint,
         "normalize_timeframe_hint": adapters.normalize_timeframe_hint,
         "normalize_topic_hint": adapters.normalize_topic_hint,

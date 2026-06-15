@@ -152,31 +152,65 @@ def _add_digest_parser(sub: Any) -> argparse.ArgumentParser:
     return p
 
 
+def _add_service_parser(sub: Any) -> argparse.ArgumentParser:
+    from ai_news_agent.app.digest_service import main as service_main
+
+    p = sub.add_parser(
+        "service",
+        help="Run the persistent local digest HTTP service (OpenClaw warm path)",
+    )
+    p.add_argument("--host", default="127.0.0.1", help="Bind host")
+    p.add_argument("--port", type=int, default=8765, help="Bind port")
+    p.add_argument(
+        "--db-path",
+        type=Path,
+        default=Path.cwd() / "digest.sqlite",
+        help="SQLite path for DigestStore",
+    )
+    p.add_argument(
+        "--fake",
+        action="store_true",
+        help="Offline deterministic mode",
+    )
+    p.set_defaults(_handler=service_main)
+    return p
+
+
+def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
+    from ai_news_agent.adapters.openclaw_client import main as openclaw_main
+
+    p = sub.add_parser(
+        "openclaw-digest",
+        help="Request digest from local warm service (OpenClaw client)",
+    )
+    p.add_argument("--timeframe", default=None, help="Timeframe hint")
+    p.add_argument(
+        "--sources",
+        default=None,
+        help="Comma-separated sources (github, bilibili)",
+    )
+    p.add_argument("--topics", default=None, help="Comma-separated topics")
+    p.add_argument("--fake", action="store_true", help="Offline fake digest")
+    p.add_argument(
+        "--service-url",
+        default=None,
+        help="Service base URL (or AI_NEWS_AGENT_SERVICE_URL)",
+    )
+    p.add_argument("--correlation-id", default=None, help="Latency correlation id")
+    p.set_defaults(_handler=openclaw_main)
+    return p
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-news-agent")
     sub = parser.add_subparsers(dest="command", required=True)
     _add_digest_parser(sub)
+    _add_service_parser(sub)
+    _add_openclaw_digest_parser(sub)
     return parser
 
 
-def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
-    """CLI entry. Returns process exit code."""
-    load_local_env()
-    configure_bilibili_network_from_env()
-    configure_logging()
-    out = stdout or sys.stdout
-    args = argv if argv is not None else sys.argv[1:]
-    parser = build_arg_parser()
-    try:
-        ns = parser.parse_args(args)
-    except SystemExit as e:
-        code = e.code
-        return int(code) if isinstance(code, int) else 2
-
-    if ns.command != "digest":
-        print("Only the digest subcommand is supported.", file=sys.stderr)
-        return 2
-
+def _run_digest_command(ns: argparse.Namespace, *, stdout: TextIO) -> int:
     try:
         req = build_digest_request(ns)
     except ValueError as e:
@@ -230,8 +264,56 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     text = result.text
     if not text.endswith("\n"):
         text += "\n"
-    out.write(text)
+    stdout.write(text)
     return 0
+
+
+def _namespace_to_argv(ns: argparse.Namespace) -> list[str]:
+    argv: list[str] = []
+    for key, value in sorted(vars(ns).items()):
+        if key in ("command", "_handler"):
+            continue
+        flag = "--" + key.replace("_", "-")
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            if value:
+                argv.append(flag)
+            continue
+        argv.extend([flag, str(value)])
+    return argv
+
+
+def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
+    """CLI entry. Returns process exit code."""
+    load_local_env()
+    configure_bilibili_network_from_env()
+    configure_logging()
+    out = stdout or sys.stdout
+    args = argv if argv is not None else sys.argv[1:]
+    parser = build_arg_parser()
+    try:
+        ns = parser.parse_args(args)
+    except SystemExit as e:
+        code = e.code
+        return int(code) if isinstance(code, int) else 2
+
+    if ns.command == "digest":
+        return _run_digest_command(ns, stdout=out)
+
+    handler = getattr(ns, "_handler", None)
+    if handler is None:
+        print(f"Unsupported command: {ns.command}", file=sys.stderr)
+        return 2
+
+    if ns.command == "service":
+        service_argv = _namespace_to_argv(ns)
+        return int(handler(service_argv))
+
+    if ns.command == "openclaw-digest":
+        return int(handler(args, stdout=out))
+
+    return int(handler(args, stdout=out))
 
 
 if __name__ == "__main__":

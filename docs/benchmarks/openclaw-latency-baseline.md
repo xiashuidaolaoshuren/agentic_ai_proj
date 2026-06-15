@@ -1,0 +1,52 @@
+# OpenClaw Digest Latency Baseline (2026-06-14)
+
+Captured before the persistent digest-service adapter. Use the same prompts for post-fix comparison.
+
+## Test environment
+
+- OS: Windows 10
+- Repo: `agentic_ai_proj`
+- Gradio: `uv run python -m ai_news_agent.app.gradio_app` (live mode)
+- OpenClaw: `openclaw gateway run` + `ai-news-digest` skill via CLI exec
+- Prompt under test: `Give me today's AI digest` (default `github,bilibili`, timeframe `today`)
+
+## Digest runtime (workflow only)
+
+| Path | Run | Entries | Warnings | Elapsed |
+|------|-----|---------|----------|---------|
+| CLI (`ai-news-agent digest`) | run_id=69 | 5 | 0 | **52s** (22:40:44 → 22:41:36) |
+| Gradio (`ChatService`) | run_id=72 | 5 | 0 | **27.23s** |
+| Gradio (channel digest) | run_id=71 | 5 | 1 | **29.62s** |
+
+**Observation:** Gradio keeps process warm (model + env + Bilibili network config loaded once). CLI cold-starts per invocation via `uv run` + OpenClaw exec, roughly doubling perceived digest time.
+
+## OpenClaw end-to-end (channel)
+
+Representative gateway trace (same session as CLI run above):
+
+| Phase | Approx. duration | Evidence |
+|-------|------------------|----------|
+| Gateway session queued behind model work | **135s+** | `long-running session … state=processing age=135s` |
+| Pre-exec `web_fetch` attempts (off-path) | **~50s** | Multiple `web_fetch failed` (412/403) on Bilibili/RSS URLs 22:54:04–22:54:52 |
+| CLI digest exec | **52s** | `cli digest start` → `cli digest done` |
+| **Estimated end-to-end (this run)** | **~3+ min** | Gateway orchestration + failed fetches + CLI cold start |
+
+## Bottleneck summary
+
+1. **Per-request CLI cold start** — new Python process, env load, model client init each OpenClaw digest.
+2. **OpenClaw gateway orchestration overhead** — skill routing may trigger extra tools (`web_fetch`) before `exec`.
+3. **Connector variance** — Bilibili anti-bot retries add seconds; not unique to OpenClaw but visible in both paths.
+
+## Post-fix targets
+
+- Digest runtime via warm service: within ~5s of Gradio p50 (~27s) for same prompt.
+- End-to-end OpenClaw: remove CLI spawn overhead; skill should call local client only (no `web_fetch` side paths).
+- Telemetry: log `correlation_id` + per-stage timings for each request.
+
+## Comparison procedure (repeat after fix)
+
+1. Start digest service: `uv run ai-news-agent service --port 8765`
+2. Restart OpenClaw gateway; `/new` session.
+3. Run prompt `Give me today's AI digest` **10 times**; record wall-clock from send to final reply.
+4. Record p50/p95 and grep logs for `correlation_id` stage lines.
+5. Compare to table above.
