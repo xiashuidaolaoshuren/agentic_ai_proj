@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ai_news_agent.adapters.openclaw import (
-    build_digest_request_from_hints,
     normalize_source_hint,
     normalize_timeframe_hint,
     normalize_topic_hint,
+    resolve_openclaw_digest_request,
 )
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
@@ -42,11 +42,15 @@ _DEFAULT_PORT = 8765
 
 def build_digest_request_payload(
     *,
+    message: str | None = None,
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
 ) -> dict[str, Any]:
     """Serialize OpenClaw hints into a JSON-friendly digest request body."""
+    if message is not None and message.strip():
+        return {"message": message.strip()}
+
     payload: dict[str, Any] = {
         "timeframe": normalize_timeframe_hint(timeframe_hint),
         "sources": ",".join(normalize_source_hint(sources_hint)),
@@ -58,6 +62,15 @@ def build_digest_request_payload(
 
 
 def _digest_request_from_json(body: dict[str, Any]) -> DigestRequest:
+    message = body.get("message")
+    if message is not None and str(message).strip():
+        sources = body.get("sources")
+        sources_hint = str(sources) if sources is not None else None
+        return resolve_openclaw_digest_request(
+            message=str(message).strip(),
+            sources_hint=sources_hint,
+        )
+
     sources = body.get("sources")
     sources_hint = str(sources) if sources is not None else None
     topics = body.get("topics")
@@ -68,16 +81,13 @@ def _digest_request_from_json(body: dict[str, Any]) -> DigestRequest:
         topics_hint = ",".join(str(t) for t in topics)
     else:
         topics_hint = str(topics)
-
-    kw: dict[str, object] = {
-        "connector_names": normalize_source_hint(sources_hint),
-    }
-    if body.get("timeframe") is not None:
-        kw["timeframe"] = normalize_timeframe_hint(str(body["timeframe"]))
-    normalized_topics = normalize_topic_hint(topics_hint)
-    if normalized_topics is not None:
-        kw["topics"] = normalized_topics
-    return DigestRequest(**kw)
+    timeframe = body.get("timeframe")
+    timeframe_hint = str(timeframe) if timeframe is not None else None
+    return resolve_openclaw_digest_request(
+        timeframe_hint=timeframe_hint,
+        sources_hint=sources_hint,
+        topics_hint=topics_hint,
+    )
 
 
 async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:

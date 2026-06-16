@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from ai_news_agent.digest_request_builder import resolve_digest_request
+from ai_news_agent.intent import parse_connector_names_from_message
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
@@ -42,6 +46,88 @@ def normalize_topic_hint(hint: str | None) -> list[str] | None:
     if not topics:
         return None
     return topics
+
+
+def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | None:
+    """Infer connector scope from explicit URL/channel selectors when unset."""
+    has_github = bool(req.github_manual_urls or req.github_target_channels)
+    has_bilibili = bool(
+        req.bilibili_manual_urls
+        or req.bilibili_target_channels
+        or req.manual_urls
+        or req.target_channels
+    )
+    if has_github and has_bilibili:
+        return list(DEFAULT_SOURCE_NAMES)
+    if has_github:
+        return ["github"]
+    if has_bilibili:
+        return ["bilibili"]
+    return None
+
+
+def validate_source_selector_consistency(req: DigestRequest) -> None:
+    """Reject contradictory source toggles vs explicit URL/channel selectors."""
+    names = list(req.connector_names or [])
+    if not names:
+        return
+
+    has_bilibili_selector = bool(
+        req.bilibili_manual_urls
+        or req.bilibili_target_channels
+        or req.manual_urls
+        or req.target_channels
+    )
+    has_github_selector = bool(req.github_manual_urls or req.github_target_channels)
+
+    if names == ["github"] and has_bilibili_selector:
+        raise ValueError(
+            "Source selection is 'github only' but the request includes Bilibili "
+            "video/channel selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["bilibili"] and has_github_selector:
+        raise ValueError(
+            "Source selection is 'bilibili only' but the request includes GitHub "
+            "repo/channel selectors. Remove the conflicting source toggle or selector."
+        )
+
+
+def resolve_openclaw_digest_request(
+    *,
+    message: str | None = None,
+    timeframe_hint: str | None = None,
+    sources_hint: str | None = None,
+    topics_hint: str | None = None,
+) -> DigestRequest:
+    """Build a digest request from NL message and/or structured OpenClaw hints."""
+    if message is not None and message.strip():
+        req = resolve_digest_request(message.strip())
+        nl_sources = parse_connector_names_from_message(message)
+        if nl_sources is not None:
+            req = replace(req, connector_names=normalize_source_names(nl_sources))
+        elif sources_hint is not None and sources_hint.strip():
+            req = replace(
+                req,
+                connector_names=normalize_source_hint(sources_hint),
+            )
+        elif req.connector_names is None:
+            inferred = _infer_connector_names_from_selectors(req)
+            if inferred is not None:
+                req = replace(req, connector_names=inferred)
+        validate_source_selector_consistency(req)
+        return req
+
+    kw: dict[str, object] = {
+        "connector_names": normalize_source_hint(sources_hint),
+    }
+    if timeframe_hint is not None and timeframe_hint.strip():
+        kw["timeframe"] = normalize_timeframe_hint(timeframe_hint)
+    topics = normalize_topic_hint(topics_hint)
+    if topics is not None:
+        kw["topics"] = topics
+    req = DigestRequest(**kw)
+    validate_source_selector_consistency(req)
+    return req
 
 
 def build_digest_cli_argv(
@@ -92,4 +178,6 @@ __all__ = [
     "normalize_source_hint",
     "normalize_timeframe_hint",
     "normalize_topic_hint",
+    "resolve_openclaw_digest_request",
+    "validate_source_selector_consistency",
 ]

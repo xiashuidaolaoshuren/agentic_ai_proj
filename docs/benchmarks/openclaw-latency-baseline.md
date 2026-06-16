@@ -50,3 +50,15 @@ Representative gateway trace (same session as CLI run above):
 3. Run prompt `Give me today's AI digest` **10 times**; record wall-clock from send to final reply.
 4. Record p50/p95 and grep logs for `correlation_id` stage lines.
 5. Compare to table above.
+
+## Targeted digest smoke (OpenClaw)
+
+With the digest service running, verify these prompts route through `openclaw-digest --message` (not `web_fetch`):
+
+| Prompt | Expected command |
+|--------|------------------|
+| `Digest bilibili video BV1gRJs63EYX` | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
+| `Digest https://www.bilibili.com/video/BV1gRJs63EYX` | `openclaw-digest --message "Digest https://www.bilibili.com/video/BV1gRJs63EYX"` |
+| `Digest https://github.com/langchain-ai/langgraph` | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
+
+Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.

@@ -183,6 +183,7 @@ def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
         "openclaw-digest",
         help="Request digest from local warm service (OpenClaw client)",
     )
+    p.add_argument("--message", default=None, help="Natural-language digest request")
     p.add_argument("--timeframe", default=None, help="Timeframe hint")
     p.add_argument(
         "--sources",

@@ -11,16 +11,27 @@ Generate a markdown AI news digest by calling the **local warm digest service** 
 `ai-news-agent openclaw-digest`. OpenClaw is the channel gateway; this project handles
 retrieval, ranking, summarization, and persistence.
 
-**Do not** use `web_fetch`, RSS lookups, or other research tools for digest requests.
-Map user intent to CLI flags and run **only** the fixed `openclaw-digest` command below.
+**Do not** use `web_fetch`, RSS lookups, Bilibili API scraping, or other research tools for
+digest requests. Map user intent to the fixed `openclaw-digest` command below.
 
 ## When To Use
 
-Activate this skill when the user asks for an AI news digest in natural language, for example:
+Activate this skill when the user asks for a digest in natural language, including:
+
+**Broad multi-source digests**
 
 - "Give me today's AI digest."
 - "Give me today's AI digest from GitHub only."
 - "Give me this week's AI digest on RAG and agents."
+
+**Targeted digests (single URL, BV id, or channel)**
+
+- "Digest bilibili video BV1gRJs63EYX"
+- "Digest https://www.bilibili.com/video/BV1gRJs63EYX"
+- "Digest https://github.com/langchain-ai/langgraph"
+- "Digest bilibili channel 285286947"
+
+Targeted requests are **in scope** for this skill. Never treat them as generic research.
 
 Do not use this skill for follow-up Q&A, scheduled digests, or non-digest research tasks.
 
@@ -45,8 +56,9 @@ Map user intent into constrained CLI options. Defaults and aliases match
 
 | User intent | CLI flag | Default / rules |
 | --- | --- | --- |
+| Full user digest phrase (preferred for targeted) | `--message` | Pass the user's digest sentence verbatim as one quoted argument. |
 | Timeframe | `--timeframe` | Default `today`. Map `daily` -> `today`; `week` / `this week` / `last7` -> `last_7_days`. |
-| Sources | `--sources` | Default `github,bilibili`. Allowed: `github`, `bilibili`. |
+| Sources | `--sources` | Default `github,bilibili` for broad digests. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
 | Topics | `--topics` | Optional comma-separated list. Omit when user does not specify topics. |
 
 Do not invent new flags or source names.
@@ -56,18 +68,24 @@ Do not invent new flags or source names.
 Run from the project workspace root. Use the `exec` tool with a **fixed command prefix**
 and validated argument tokens. Never build a shell string from raw user text.
 
-**Live run template:**
+**Broad digest template:**
 
 ```bash
 uv run ai-news-agent openclaw-digest --timeframe <timeframe> --sources <sources>
 ```
 
-Add `--topics <csv>` only when the user specified topics.
+**Targeted digest template (preferred):**
+
+```bash
+uv run ai-news-agent openclaw-digest --message "<user digest sentence>"
+```
+
+Add `--topics <csv>` only when the user specified topics for broad digests.
 
 **Offline / smoke template** (service must be started with `--fake`):
 
 ```bash
-uv run ai-news-agent openclaw-digest --fake --timeframe <timeframe> --sources <sources>
+uv run ai-news-agent openclaw-digest --fake --message "Digest bilibili video BV1demo0001"
 ```
 
 ### Examples
@@ -77,6 +95,9 @@ uv run ai-news-agent openclaw-digest --fake --timeframe <timeframe> --sources <s
 | Give me today's AI digest. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili` |
 | Give me today's AI digest from GitHub only. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github` |
 | Give me this week's AI digest on RAG and agents. | `uv run ai-news-agent openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
+| Digest bilibili video BV1gRJs63EYX | `uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
+| Digest https://github.com/langchain-ai/langgraph | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
+| Digest bilibili channel 285286947 | `uv run ai-news-agent openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Return the client stdout (markdown digest) to the user unchanged. Preserve source links and
 connector caveats in the response.
@@ -104,5 +125,6 @@ Prefer the warm `openclaw-digest` path for lower latency.
 | Service not reachable | Ask user to start `uv run ai-news-agent service` and retry. |
 | Missing `OPENAI_API_KEY` in live mode | Explain live digest requires `OPENAI_API_KEY`; suggest `--fake` smoke. |
 | Invalid source name | Report allowed sources: `github`, `bilibili`. |
+| Conflicting source toggle vs URL/channel selector | Explain the mismatch and ask user to remove one side of the conflict. |
 | Empty digest or connector warnings | Return digest output and surface warnings. |
 | Non-zero exit code | Summarize stderr; do not expose full stack traces. |

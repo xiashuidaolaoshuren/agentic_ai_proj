@@ -8,6 +8,8 @@ from ai_news_agent.adapters.openclaw import (
     normalize_source_hint,
     normalize_timeframe_hint,
     normalize_topic_hint,
+    resolve_openclaw_digest_request,
+    validate_source_selector_consistency,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "normalize_source_hint",
     "normalize_timeframe_hint",
     "normalize_topic_hint",
+    "resolve_openclaw_digest_request",
+    "validate_source_selector_consistency",
 ]

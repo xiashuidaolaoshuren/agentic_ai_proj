@@ -33,6 +33,7 @@ def resolve_service_url(explicit: str | None = None) -> str:
 def request_digest_markdown(
     service_url: str,
     *,
+    message: str | None = None,
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
@@ -43,6 +44,7 @@ def request_digest_markdown(
     """POST digest request to the local service and return markdown text."""
     cid = correlation_id or new_correlation_id()
     payload = build_digest_request_payload(
+        message=message,
         timeframe_hint=timeframe_hint,
         sources_hint=sources_hint,
         topics_hint=topics_hint,
@@ -92,6 +94,11 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         description="Request a digest from the local warm digest service.",
     )
     parser.add_argument(
+        "--message",
+        default=None,
+        help="Natural-language digest request (targeted URL/BV/channel or broad digest)",
+    )
+    parser.add_argument(
         "--timeframe",
         default=None,
         help="Timeframe hint (today, last_7_days, …)",
@@ -128,6 +135,7 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     try:
         text = request_digest_markdown(
             service_url,
+            message=ns.message,
             timeframe_hint=ns.timeframe,
             sources_hint=ns.sources,
             topics_hint=ns.topics,
@@ -147,12 +155,19 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
 
 def build_openclaw_digest_argv(
     *,
+    message: str | None = None,
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
     fake: bool = False,
 ) -> list[str]:
     """Build argv for ``openclaw-digest`` mirroring digest CLI flag shapes."""
+    if message is not None and message.strip():
+        argv = ["openclaw-digest", "--message", message.strip()]
+        if fake:
+            argv.append("--fake")
+        return argv
+
     argv = ["openclaw-digest"]
     digest_argv = build_digest_cli_argv(
         timeframe_hint=timeframe_hint,

@@ -113,6 +113,8 @@ def test_adapters_package_exports_public_surface() -> None:
         "normalize_source_hint": adapters.normalize_source_hint,
         "normalize_timeframe_hint": adapters.normalize_timeframe_hint,
         "normalize_topic_hint": adapters.normalize_topic_hint,
+        "resolve_openclaw_digest_request": adapters.resolve_openclaw_digest_request,
+        "validate_source_selector_consistency": adapters.validate_source_selector_consistency,
     }
 
     assert set(adapters.__all__) == set(exported)
