@@ -10,7 +10,7 @@ from typing import TextIO
 import httpx
 
 from ai_news_agent.adapters.openclaw import build_digest_cli_argv
-from ai_news_agent.app.digest_service import build_digest_request_payload
+from ai_news_agent.app.digest_service import build_digest_request_payload, build_followup_request_payload
 from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.telemetry import new_correlation_id
 
@@ -84,6 +84,48 @@ def request_digest_markdown(
     return text
 
 
+def request_followup_text(
+    service_url: str,
+    *,
+    message: str,
+    correlation_id: str | None = None,
+    timeout_s: float = 60.0,
+) -> str:
+    """POST structured follow-up request to the local service and return reply text."""
+    cid = correlation_id or new_correlation_id()
+    payload = build_followup_request_payload(message=message)
+    payload["correlation_id"] = cid
+
+    url = f"{service_url.rstrip('/')}/followup"
+    logger.info(
+        "openclaw_client followup_start correlation_id=%s url=%s",
+        cid,
+        url,
+    )
+    with httpx.Client(timeout=httpx.Timeout(timeout_s)) as client:
+        response = client.post(url, json=payload)
+
+    if response.status_code != 200:
+        detail = response.text[:500]
+        try:
+            body = response.json()
+            detail = str(body.get("error", detail))
+        except ValueError:
+            pass
+        raise RuntimeError(
+            f"digest service returned HTTP {response.status_code}: {detail}"
+        )
+
+    data = response.json()
+    text = str(data.get("text", ""))
+    logger.info(
+        "openclaw_client followup_done correlation_id=%s path=%s",
+        data.get("correlation_id", cid),
+        data.get("path"),
+    )
+    return text
+
+
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     """CLI: ``ai-news-agent openclaw-digest`` — prints markdown digest to stdout."""
     configure_logging()
@@ -153,6 +195,51 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     return 0
 
 
+def followup_main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
+    """CLI: ``ai-news-agent openclaw-followup`` — prints structured follow-up text."""
+    configure_logging()
+    out = stdout or sys.stdout
+
+    parser = argparse.ArgumentParser(
+        prog="ai-news-agent openclaw-followup",
+        description="Request structured follow-up from the local warm digest service.",
+    )
+    parser.add_argument(
+        "--message",
+        required=True,
+        help="Structured follow-up phrase (show sources, study first, show caveats)",
+    )
+    parser.add_argument(
+        "--service-url",
+        default=None,
+        help=f"Digest service base URL (default: env {_ENV_SERVICE_URL} or {_DEFAULT_SERVICE_URL})",
+    )
+    parser.add_argument(
+        "--correlation-id",
+        default=None,
+        help="Optional correlation id for latency tracing",
+    )
+
+    ns = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    service_url = resolve_service_url(ns.service_url)
+
+    try:
+        text = request_followup_text(
+            service_url,
+            message=ns.message,
+            correlation_id=ns.correlation_id,
+        )
+    except (httpx.RequestError, RuntimeError, ValueError) as exc:
+        logger.exception("openclaw_followup failed")
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if not text.endswith("\n"):
+        text += "\n"
+    out.write(text)
+    return 0
+
+
 def build_openclaw_digest_argv(
     *,
     message: str | None = None,
@@ -187,9 +274,17 @@ def build_openclaw_digest_argv(
     return argv
 
 
+def build_openclaw_followup_argv(*, message: str) -> list[str]:
+    """Build argv for ``openclaw-followup`` with a quoted user message token."""
+    return ["openclaw-followup", "--message", message.strip()]
+
+
 __all__ = [
     "build_openclaw_digest_argv",
+    "build_openclaw_followup_argv",
+    "followup_main",
     "main",
     "request_digest_markdown",
+    "request_followup_text",
     "resolve_service_url",
 ]

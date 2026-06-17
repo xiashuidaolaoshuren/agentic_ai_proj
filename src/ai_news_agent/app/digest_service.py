@@ -21,6 +21,7 @@ from ai_news_agent.adapters.openclaw import (
 )
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
+from ai_news_agent.followup_structured import handle_openclaw_structured_followup
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest_instrumented
 from ai_news_agent.llm import build_chat_model
@@ -97,6 +98,11 @@ async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
             await closer()
 
 
+def build_followup_request_payload(*, message: str) -> dict[str, Any]:
+    """Serialize an OpenClaw structured follow-up request body."""
+    return {"message": message.strip()}
+
+
 class DigestServiceRuntime:
     """Warm digest runtime: store schema, model, and connector factory."""
 
@@ -154,9 +160,24 @@ class DigestServiceRuntime:
         )
         return result, dict(timer.stages), elapsed
 
+    def run_followup(
+        self,
+        *,
+        message: str,
+        correlation_id: str,
+    ) -> dict[str, object]:
+        outcome = handle_openclaw_structured_followup(message=message, store=self._store)
+        logger.info(
+            "followup_service completed correlation_id=%s run_id=%s path=%s",
+            correlation_id,
+            outcome.get("run_id"),
+            outcome.get("path"),
+        )
+        return outcome
+
 
 class DigestServiceServer:
-    """Threaded HTTP server exposing ``/health`` and ``/digest``."""
+    """Threaded HTTP server exposing ``/health``, ``/digest``, and ``/followup``."""
 
     def __init__(
         self,
@@ -206,10 +227,17 @@ def _make_handler(runtime: DigestServiceRuntime) -> type[BaseHTTPRequestHandler]
             self._json_response(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") != "/digest":
+            path = self.path.rstrip("/")
+            if path == "/followup":
+                self._handle_followup_post()
+                return
+            if path != "/digest":
                 self._json_response(404, {"error": "not found"})
                 return
 
+            self._handle_digest_post()
+
+        def _handle_digest_post(self) -> None:
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b"{}"
             try:
@@ -268,6 +296,35 @@ def _make_handler(runtime: DigestServiceRuntime) -> type[BaseHTTPRequestHandler]
                     "correlation_id": correlation_id,
                     "elapsed_s": round(elapsed, 3),
                     "stages": stages,
+                },
+            )
+
+        def _handle_followup_post(self) -> None:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._json_response(400, {"error": "invalid JSON body"})
+                return
+
+            message = body.get("message")
+            if message is None or not str(message).strip():
+                self._json_response(400, {"error": "message is required"})
+                return
+
+            correlation_id = str(body.get("correlation_id") or new_correlation_id())
+            outcome = runtime.run_followup(
+                message=str(message).strip(),
+                correlation_id=correlation_id,
+            )
+            self._json_response(
+                200,
+                {
+                    "text": outcome["text"],
+                    "run_id": outcome["run_id"],
+                    "path": outcome["path"],
+                    "correlation_id": correlation_id,
                 },
             )
 
@@ -331,5 +388,6 @@ __all__ = [
     "DigestServiceRuntime",
     "DigestServiceServer",
     "build_digest_request_payload",
+    "build_followup_request_payload",
     "main",
 ]

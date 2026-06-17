@@ -218,7 +218,7 @@ Design: [OpenClaw integration design](docs/superpowers/specs/2026-06-08-openclaw
 
 ### Skill setup
 
-The skill definition lives in this repo at [`openclaw/skills/ai-news-digest/SKILL.md`](openclaw/skills/ai-news-digest/SKILL.md).
+The skill definitions live in this repo at [`openclaw/skills/ai-news-digest/SKILL.md`](openclaw/skills/ai-news-digest/SKILL.md) and [`openclaw/skills/ai-news-followup/SKILL.md`](openclaw/skills/ai-news-followup/SKILL.md).
 
 **Start the warm digest service** (once per session; keeps model and connectors warm):
 
@@ -231,8 +231,9 @@ Optional: set `AI_NEWS_AGENT_SERVICE_URL` if not using the default `http://127.0
 Make the skill visible to your OpenClaw workspace (adjust paths for your OS):
 
 ```bash
-# Example: symlink repo skill into OpenClaw workspace skills directory
+# Example: symlink repo skills into OpenClaw workspace skills directory
 ln -s "$(pwd)/openclaw/skills/ai-news-digest" ~/.openclaw/workspace/skills/ai-news-digest
+ln -s "$(pwd)/openclaw/skills/ai-news-followup" ~/.openclaw/workspace/skills/ai-news-followup
 ```
 
 After adding or updating the skill, start a new OpenClaw session (e.g. `/new` in chat) or restart the gateway so it reloads skills.
@@ -270,6 +271,22 @@ Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 
+### Structured follow-up (OpenClaw)
+
+After generating a digest, use the **`ai-news-followup`** skill for deterministic inspection of the latest saved digest (same `digest.sqlite` as the warm service):
+
+| Smoke prompt | Expected CLI shape |
+|--------------|-------------------|
+| Show sources | `openclaw-followup --message "show sources"` |
+| Which item should I study first? | `openclaw-followup --message "which item should I study first"` |
+| Show caveats | `openclaw-followup --message "show caveats"` |
+
+```bash
+uv run ai-news-agent openclaw-followup --message "show sources"
+```
+
+Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for tool-agent follow-ups.
+
 Offline smoke (no API key, no network) — run directly from repo root:
 
 ```bash
@@ -286,7 +303,7 @@ uv run ai-news-agent digest --timeframe today --sources github,bilibili
 
 - Keep the gateway on loopback / trusted local contexts only.
 - Commands use validated tokens; do not interpolate raw user text into shell strings.
-- Follow-up Q&A inside OpenClaw is out of scope for Milestone 3; use Gradio for structured follow-ups.
+- OpenClaw supports **structured** follow-up only (`openclaw-followup`); open-ended Q&A remains in Gradio.
 
 ## Tests
 
@@ -325,7 +342,7 @@ Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if
 **Milestone 3 OpenClaw:**
 
 - Digest generation only via CLI delegation; no gateway-native TypeScript plugin.
-- Follow-up Q&A inside OpenClaw channels is not implemented; use Gradio for follow-ups.
+- OpenClaw supports structured follow-up via `openclaw-followup`; open-ended Q&A in channels uses Gradio.
 
 ## Documentation
 

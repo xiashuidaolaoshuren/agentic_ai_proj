@@ -70,3 +70,13 @@ Success criteria: markdown digest output from our workflow, connector caveats pr
 2. Run: `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"`
 3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk`), not only the GitHub repo card.
 4. If `rss.xml` is unreachable, expect a single repo-metadata item plus `juya_rss_unavailable` in connector caveats.
+
+## Structured follow-up smoke (OpenClaw)
+
+Prerequisite: digest service running and a digest already generated in the same `digest.sqlite`.
+
+1. Generate digest: `uv run ai-news-agent openclaw-digest --fake --timeframe today --sources github`
+2. Follow up: `uv run ai-news-agent openclaw-followup --message "show sources"`
+3. Expect numbered source links from the latest digest (not a new digest run).
+4. Try `openclaw-followup --message "show caveats"` and `openclaw-followup --message "which item should I study first"`.
+5. Unsupported phrase (e.g. `followup the first issue`) should return structured-mode guidance, not `web_fetch`.

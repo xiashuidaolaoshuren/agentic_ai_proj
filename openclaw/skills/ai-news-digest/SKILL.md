@@ -34,6 +34,8 @@ Activate this skill when the user asks for a digest in natural language, includi
 Targeted requests are **in scope** for this skill. Never treat them as generic research.
 
 Do not use this skill for follow-up Q&A, scheduled digests, or non-digest research tasks.
+Use the separate **`ai-news-followup`** skill for structured follow-up (show sources, study
+first, show caveats) after a digest has been generated.
 
 ## Prerequisites
 

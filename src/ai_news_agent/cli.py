@@ -202,12 +202,35 @@ def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
     return p
 
 
+def _add_openclaw_followup_parser(sub: Any) -> argparse.ArgumentParser:
+    from ai_news_agent.adapters.openclaw_client import followup_main
+
+    p = sub.add_parser(
+        "openclaw-followup",
+        help="Request structured follow-up from local warm service (OpenClaw client)",
+    )
+    p.add_argument(
+        "--message",
+        required=True,
+        help="Structured follow-up phrase (show sources, study first, show caveats)",
+    )
+    p.add_argument(
+        "--service-url",
+        default=None,
+        help="Service base URL (or AI_NEWS_AGENT_SERVICE_URL)",
+    )
+    p.add_argument("--correlation-id", default=None, help="Latency correlation id")
+    p.set_defaults(_handler=followup_main)
+    return p
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-news-agent")
     sub = parser.add_subparsers(dest="command", required=True)
     _add_digest_parser(sub)
     _add_service_parser(sub)
     _add_openclaw_digest_parser(sub)
+    _add_openclaw_followup_parser(sub)
     return parser
 
 
@@ -312,6 +335,9 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         return int(handler(service_argv))
 
     if ns.command == "openclaw-digest":
+        return int(handler(args, stdout=out))
+
+    if ns.command == "openclaw-followup":
         return int(handler(args, stdout=out))
 
     return int(handler(args, stdout=out))
