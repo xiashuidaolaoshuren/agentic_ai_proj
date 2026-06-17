@@ -60,5 +60,13 @@ With the digest service running, verify these prompts route through `openclaw-di
 | `Digest bilibili video BV1gRJs63EYX` | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | `Digest https://www.bilibili.com/video/BV1gRJs63EYX` | `openclaw-digest --message "Digest https://www.bilibili.com/video/BV1gRJs63EYX"` |
 | `Digest https://github.com/langchain-ai/langgraph` | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
+| `Digest https://github.com/jujuyaya/juya-ai-daily` | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"` |
 
 Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.
+
+### Juya daily repo ingestion smoke
+
+1. Start digest service: `uv run ai-news-agent service --port 8765`
+2. Run: `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"`
+3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk`), not only the GitHub repo card.
+4. If `rss.xml` is unreachable, expect a single repo-metadata item plus `juya_rss_unavailable` in connector caveats.

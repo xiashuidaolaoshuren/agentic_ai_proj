@@ -36,6 +36,60 @@ def test_resolve_openclaw_digest_request_parses_github_repo_url() -> None:
     assert req.connector_names == ["github"]
 
 
+def test_resolve_openclaw_digest_request_parses_juya_daily_repo_url() -> None:
+    req = resolve_openclaw_digest_request(
+        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+    )
+    assert any("jujuyaya/juya-ai-daily" in u for u in req.github_manual_urls)
+    assert req.connector_names == ["github"]
+
+
+def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -> None:
+    """OpenClaw resolve + GitHub connector should surface daily RSS entries."""
+    import asyncio
+    import base64
+    from pathlib import Path
+
+    import httpx
+
+    from ai_news_agent.connectors.base import ConnectorRequest
+    from ai_news_agent.connectors.github import GitHubConnector
+    from ai_news_agent.graph.nodes.parse import parse_request_node
+    from ai_news_agent.graph.state import DigestGraphState
+
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "juya_rss_sample.xml"
+    ).read_text(encoding="utf-8")
+    rss_b64 = base64.b64encode(fixture.encode("utf-8")).decode("ascii")
+
+    req = resolve_openclaw_digest_request(
+        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+    )
+    parsed = parse_request_node(DigestGraphState(request=req))
+    connector_req: ConnectorRequest = parsed["connector_request"]  # type: ignore[index]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/rss.xml":
+            return httpx.Response(200, json={"content": rss_b64, "encoding": "base64"})
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            out = await GitHubConnector(token=None, client=client).collect(connector_req)
+
+        assert len(out.items) >= 1
+        assert out.items[0].title == "2026-06-16"
+        assert "daily.juya.uk" in out.items[0].url
+        assert out.items[0].title != "jujuyaya/juya-ai-daily"
+
+    asyncio.run(main())
+
+
 def test_validate_source_selector_consistency_rejects_github_only_with_bilibili_url() -> None:
     req = DigestRequest(
         topics=[],

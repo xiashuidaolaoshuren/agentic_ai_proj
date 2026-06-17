@@ -255,6 +255,7 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 | Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
 | Digest bilibili video BV1gRJs63EYX | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
+| Digest https://github.com/jujuyaya/juya-ai-daily | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"` |
 | Digest bilibili channel 285286947 | `openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Full commands (from repo root, service running):
@@ -262,7 +263,10 @@ Full commands (from repo root, service running):
 ```bash
 uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili
 uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"
+uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"
 ```
+
+Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml` (title, link, snippet). If RSS is unavailable, the connector falls back to repository metadata and emits a `juya_rss_unavailable` caveat.
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 

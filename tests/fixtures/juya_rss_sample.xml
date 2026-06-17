@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>橘鸦AI早报</title>
+    <item>
+      <title>2026-06-16</title>
+      <link>https://daily.juya.uk/2026/06/16/</link>
+      <pubDate>Mon, 16 Jun 2026 08:00:00 GMT</pubDate>
+      <description>GLM-5.2 release and ZCode 3.0 updates.</description>
+    </item>
+    <item>
+      <title>2026-06-15</title>
+      <link>https://daily.juya.uk/2026/06/15/</link>
+      <pubDate>Sun, 15 Jun 2026 08:00:00 GMT</pubDate>
+      <description>Prior day AI news roundup.</description>
+    </item>
+  </channel>
+</rss>
