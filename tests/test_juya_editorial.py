@@ -1,0 +1,239 @@
+"""Tests for Juya BACKUP enrichment and editorial digest output."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
+import pytest
+
+from ai_news_agent.adapters.openclaw import (
+    normalize_output_language_hint,
+    normalize_output_style_hint,
+    resolve_openclaw_digest_request,
+)
+from ai_news_agent.app.digest_service import build_digest_request_payload
+from ai_news_agent.connectors.base import ConnectorRequest
+from ai_news_agent.connectors.github import GitHubConnector
+from ai_news_agent.connectors.github_juya import (
+    backup_path_for_entry,
+    clean_backup_markdown,
+    enrich_juya_items_with_backup,
+    parse_juya_rss_entries,
+)
+from ai_news_agent.models import (
+    ConfidenceLevel,
+    Digest,
+    DigestEntry,
+    FollowUpAction,
+    NewsItem,
+    SourceKind,
+)
+from ai_news_agent.rendering import render_digest_editorial_text, select_digest_renderers
+from ai_news_agent.request import DigestRequest
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+JUYA_URL = "https://github.com/jujuyaya/juya-ai-daily"
+
+
+def _atom_fixture() -> str:
+    return (FIXTURES / "juya_rss_atom_sample.xml").read_text(encoding="utf-8")
+
+
+def _backup_fixture() -> str:
+    return (FIXTURES / "juya_backup_2026-06-16_sample.md").read_text(encoding="utf-8")
+
+
+def test_backup_path_for_entry_matches_date_suffix() -> None:
+    index = [{"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md"}]
+    assert backup_path_for_entry("2026-06-16", "https://daily.juya.uk/issue-5/", index) == (
+        "BACKUP/5_2026-06-16.md"
+    )
+
+
+def test_clean_backup_markdown_strips_headings() -> None:
+    cleaned = clean_backup_markdown(_backup_fixture())
+    assert "SpaceX" in cleaned
+    assert "#" not in cleaned
+
+
+def test_enrich_juya_items_with_backup_grows_snippet() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    items = parse_juya_rss_entries(_atom_fixture(), max_items=5, collected_at=now)
+    backup_b64 = base64.b64encode(_backup_fixture().encode("utf-8")).decode("ascii")
+    backup_index = [
+        {"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md", "type": "file"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
+            return httpx.Response(200, json=backup_index)
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP/5_2026-06-16.md":
+            return httpx.Response(200, json={"content": backup_b64, "encoding": "base64"})
+        return httpx.Response(404)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            enriched, warnings = await enrich_juya_items_with_backup(client, items)
+
+        assert len(enriched) == 1
+        assert "SpaceX" in (enriched[0].raw_snippet or "")
+        assert len(enriched[0].raw_snippet or "") > 50
+        assert enriched[0].content_confidence is ConfidenceLevel.HIGH
+        assert not any(w.code == "juya_backup_unavailable" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_enrich_juya_items_keeps_rss_when_backup_missing() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    items = parse_juya_rss_entries(_atom_fixture(), max_items=5, collected_at=now)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            enriched, warnings = await enrich_juya_items_with_backup(client, items)
+
+        assert enriched[0].raw_snippet == "Short RSS summary only."
+        assert any(w.code == "juya_backup_unavailable" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_collect_juya_repo_enriches_from_backup() -> None:
+    rss_b64 = base64.b64encode(_atom_fixture().encode("utf-8")).decode("ascii")
+    backup_b64 = base64.b64encode(_backup_fixture().encode("utf-8")).decode("ascii")
+    backup_index = [
+        {"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md", "type": "file"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/rss.xml":
+            return httpx.Response(200, json={"content": rss_b64, "encoding": "base64"})
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
+            return httpx.Response(200, json=backup_index)
+        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP/5_2026-06-16.md":
+            return httpx.Response(200, json={"content": backup_b64, "encoding": "base64"})
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            out = await GitHubConnector(token=None, client=client).collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_manual_urls=[JUYA_URL],
+                    max_items=5,
+                ),
+            )
+        assert len(out.items) == 1
+        assert "SpaceX" in (out.items[0].raw_snippet or "")
+
+    asyncio.run(main())
+
+
+def test_normalize_output_style_and_language_hints() -> None:
+    assert normalize_output_style_hint("newsletter") == "editorial"
+    assert normalize_output_style_hint(None) is None
+    assert normalize_output_language_hint("zh-CN") == "zh-CN"
+    assert normalize_output_language_hint("chinese") == "zh-CN"
+
+
+def test_build_digest_request_payload_includes_style_fields() -> None:
+    payload = build_digest_request_payload(
+        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        output_style_hint="editorial",
+        output_language_hint="zh-CN",
+    )
+    assert payload["message"].startswith("Digest")
+    assert payload["output_style"] == "editorial"
+    assert payload["output_language"] == "zh-CN"
+
+
+def test_resolve_openclaw_digest_request_applies_style_hints() -> None:
+    req = resolve_openclaw_digest_request(
+        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        output_style_hint="editorial",
+        output_language_hint="zh-CN",
+    )
+    assert req.output_style == "editorial"
+    assert req.output_language == "zh-CN"
+
+
+def test_render_digest_editorial_text_groups_sections() -> None:
+    digest = Digest(
+        generated_at=datetime(2026, 6, 17, 12, 0, tzinfo=UTC),
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="1",
+                title="GLM-5.2 release",
+                source_name="GitHub",
+                source_url="https://example.com/1",
+                summary="智谱开源 GLM-5.2",
+                why_it_matters="模型发布",
+                background_knowledge="",
+                follow_up_action=FollowUpAction.READ,
+            ),
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="2",
+                title="Alipay AI beta",
+                source_name="GitHub",
+                source_url="https://example.com/2",
+                summary="支付宝 AI 版邀测",
+                why_it_matters="产品更新",
+                background_knowledge="",
+                follow_up_action=FollowUpAction.READ,
+            ),
+        ],
+        topics=[],
+        timeframe="today",
+    )
+    out = render_digest_editorial_text(digest, output_language="zh-CN")
+    assert "模型发布" in out
+    assert "产品与应用" in out
+    assert "https://example.com/1" in out
+
+
+def test_select_digest_renderers_defaults_to_bulletin() -> None:
+    from ai_news_agent.rendering import render_digest_markdown, render_digest_text
+
+    md_fn, txt_fn = select_digest_renderers(None)
+    assert md_fn is render_digest_markdown
+    assert txt_fn is render_digest_text
+
+
+def test_select_digest_renderers_editorial_mode() -> None:
+    from ai_news_agent.rendering import render_digest_editorial_markdown, render_digest_editorial_text
+
+    md_fn, txt_fn = select_digest_renderers("editorial")
+    assert md_fn is render_digest_editorial_markdown
+    assert txt_fn is render_digest_editorial_text
+
+
+def test_digest_request_output_style_defaults_none() -> None:
+    req = DigestRequest()
+    assert req.output_style is None
+    assert req.output_language is None

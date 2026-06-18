@@ -32,6 +32,10 @@ class DigestRequest:
     github_target_channels: list[str] = field(default_factory=_empty_str_list)
     github_manual_urls: list[str] = field(default_factory=_empty_str_list)
     connector_names: list[str] | None = None
+    #: ``editorial`` selects newsletter-style rendering; ``None`` keeps the default bulletin.
+    output_style: str | None = None
+    #: BCP-47 language tag for summarization/rendering (e.g. ``zh-CN``).
+    output_language: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_items_per_source < 1:

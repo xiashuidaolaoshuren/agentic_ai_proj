@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ai_news_agent.adapters.openclaw import (
+    normalize_output_language_hint,
+    normalize_output_style_hint,
     normalize_source_hint,
     normalize_timeframe_hint,
     normalize_topic_hint,
@@ -47,14 +49,25 @@ def build_digest_request_payload(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
 ) -> dict[str, Any]:
     """Serialize OpenClaw hints into a JSON-friendly digest request body."""
+    style = normalize_output_style_hint(output_style_hint)
+    language = normalize_output_language_hint(output_language_hint)
+    style_fields: dict[str, str] = {}
+    if style is not None:
+        style_fields["output_style"] = style
+    if language is not None:
+        style_fields["output_language"] = language
+
     if message is not None and message.strip():
-        return {"message": message.strip()}
+        return {"message": message.strip(), **style_fields}
 
     payload: dict[str, Any] = {
         "timeframe": normalize_timeframe_hint(timeframe_hint),
         "sources": ",".join(normalize_source_hint(sources_hint)),
+        **style_fields,
     }
     topics = normalize_topic_hint(topics_hint)
     if topics is not None:
@@ -62,7 +75,19 @@ def build_digest_request_payload(
     return payload
 
 
+def _style_hints_from_body(body: dict[str, Any]) -> dict[str, str | None]:
+    output_style = body.get("output_style")
+    output_language = body.get("output_language")
+    return {
+        "output_style_hint": str(output_style) if output_style is not None else None,
+        "output_language_hint": (
+            str(output_language) if output_language is not None else None
+        ),
+    }
+
+
 def _digest_request_from_json(body: dict[str, Any]) -> DigestRequest:
+    style_hints = _style_hints_from_body(body)
     message = body.get("message")
     if message is not None and str(message).strip():
         sources = body.get("sources")
@@ -70,6 +95,7 @@ def _digest_request_from_json(body: dict[str, Any]) -> DigestRequest:
         return resolve_openclaw_digest_request(
             message=str(message).strip(),
             sources_hint=sources_hint,
+            **style_hints,
         )
 
     sources = body.get("sources")
@@ -88,6 +114,7 @@ def _digest_request_from_json(body: dict[str, Any]) -> DigestRequest:
         timeframe_hint=timeframe_hint,
         sources_hint=sources_hint,
         topics_hint=topics_hint,
+        **style_hints,
     )
 
 

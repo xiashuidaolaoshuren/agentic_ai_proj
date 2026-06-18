@@ -121,6 +121,57 @@ def test_chat_structured_sources_lists_digest_urls(tmp_path) -> None:
     assert "Repo" in reply
 
 
+def test_chat_structured_rank_item_returns_entry_detail(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="r1",
+        url="https://example.com/r1",
+        title="Repo",
+        collected_at=now,
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="Repo",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="Digest summary",
+                why_it_matters="Because it matters",
+                background_knowledge="Background",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+
+    store = DigestStore(tmp_path / "rank-item.db")
+    store.init_schema()
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe=None,
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(run_id, [])
+    store.save_digest(run_id, digest)
+
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+    reply = asyncio.run(svc.handle_message_async("follow up on item 1"))
+
+    assert "Digest item 1: Repo" in reply
+    assert "Digest summary" in reply
+    assert "Because it matters" in reply
+
+
 def test_chat_structured_ranking_recommends_top_selected(tmp_path) -> None:
     async def fake_runner(_: DigestRequest) -> DigestResult:
         raise AssertionError("workflow should not run")

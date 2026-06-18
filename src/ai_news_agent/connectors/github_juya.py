@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -19,8 +20,12 @@ JUYA_OWNER = "jujuyaya"
 JUYA_REPO = "juya-ai-daily"
 JUYA_RSS_MAX_ENTRIES = 10
 JUYA_RSS_PATH = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/rss.xml"
+JUYA_BACKUP_PATH = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/BACKUP"
 _SNIPPET_MAX = 650
+_BACKUP_MAX = 6000
 _TAG_RE = re.compile(r"<[^>]+>")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_ISSUE_RE = re.compile(r"issue-(\d+)", re.IGNORECASE)
 
 
 def is_juya_daily_repo(owner: str, repo: str) -> bool:
@@ -165,7 +170,157 @@ async def fetch_juya_daily_items(
         )
         return [], 1, warnings
 
-    return items, len(items), warnings
+    enriched, backup_warnings = await enrich_juya_items_with_backup(
+        client,
+        items,
+        connector_name=connector_name,
+    )
+    warnings.extend(backup_warnings)
+    return enriched, len(enriched), warnings
+
+
+def backup_path_for_entry(
+    title: str,
+    link: str,
+    index: list[dict[str, Any]],
+) -> str | None:
+    """Resolve a BACKUP markdown path from RSS title/date and issue link."""
+    date_match = _DATE_RE.search(title or "")
+    date_token = date_match.group(0) if date_match else None
+    issue_match = _ISSUE_RE.search(link or "")
+    issue_num = issue_match.group(1) if issue_match else None
+
+    for entry in index:
+        name = str(entry.get("name") or "")
+        if not name.endswith(".md"):
+            continue
+        path = str(entry.get("path") or f"BACKUP/{name}")
+        if date_token and date_token in name:
+            return path
+        if issue_num and name.startswith(f"{issue_num}_"):
+            return path
+    return None
+
+
+def clean_backup_markdown(text: str) -> str:
+    """Flatten BACKUP markdown into bounded plain evidence text."""
+    parts: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            stripped = re.sub(r"^#+\s*", "", stripped)
+        if stripped.startswith(("- ", "* ")):
+            stripped = stripped[2:].strip()
+        parts.append(stripped)
+    plain = re.sub(r"\s+", " ", " ".join(parts)).strip()
+    if not plain:
+        return ""
+    return plain[:_BACKUP_MAX]
+
+
+async def _fetch_backup_index(client: httpx.AsyncClient) -> list[dict[str, Any]]:
+    try:
+        resp = await client.get(JUYA_BACKUP_PATH)
+    except httpx.RequestError:
+        return []
+    if resp.status_code != 200:
+        return []
+    try:
+        payload = resp.json()
+    except ValueError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [row for row in payload if isinstance(row, dict)]
+
+
+async def _fetch_backup_markdown(client: httpx.AsyncClient, path: str) -> str | None:
+    api_path = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/{path}"
+    try:
+        resp = await client.get(api_path)
+    except httpx.RequestError:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return decode_github_base64_content(payload)
+
+
+async def enrich_juya_items_with_backup(
+    client: httpx.AsyncClient,
+    items: list[NewsItem],
+    *,
+    connector_name: str = "github",
+) -> tuple[list[NewsItem], list[ConnectorWarning]]:
+    """Replace RSS snippets with fuller BACKUP markdown when available."""
+    warnings: list[ConnectorWarning] = []
+    index = await _fetch_backup_index(client)
+    if not index:
+        for _ in items:
+            warnings.append(
+                ConnectorWarning(
+                    connector=connector_name,
+                    code="juya_backup_unavailable",
+                    message="Juya BACKUP index unavailable; using RSS snippets only",
+                )
+            )
+        return items, warnings
+
+    enriched: list[NewsItem] = []
+    for item in items:
+        path = backup_path_for_entry(item.title, item.url, index)
+        if not path:
+            warnings.append(
+                ConnectorWarning(
+                    connector=connector_name,
+                    code="juya_backup_unavailable",
+                    message=f"No BACKUP markdown matched entry {item.title!r}",
+                )
+            )
+            enriched.append(item)
+            continue
+
+        raw_md = await _fetch_backup_markdown(client, path)
+        if not raw_md:
+            warnings.append(
+                ConnectorWarning(
+                    connector=connector_name,
+                    code="juya_backup_unavailable",
+                    message=f"BACKUP markdown unavailable for {path}",
+                )
+            )
+            enriched.append(item)
+            continue
+
+        cleaned = clean_backup_markdown(raw_md)
+        if not cleaned:
+            warnings.append(
+                ConnectorWarning(
+                    connector=connector_name,
+                    code="juya_backup_unavailable",
+                    message=f"BACKUP markdown empty after cleanup for {path}",
+                )
+            )
+            enriched.append(item)
+            continue
+
+        enriched.append(
+            replace(
+                item,
+                raw_snippet=cleaned,
+                content_confidence=ConfidenceLevel.HIGH,
+                metadata_completeness=max(item.metadata_completeness, 0.9),
+                tags=[*item.tags, "juya-backup"],
+            )
+        )
+    return enriched, warnings
 
 
 def _rss_item_element_to_news_item(
@@ -207,7 +362,9 @@ def _atom_entry_to_news_item(
     collected_at: datetime,
 ) -> NewsItem | None:
     title = _element_text(entry.find("atom:title", ns))
-    link_el = entry.find("atom:link[@rel='alternate']", ns) or entry.find("atom:link", ns)
+    link_el = entry.find("atom:link[@rel='alternate']", ns)
+    if link_el is None:
+        link_el = entry.find("atom:link", ns)
     link = link_el.get("href") if link_el is not None else None
     if not title or not link:
         return None

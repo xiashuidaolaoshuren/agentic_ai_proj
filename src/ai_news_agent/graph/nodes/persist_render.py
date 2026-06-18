@@ -7,7 +7,12 @@ from collections.abc import Callable, Iterable
 from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.graph.state import DigestGraphState, WorkflowError
 from ai_news_agent.models import ConnectorWarning, Digest, NewsItem
-from ai_news_agent.rendering import render_digest_markdown, render_digest_text
+from ai_news_agent.rendering import (
+    render_digest_editorial_markdown,
+    render_digest_editorial_text,
+    render_digest_markdown,
+    render_digest_text,
+)
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 
@@ -95,8 +100,8 @@ def make_render_digest_node(
 ):
     """Build a node that fills ``markdown`` / ``text`` from the current ``digest``."""
 
-    md_fn = render_markdown or render_digest_markdown
-    txt_fn = render_text or render_digest_text
+    md_default = render_markdown or render_digest_markdown
+    txt_default = render_text or render_digest_text
 
     def render_digest_node(state: DigestGraphState) -> dict[str, object]:
         digest = state.get("digest")
@@ -106,12 +111,34 @@ def make_render_digest_node(
                     WorkflowError(stage="render", message="missing Digest in state")
                 ]
             }
+        req = state.get("request")
+        style = req.output_style if req is not None else None
+        language = req.output_language if req is not None else None
         warnings = list(state.get("warnings") or [])
         try:
-            return {
-                "markdown": md_fn(digest, warnings=warnings),
-                "text": txt_fn(digest, warnings=warnings),
-            }
+            if render_markdown is not None:
+                markdown = render_markdown(digest, warnings=warnings)
+            elif style == "editorial":
+                markdown = render_digest_editorial_markdown(
+                    digest,
+                    warnings=warnings,
+                    output_language=language,
+                )
+            else:
+                markdown = md_default(digest, warnings=warnings)
+
+            if render_text is not None:
+                text = render_text(digest, warnings=warnings)
+            elif style == "editorial":
+                text = render_digest_editorial_text(
+                    digest,
+                    warnings=warnings,
+                    output_language=language,
+                )
+            else:
+                text = txt_default(digest, warnings=warnings)
+
+            return {"markdown": markdown, "text": text}
         except Exception as exc:  # noqa: BLE001 - surface as workflow error
             return {
                 "errors": [

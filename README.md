@@ -256,7 +256,7 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 | Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
 | Digest bilibili video BV1gRJs63EYX | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
-| Digest https://github.com/jujuyaya/juya-ai-daily | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"` |
+| Digest https://github.com/jujuyaya/juya-ai-daily | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
 | Digest bilibili channel 285286947 | `openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Full commands (from repo root, service running):
@@ -264,10 +264,11 @@ Full commands (from repo root, service running):
 ```bash
 uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili
 uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"
-uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"
+uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN
+uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml` (title, link, snippet). If RSS is unavailable, the connector falls back to repository metadata and emits a `juya_rss_unavailable` caveat.
+Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml`, then enrich each entry from matching `BACKUP/*.md` markdown when available. Use `--output-style editorial --output-language zh-CN` for newsletter-style Chinese output. If RSS is unavailable, the connector falls back to repository metadata and emits a `juya_rss_unavailable` caveat; missing BACKUP files emit `juya_backup_unavailable` while keeping RSS snippets.
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 
@@ -279,11 +280,16 @@ After generating a digest, use the **`ai-news-followup`** skill for deterministi
 |--------------|-------------------|
 | Show sources | `openclaw-followup --message "show sources"` |
 | Which item should I study first? | `openclaw-followup --message "which item should I study first"` |
+| Follow up on item 1 | `openclaw-followup --message "follow up on item 1"` |
+| Follow up on the second one | `openclaw-followup --message "follow up on the second one"` |
 | Show caveats | `openclaw-followup --message "show caveats"` |
 
 ```bash
 uv run ai-news-agent openclaw-followup --message "show sources"
+uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
+
+Rank-targeted follow-up returns deterministic item details (title, URL, summary, why-it-matters, caveat) from the latest digest list order.
 
 Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for tool-agent follow-ups.
 

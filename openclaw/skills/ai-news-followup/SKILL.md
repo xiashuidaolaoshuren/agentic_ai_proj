@@ -24,6 +24,8 @@ through `ai-news-digest`, including:
 - "What's the top pick?"
 - "Show caveats"
 - "Any warnings or confidence issues?"
+- "Follow up on item 1" / "#2" / "the second one"
+- "Followup the first issue" (first digest item)
 
 **Prerequisite:** a digest must already exist in the service database. Run
 `ai-news-digest` first if the user has not generated a digest in this session.
@@ -65,6 +67,8 @@ Return the client stdout to the user unchanged.
 | --- | --- |
 | Show sources | `uv run ai-news-agent openclaw-followup --message "show sources"` |
 | Which item should I study first? | `uv run ai-news-agent openclaw-followup --message "which item should I study first"` |
+| Follow up on item 1 | `uv run ai-news-agent openclaw-followup --message "follow up on item 1"` |
+| The second one | `uv run ai-news-agent openclaw-followup --message "follow up on the second one"` |
 | Any caveats? | `uv run ai-news-agent openclaw-followup --message "show caveats"` |
 
 ## Error Handling

@@ -29,6 +29,8 @@ def make_summarize_items_node(model: Any):
                 timeframe=req.timeframe,
                 generated_at=state.get("finished_at") or state.get("started_at"),
                 model=model,
+                output_style=req.output_style,
+                output_language=req.output_language,
             )
         except Exception as exc:
             return {

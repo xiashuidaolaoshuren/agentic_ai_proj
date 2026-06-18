@@ -60,16 +60,17 @@ With the digest service running, verify these prompts route through `openclaw-di
 | `Digest bilibili video BV1gRJs63EYX` | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | `Digest https://www.bilibili.com/video/BV1gRJs63EYX` | `openclaw-digest --message "Digest https://www.bilibili.com/video/BV1gRJs63EYX"` |
 | `Digest https://github.com/langchain-ai/langgraph` | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
-| `Digest https://github.com/jujuyaya/juya-ai-daily` | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"` |
+| `Digest https://github.com/jujuyaya/juya-ai-daily` | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
 
 Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.
 
 ### Juya daily repo ingestion smoke
 
 1. Start digest service: `uv run ai-news-agent service --port 8765`
-2. Run: `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily"`
-3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk`), not only the GitHub repo card.
+2. Run: `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN`
+3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk`), newsletter-style Chinese sections, and richer evidence from `BACKUP/*.md` when available.
 4. If `rss.xml` is unreachable, expect a single repo-metadata item plus `juya_rss_unavailable` in connector caveats.
+5. If BACKUP markdown is missing for an entry, expect `juya_backup_unavailable` and RSS snippets preserved.
 
 ## Structured follow-up smoke (OpenClaw)
 
@@ -79,4 +80,5 @@ Prerequisite: digest service running and a digest already generated in the same 
 2. Follow up: `uv run ai-news-agent openclaw-followup --message "show sources"`
 3. Expect numbered source links from the latest digest (not a new digest run).
 4. Try `openclaw-followup --message "show caveats"` and `openclaw-followup --message "which item should I study first"`.
-5. Unsupported phrase (e.g. `followup the first issue`) should return structured-mode guidance, not `web_fetch`.
+5. Try `openclaw-followup --message "follow up on item 1"` and expect item-level details (title, URL, summary).
+6. Unsupported phrase (e.g. open-ended why-question) should return structured-mode guidance, not `web_fetch`.

@@ -37,6 +37,8 @@ def request_digest_markdown(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
     fake: bool = False,
     correlation_id: str | None = None,
     timeout_s: float = 600.0,
@@ -48,6 +50,8 @@ def request_digest_markdown(
         timeframe_hint=timeframe_hint,
         sources_hint=sources_hint,
         topics_hint=topics_hint,
+        output_style_hint=output_style_hint,
+        output_language_hint=output_language_hint,
     )
     payload["fake"] = fake
     payload["correlation_id"] = cid
@@ -156,6 +160,16 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         help="Comma-separated topics; omit for built-in defaults",
     )
     parser.add_argument(
+        "--output-style",
+        default=None,
+        help="Digest output style (editorial/newsletter or default bulletin)",
+    )
+    parser.add_argument(
+        "--output-language",
+        default=None,
+        help="BCP-47 output language hint (e.g. zh-CN)",
+    )
+    parser.add_argument(
         "--fake",
         action="store_true",
         help="Request fake/offline digest from service",
@@ -181,6 +195,8 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
             timeframe_hint=ns.timeframe,
             sources_hint=ns.sources,
             topics_hint=ns.topics,
+            output_style_hint=ns.output_style,
+            output_language_hint=ns.output_language,
             fake=ns.fake,
             correlation_id=ns.correlation_id,
         )
@@ -246,11 +262,17 @@ def build_openclaw_digest_argv(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
     fake: bool = False,
 ) -> list[str]:
     """Build argv for ``openclaw-digest`` mirroring digest CLI flag shapes."""
     if message is not None and message.strip():
         argv = ["openclaw-digest", "--message", message.strip()]
+        if output_style_hint:
+            argv.extend(["--output-style", output_style_hint])
+        if output_language_hint:
+            argv.extend(["--output-language", output_language_hint])
         if fake:
             argv.append("--fake")
         return argv
@@ -260,6 +282,8 @@ def build_openclaw_digest_argv(
         timeframe_hint=timeframe_hint,
         sources_hint=sources_hint,
         topics_hint=topics_hint,
+        output_style_hint=output_style_hint,
+        output_language_hint=output_language_hint,
     )
     idx = 0
     while idx < len(digest_argv):

@@ -16,7 +16,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
-from ai_news_agent.connectors.base import SourceConnector
+from ai_news_agent.adapters.openclaw import (
+    normalize_output_language_hint,
+    normalize_output_style_hint,
+)
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
@@ -69,6 +72,13 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
     sources = parse_sources_csv(getattr(ns, "sources", "") or "")
     if sources:
         kw["connector_names"] = normalize_source_names(sources)
+
+    output_style = normalize_output_style_hint(getattr(ns, "output_style", None))
+    if output_style is not None:
+        kw["output_style"] = output_style
+    output_language = normalize_output_language_hint(getattr(ns, "output_language", None))
+    if output_language is not None:
+        kw["output_language"] = output_language
 
     return DigestRequest(**kw)
 
@@ -149,6 +159,16 @@ def _add_digest_parser(sub: Any) -> argparse.ArgumentParser:
         action="store_true",
         help="Offline deterministic run (no network, no OpenAI key)",
     )
+    p.add_argument(
+        "--output-style",
+        default=None,
+        help="Digest output style (editorial/newsletter or default bulletin)",
+    )
+    p.add_argument(
+        "--output-language",
+        default=None,
+        help="BCP-47 output language hint (e.g. zh-CN)",
+    )
     return p
 
 
@@ -191,6 +211,16 @@ def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
         help="Comma-separated sources (github, bilibili)",
     )
     p.add_argument("--topics", default=None, help="Comma-separated topics")
+    p.add_argument(
+        "--output-style",
+        default=None,
+        help="Digest output style (editorial/newsletter or default bulletin)",
+    )
+    p.add_argument(
+        "--output-language",
+        default=None,
+        help="BCP-47 output language hint (e.g. zh-CN)",
+    )
     p.add_argument("--fake", action="store_true", help="Offline fake digest")
     p.add_argument(
         "--service-url",
@@ -308,6 +338,12 @@ def _namespace_to_argv(ns: argparse.Namespace) -> list[str]:
     return argv
 
 
+def _subcommand_argv(args: list[str], command: str) -> list[str]:
+    if args and args[0] == command:
+        return args[1:]
+    return args
+
+
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     """CLI entry. Returns process exit code."""
     load_local_env()
@@ -335,12 +371,12 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         return int(handler(service_argv))
 
     if ns.command == "openclaw-digest":
-        return int(handler(args, stdout=out))
+        return int(handler(_subcommand_argv(args, "openclaw-digest"), stdout=out))
 
     if ns.command == "openclaw-followup":
-        return int(handler(args, stdout=out))
+        return int(handler(_subcommand_argv(args, "openclaw-followup"), stdout=out))
 
-    return int(handler(args, stdout=out))
+    return int(handler(_subcommand_argv(args, ns.command), stdout=out))
 
 
 if __name__ == "__main__":

@@ -110,6 +110,8 @@ def test_adapters_package_exports_public_surface() -> None:
     exported = {
         "build_digest_cli_argv": adapters.build_digest_cli_argv,
         "build_digest_request_from_hints": adapters.build_digest_request_from_hints,
+        "normalize_output_language_hint": adapters.normalize_output_language_hint,
+        "normalize_output_style_hint": adapters.normalize_output_style_hint,
         "normalize_source_hint": adapters.normalize_source_hint,
         "normalize_timeframe_hint": adapters.normalize_timeframe_hint,
         "normalize_topic_hint": adapters.normalize_topic_hint,

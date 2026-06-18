@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ai_news_agent.models import RankedItem
+import re
+
+from ai_news_agent.models import DigestEntry, RankedItem
 from ai_news_agent.storage import DigestStore, FollowupContext
 
 NO_SAVED_DIGEST = (
@@ -12,9 +14,73 @@ NO_SAVED_DIGEST = (
 
 OPENCLAW_GUIDANCE_FALLBACK = (
     "That follow-up is not supported in OpenClaw structured mode. "
-    "Try: show sources, which item should I study first, or show caveats. "
-    "For open-ended Q&A, use the Gradio UI."
+    "Try: show sources, item 1 / #2 / the second one, which item should I study first, "
+    "or show caveats. For open-ended Q&A, use the Gradio UI."
 )
+
+_ORDINAL_WORDS: dict[str, int] = {
+    "first": 1,
+    "1st": 1,
+    "second": 2,
+    "2nd": 2,
+    "third": 3,
+    "3rd": 3,
+    "fourth": 4,
+    "4th": 4,
+    "fifth": 5,
+    "5th": 5,
+    "sixth": 6,
+    "6th": 6,
+    "seventh": 7,
+    "7th": 7,
+    "eighth": 8,
+    "8th": 8,
+    "ninth": 9,
+    "9th": 9,
+    "tenth": 10,
+    "10th": 10,
+}
+
+_ORDINAL_ALT = "|".join(sorted(_ORDINAL_WORDS, key=len, reverse=True))
+
+_RANK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"#\s*(\d+)\b"),
+    re.compile(r"\brank\s+(\d+)\b", re.I),
+    re.compile(r"\bitem\s+(\d+)\b", re.I),
+    re.compile(r"\bnumber\s+(\d+)\b", re.I),
+    re.compile(
+        rf"\b({_ORDINAL_ALT})\s+(?:item|issue|entry|story|one)\b",
+        re.I,
+    ),
+    re.compile(rf"\bthe\s+({_ORDINAL_ALT})\s+one\b", re.I),
+    re.compile(
+        rf"\bfollow\s*[- ]?up\b.*?\b({_ORDINAL_ALT})\b",
+        re.I,
+    ),
+    re.compile(r"\bfollow\s*[- ]?up\b.*?\bitem\s+(\d+)\b", re.I),
+    re.compile(r"\bfollow\s*[- ]?up\b.*?\b#?\s*(\d+)\b", re.I),
+    re.compile(rf"\b({_ORDINAL_ALT})\s+issue\b", re.I),
+)
+
+
+def parse_rank_from_message(message: str) -> int | None:
+    """Extract a 1-based digest rank from a follow-up message, if present."""
+    text = message.strip()
+    if not text:
+        return None
+
+    for pattern in _RANK_PATTERNS:
+        match = pattern.search(text)
+        if match is None:
+            continue
+        token = match.group(1).lower()
+        if token.isdigit():
+            rank = int(token)
+            return rank if rank >= 1 else None
+        rank = _ORDINAL_WORDS.get(token)
+        if rank is not None:
+            return rank
+    return None
 
 
 def answer_structured_followup(message: str, ctx: FollowupContext) -> str | None:
@@ -26,6 +92,10 @@ def answer_structured_followup(message: str, ctx: FollowupContext) -> str | None
 
     if _mentions_ranking(low):
         return _format_ranking_pick(ctx)
+
+    rank = parse_rank_from_message(message)
+    if rank is not None:
+        return _format_rank_item(ctx, rank)
 
     if _mentions_caveats(low):
         return _format_caveats(ctx)
@@ -104,6 +174,30 @@ def _format_ranking_pick(ctx: FollowupContext) -> str:
     )
 
 
+def _format_rank_item(ctx: FollowupContext, rank: int) -> str:
+    if ctx.digest is None or not ctx.digest.entries:
+        return "No digest entries are available for rank-targeted follow-up."
+
+    entries = ctx.digest.entries
+    if rank < 1 or rank > len(entries):
+        return f"No digest item at rank {rank}."
+
+    entry = entries[rank - 1]
+    return _format_digest_entry_detail(entry, rank=rank)
+
+
+def _format_digest_entry_detail(entry: DigestEntry, *, rank: int) -> str:
+    lines = [
+        f"Digest item {rank}: {entry.title}",
+        f"- URL: {entry.source_url}",
+        f"- Summary: {entry.summary}",
+        f"- Why it matters: {entry.why_it_matters}",
+    ]
+    if entry.confidence_caveat:
+        lines.append(f"- Confidence caveat: {entry.confidence_caveat}")
+    return "\n".join(lines)
+
+
 def _format_caveats(ctx: FollowupContext) -> str:
     lines: list[str] = []
 
@@ -135,4 +229,5 @@ __all__ = [
     "OPENCLAW_GUIDANCE_FALLBACK",
     "answer_structured_followup",
     "handle_openclaw_structured_followup",
+    "parse_rank_from_message",
 ]

@@ -62,6 +62,8 @@ Map user intent into constrained CLI options. Defaults and aliases match
 | Timeframe | `--timeframe` | Default `today`. Map `daily` -> `today`; `week` / `this week` / `last7` -> `last_7_days`. |
 | Sources | `--sources` | Default `github,bilibili` for broad digests. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
 | Topics | `--topics` | Optional comma-separated list. Omit when user does not specify topics. |
+| Output style | `--output-style` | Default bulletin. Use `editorial` or `newsletter` for Chinese newsletter-style sections (Juya daily). |
+| Output language | `--output-language` | Optional BCP-47 tag. Use `zh-CN` with Juya editorial digests. |
 
 Do not invent new flags or source names.
 
@@ -84,6 +86,15 @@ uv run ai-news-agent openclaw-digest --message "<user digest sentence>"
 
 Add `--topics <csv>` only when the user specified topics for broad digests.
 
+**Juya editorial digest template (preferred for `jujuyaya/juya-ai-daily`):**
+
+```bash
+uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN
+```
+
+This stays on the local workflow (RSS + BACKUP enrichment, ranking, summarization, persistence).
+Do **not** substitute `web_fetch` or manual scraping for this path.
+
 **Offline / smoke template** (service must be started with `--fake`):
 
 ```bash
@@ -99,6 +110,7 @@ uv run ai-news-agent openclaw-digest --fake --message "Digest bilibili video BV1
 | Give me this week's AI digest on RAG and agents. | `uv run ai-news-agent openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
 | Digest bilibili video BV1gRJs63EYX | `uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
+| Digest https://github.com/jujuyaya/juya-ai-daily | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
 | Digest bilibili channel 285286947 | `uv run ai-news-agent openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Return the client stdout (markdown digest) to the user unchanged. Preserve source links and

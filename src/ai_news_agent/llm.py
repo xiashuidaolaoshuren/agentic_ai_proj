@@ -57,12 +57,7 @@ class OpenAIChatModel:
         self._model = model
 
     def generate_entry_fields(self, context: dict[str, Any]) -> dict[str, Any]:
-        system = (
-            "You output a single JSON object with keys: "
-            "summary, why_it_matters, background_knowledge, follow_up_action. "
-            "follow_up_action must be one of: read, watch, try, build. "
-            "Stay faithful to the provided evidence; do not invent URLs or authors."
-        )
+        system = _build_summarization_system_prompt(context)
         user = json.dumps(context, ensure_ascii=False)
         resp = self._client.chat.completions.create(
             model=self._model,
@@ -83,3 +78,22 @@ class OpenAIChatModel:
                 "background_knowledge": "",
                 "follow_up_action": "read",
             }
+
+
+def _build_summarization_system_prompt(context: dict[str, Any]) -> str:
+    parts = [
+        "You output a single JSON object with keys: "
+        "summary, why_it_matters, background_knowledge, follow_up_action. "
+        "follow_up_action must be one of: read, watch, try, build. "
+        "Stay faithful to the provided evidence; do not invent URLs, dates, or authors.",
+    ]
+    language = str(context.get("output_language") or "").strip()
+    style = str(context.get("output_style") or "").strip()
+    if language:
+        parts.append(f"Write summary and why_it_matters in {language}.")
+    if style == "editorial":
+        parts.append(
+            "Use concise newsletter tone suitable for a daily briefing section. "
+            "Prefer the raw_snippet evidence when present."
+        )
+    return " ".join(parts)

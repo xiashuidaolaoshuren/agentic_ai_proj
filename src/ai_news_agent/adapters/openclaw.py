@@ -19,6 +19,17 @@ _TIMEFRAME_ALIASES: dict[str, str] = {
     "last7": "last_7_days",
 }
 
+_OUTPUT_STYLE_ALIASES: dict[str, str] = {
+    "newsletter": "editorial",
+    "bulletin": "bulletin",
+}
+
+_OUTPUT_LANGUAGE_ALIASES: dict[str, str] = {
+    "chinese": "zh-CN",
+    "zh": "zh-CN",
+    "zh-cn": "zh-CN",
+}
+
 
 def normalize_source_hint(hint: str | None) -> list[str]:
     """Normalize an OpenClaw source hint into validated connector names."""
@@ -46,6 +57,22 @@ def normalize_topic_hint(hint: str | None) -> list[str] | None:
     if not topics:
         return None
     return topics
+
+
+def normalize_output_style_hint(hint: str | None) -> str | None:
+    """Normalize output style hints; ``None`` preserves the default bulletin renderer."""
+    if hint is None or hint.strip() == "":
+        return None
+    key = hint.strip().lower()
+    return _OUTPUT_STYLE_ALIASES.get(key, key)
+
+
+def normalize_output_language_hint(hint: str | None) -> str | None:
+    """Normalize BCP-47 language hints such as ``zh-CN``."""
+    if hint is None or hint.strip() == "":
+        return None
+    key = hint.strip().lower()
+    return _OUTPUT_LANGUAGE_ALIASES.get(key, hint.strip())
 
 
 def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | None:
@@ -98,8 +125,18 @@ def resolve_openclaw_digest_request(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
 ) -> DigestRequest:
     """Build a digest request from NL message and/or structured OpenClaw hints."""
+    style = normalize_output_style_hint(output_style_hint)
+    language = normalize_output_language_hint(output_language_hint)
+    style_kw: dict[str, object] = {}
+    if style is not None:
+        style_kw["output_style"] = style
+    if language is not None:
+        style_kw["output_language"] = language
+
     if message is not None and message.strip():
         req = resolve_digest_request(message.strip())
         nl_sources = parse_connector_names_from_message(message)
@@ -114,11 +151,14 @@ def resolve_openclaw_digest_request(
             inferred = _infer_connector_names_from_selectors(req)
             if inferred is not None:
                 req = replace(req, connector_names=inferred)
+        if style_kw:
+            req = replace(req, **style_kw)
         validate_source_selector_consistency(req)
         return req
 
     kw: dict[str, object] = {
         "connector_names": normalize_source_hint(sources_hint),
+        **style_kw,
     }
     if timeframe_hint is not None and timeframe_hint.strip():
         kw["timeframe"] = normalize_timeframe_hint(timeframe_hint)
@@ -135,11 +175,15 @@ def build_digest_cli_argv(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
 ) -> list[str]:
     """Build a safe argv token list for ``ai-news-agent digest`` (no shell interpolation)."""
     timeframe = normalize_timeframe_hint(timeframe_hint)
     sources = normalize_source_hint(sources_hint)
     topics = normalize_topic_hint(topics_hint)
+    output_style = normalize_output_style_hint(output_style_hint)
+    output_language = normalize_output_language_hint(output_language_hint)
 
     argv: list[str] = [
         "digest",
@@ -150,6 +194,10 @@ def build_digest_cli_argv(
     ]
     if topics is not None:
         argv.extend(["--topics", ",".join(topics)])
+    if output_style is not None:
+        argv.extend(["--output-style", output_style])
+    if output_language is not None:
+        argv.extend(["--output-language", output_language])
     return argv
 
 
@@ -158,23 +206,33 @@ def build_digest_request_from_hints(
     timeframe_hint: str | None = None,
     sources_hint: str | None = None,
     topics_hint: str | None = None,
+    output_style_hint: str | None = None,
+    output_language_hint: str | None = None,
 ) -> DigestRequest:
     """Build a :class:`~ai_news_agent.request.DigestRequest` from OpenClaw hints."""
     timeframe = normalize_timeframe_hint(timeframe_hint)
     sources = normalize_source_hint(sources_hint)
     topics = normalize_topic_hint(topics_hint)
+    output_style = normalize_output_style_hint(output_style_hint)
+    output_language = normalize_output_language_hint(output_language_hint)
     kw: dict[str, object] = {
         "timeframe": timeframe,
         "connector_names": sources,
     }
     if topics is not None:
         kw["topics"] = topics
+    if output_style is not None:
+        kw["output_style"] = output_style
+    if output_language is not None:
+        kw["output_language"] = output_language
     return DigestRequest(**kw)
 
 
 __all__ = [
     "build_digest_cli_argv",
     "build_digest_request_from_hints",
+    "normalize_output_language_hint",
+    "normalize_output_style_hint",
     "normalize_source_hint",
     "normalize_timeframe_hint",
     "normalize_topic_hint",
