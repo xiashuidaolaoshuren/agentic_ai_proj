@@ -64,13 +64,15 @@ With the digest service running, verify these prompts route through `openclaw-di
 
 Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.
 
-### Juya daily repo ingestion smoke
+### Juya daily website ingestion smoke
 
 1. Start digest service: `uv run ai-news-agent service --port 8765`
-2. Run: `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN`
-3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk`), newsletter-style Chinese sections, and richer evidence from `BACKUP/*.md` when available.
-4. If `rss.xml` is unreachable, expect a single repo-metadata item plus `juya_rss_unavailable` in connector caveats.
-5. If BACKUP markdown is missing for an entry, expect `juya_backup_unavailable` and RSS snippets preserved.
+2. Run either:
+   - `uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN`
+   - `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` (legacy alias)
+3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk/issues/...`), compact Chinese issue index output, and richer evidence from per-issue markdown when available.
+4. If website RSS is unreachable, expect **no** Juya items plus `juya_rss_unavailable` in connector caveats (no GitHub repo-metadata fallback).
+5. If per-issue markdown is missing for an entry, expect `juya_markdown_unavailable` and RSS snippet or `content:encoded` fallback preserved.
 
 ## Structured follow-up smoke (OpenClaw)
 

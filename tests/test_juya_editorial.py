@@ -1,10 +1,8 @@
-"""Tests for Juya BACKUP enrichment and editorial digest output."""
+"""Tests for Juya website markdown enrichment and editorial digest output."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,10 +18,10 @@ from ai_news_agent.app.digest_service import build_digest_request_payload
 from ai_news_agent.connectors.base import ConnectorRequest
 from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.connectors.github_juya import (
-    backup_path_for_entry,
-    clean_backup_markdown,
-    enrich_juya_items_with_backup,
-    parse_juya_rss_entries,
+    clean_issue_markdown,
+    enrich_juya_items_with_markdown,
+    markdown_url_for_issue,
+    parse_juya_rss_rows,
 )
 from ai_news_agent.models import (
     ConfidenceLevel,
@@ -44,94 +42,102 @@ def _atom_fixture() -> str:
     return (FIXTURES / "juya_rss_atom_sample.xml").read_text(encoding="utf-8")
 
 
-def _backup_fixture() -> str:
+def _markdown_fixture() -> str:
     return (FIXTURES / "juya_backup_2026-06-16_sample.md").read_text(encoding="utf-8")
 
 
-def test_backup_path_for_entry_matches_date_suffix() -> None:
-    index = [{"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md"}]
-    assert backup_path_for_entry("2026-06-16", "https://daily.juya.uk/issue-5/", index) == (
-        "BACKUP/5_2026-06-16.md"
+def _website_rss_fixture() -> str:
+    return (FIXTURES / "juya_website_rss_sample.xml").read_text(encoding="utf-8")
+
+
+def test_markdown_url_for_issue_matches_date() -> None:
+    assert markdown_url_for_issue("2026-06-16", "https://daily.juya.uk/issues/2026-06-16/") == (
+        "https://daily.juya.uk/markdown/2026-06-16.md"
     )
 
 
-def test_clean_backup_markdown_strips_headings() -> None:
-    cleaned = clean_backup_markdown(_backup_fixture())
+def test_clean_issue_markdown_strips_headings() -> None:
+    cleaned = clean_issue_markdown(_markdown_fixture())
     assert "SpaceX" in cleaned
     assert "#" not in cleaned
 
 
-def test_enrich_juya_items_with_backup_grows_snippet() -> None:
+def test_enrich_juya_items_with_markdown_grows_snippet() -> None:
     now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
-    items = parse_juya_rss_entries(_atom_fixture(), max_items=5, collected_at=now)
-    backup_b64 = base64.b64encode(_backup_fixture().encode("utf-8")).decode("ascii")
-    backup_index = [
-        {"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md", "type": "file"},
-    ]
+    rows = parse_juya_rss_rows(_atom_fixture(), max_items=5, collected_at=now)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
-            return httpx.Response(200, json=backup_index)
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP/5_2026-06-16.md":
-            return httpx.Response(200, json={"content": backup_b64, "encoding": "base64"})
+        if request.url.path == "/markdown/2026-06-16.md":
+            return httpx.Response(200, text=_markdown_fixture())
         return httpx.Response(404)
 
     async def main() -> None:
         transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.github.com",
-        ) as client:
-            enriched, warnings = await enrich_juya_items_with_backup(client, items)
+        async with httpx.AsyncClient(transport=transport) as client:
+            enriched, warnings = await enrich_juya_items_with_markdown(client, rows)
 
         assert len(enriched) == 1
         assert "SpaceX" in (enriched[0].raw_snippet or "")
         assert len(enriched[0].raw_snippet or "") > 50
         assert enriched[0].content_confidence is ConfidenceLevel.HIGH
-        assert not any(w.code == "juya_backup_unavailable" for w in warnings)
+        assert "juya-markdown" in enriched[0].tags
+        assert not any(w.code == "juya_markdown_unavailable" for w in warnings)
 
     asyncio.run(main())
 
 
-def test_enrich_juya_items_keeps_rss_when_backup_missing() -> None:
-    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
-    items = parse_juya_rss_entries(_atom_fixture(), max_items=5, collected_at=now)
+def test_enrich_juya_items_falls_back_to_content_encoded() -> None:
+    now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+    rows = parse_juya_rss_rows(_website_rss_fixture(), max_items=1, collected_at=now)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
-            return httpx.Response(200, json=[])
         return httpx.Response(404)
 
     async def main() -> None:
         transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.github.com",
-        ) as client:
-            enriched, warnings = await enrich_juya_items_with_backup(client, items)
+        async with httpx.AsyncClient(transport=transport) as client:
+            enriched, warnings = await enrich_juya_items_with_markdown(client, rows)
 
-        assert enriched[0].raw_snippet == "Short RSS summary only."
-        assert any(w.code == "juya_backup_unavailable" for w in warnings)
+        assert len(enriched) == 1
+        assert "DeepSeek" in (enriched[0].raw_snippet or "")
+        assert "juya-rss-content" in enriched[0].tags
+        assert not any(w.code == "juya_markdown_unavailable" for w in warnings)
 
     asyncio.run(main())
 
 
-def test_collect_juya_repo_enriches_from_backup() -> None:
-    rss_b64 = base64.b64encode(_atom_fixture().encode("utf-8")).decode("ascii")
-    backup_b64 = base64.b64encode(_backup_fixture().encode("utf-8")).decode("ascii")
-    backup_index = [
-        {"name": "5_2026-06-16.md", "path": "BACKUP/5_2026-06-16.md", "type": "file"},
-    ]
+def test_enrich_juya_items_warns_when_markdown_and_encoded_missing() -> None:
+    rss_text = (FIXTURES / "juya_rss_sample.xml").read_text(encoding="utf-8")
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    rows = parse_juya_rss_rows(rss_text, max_items=1, collected_at=now)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            enriched, warnings = await enrich_juya_items_with_markdown(client, rows)
+
+        assert "GLM-5.2" in (enriched[0].raw_snippet or "")
+        assert any(w.code == "juya_markdown_unavailable" for w in warnings)
+
+    asyncio.run(main())
+
+
+def test_collect_juya_repo_enriches_from_website_markdown() -> None:
+    rss_text = _atom_fixture()
+    markdown = {"/markdown/2026-06-16.md": _markdown_fixture()}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
         path = request.url.path
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/rss.xml":
-            return httpx.Response(200, json={"content": rss_b64, "encoding": "base64"})
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP":
-            return httpx.Response(200, json=backup_index)
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/BACKUP/5_2026-06-16.md":
-            return httpx.Response(200, json={"content": backup_b64, "encoding": "base64"})
+        if host == "daily.juya.uk":
+            if path == "/rss.xml":
+                return httpx.Response(200, text=rss_text)
+            if path in markdown:
+                return httpx.Response(200, text=markdown[path])
+            return httpx.Response(404)
         return httpx.Response(404, json={"message": "not found"})
 
     async def main() -> None:

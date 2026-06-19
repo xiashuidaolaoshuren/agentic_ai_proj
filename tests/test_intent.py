@@ -24,6 +24,12 @@ def test_parse_github_repo_url() -> None:
     assert req.github_target_channels == []
 
 
+def test_parse_juya_website_url_routes_to_github_connector() -> None:
+    req = parse_digest_intent("Digest https://daily.juya.uk/")
+    assert req.topics == []
+    assert any("daily.juya.uk" in u for u in req.github_manual_urls)
+
+
 def test_parse_github_repo_url_does_not_infer_owner_channel() -> None:
     req = parse_digest_intent(
         "Digest https://github.com/langchain-ai/langgraph",

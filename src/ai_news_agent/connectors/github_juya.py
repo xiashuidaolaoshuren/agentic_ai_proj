@@ -1,15 +1,13 @@
-"""RSS-first ingestion helpers for jujuyaya/juya-ai-daily (repo-specific)."""
+"""RSS-first ingestion helpers for jujuyaya/juya-ai-daily (website-primary)."""
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
+import html
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -18,192 +16,58 @@ from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, So
 
 JUYA_OWNER = "jujuyaya"
 JUYA_REPO = "juya-ai-daily"
+JUYA_CANONICAL_GITHUB_URL = f"https://github.com/{JUYA_OWNER}/{JUYA_REPO}"
+JUYA_WEBSITE_BASE = "https://daily.juya.uk"
+JUYA_WEBSITE_RSS_URL = f"{JUYA_WEBSITE_BASE}/rss.xml"
 JUYA_RSS_MAX_ENTRIES = 10
-JUYA_RSS_PATH = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/rss.xml"
-JUYA_BACKUP_PATH = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/BACKUP"
 _SNIPPET_MAX = 650
-_BACKUP_MAX = 6000
+_CONTENT_MAX = 6000
 _TAG_RE = re.compile(r"<[^>]+>")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_ISSUE_RE = re.compile(r"issue-(\d+)", re.IGNORECASE)
+_JUYA_WEBSITE_URL = re.compile(r"https?://(?:www\.)?daily\.juya\.uk", re.IGNORECASE)
+_CONTENT_NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
+
+
+@dataclass(frozen=True)
+class _ParsedJuyaRssRow:
+    item: NewsItem
+    content_encoded: str | None = None
 
 
 def is_juya_daily_repo(owner: str, repo: str) -> bool:
     return owner.lower() == JUYA_OWNER.lower() and repo.lower() == JUYA_REPO.lower()
 
 
-def decode_github_base64_content(payload: dict[str, Any]) -> str | None:
-    content = payload.get("content")
-    if not isinstance(content, str) or not content.strip():
-        return None
-    encoding = str(payload.get("encoding") or "base64").lower()
-    if encoding != "base64":
-        return None
-    try:
-        raw = base64.b64decode(content, validate=False)
-    except (ValueError, binascii.Error):
-        return None
-    return raw.decode("utf-8", errors="replace")
+def is_juya_website_url(url: str) -> bool:
+    return bool(_JUYA_WEBSITE_URL.search(url or ""))
 
 
-def parse_juya_rss_entries(
-    xml_text: str,
-    *,
-    max_items: int,
-    collected_at: datetime | None = None,
-) -> list[NewsItem]:
-    when = collected_at or datetime.now(UTC)
-    root = ET.fromstring(xml_text)
-    items: list[NewsItem] = []
-
-    channel = root.find("channel")
-    if channel is not None:
-        for item_el in channel.findall("item"):
-            parsed = _rss_item_element_to_news_item(item_el, collected_at=when)
-            if parsed is not None:
-                items.append(parsed)
-            if len(items) >= max_items:
-                break
-        return items
-
-    atom_ns = {"atom": "http://www.w3.org/2005/Atom"}
-    for entry in root.findall("atom:entry", atom_ns):
-        parsed = _atom_entry_to_news_item(entry, atom_ns, collected_at=when)
-        if parsed is not None:
-            items.append(parsed)
-        if len(items) >= max_items:
-            break
-    return items
+_GITHUB_REPO_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+    re.IGNORECASE,
+)
 
 
-async def fetch_juya_daily_items(
-    client: httpx.AsyncClient,
-    *,
-    max_items: int,
-    collected_at: datetime,
-    connector_name: str = "github",
-) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
-    warnings: list[ConnectorWarning] = []
-    bounded = max(1, min(max_items, JUYA_RSS_MAX_ENTRIES))
-
-    try:
-        resp = await client.get(JUYA_RSS_PATH)
-    except httpx.RequestError as exc:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS fetch failed; falling back to repo metadata",
-                detail=str(exc),
-            )
-        )
-        return [], 1, warnings
-
-    if resp.status_code != 200:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message=(
-                    f"Juya daily RSS unavailable (HTTP {resp.status_code}); "
-                    "falling back to repo metadata"
-                ),
-                detail=resp.text[:300] if resp.text else None,
-            )
-        )
-        return [], 1, warnings
-
-    try:
-        payload = resp.json()
-    except ValueError as exc:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS response was not valid JSON",
-                detail=str(exc),
-            )
-        )
-        return [], 1, warnings
-
-    if not isinstance(payload, dict):
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS response had unexpected shape",
-            )
-        )
-        return [], 1, warnings
-
-    xml_text = decode_github_base64_content(payload)
-    if not xml_text:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS content could not be decoded",
-            )
-        )
-        return [], 1, warnings
-
-    try:
-        items = parse_juya_rss_entries(xml_text, max_items=bounded, collected_at=collected_at)
-    except ET.ParseError as exc:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS XML parse failed",
-                detail=str(exc),
-            )
-        )
-        return [], 1, warnings
-
-    if not items:
-        warnings.append(
-            ConnectorWarning(
-                connector=connector_name,
-                code="juya_rss_unavailable",
-                message="Juya daily RSS contained no usable entries",
-            )
-        )
-        return [], 1, warnings
-
-    enriched, backup_warnings = await enrich_juya_items_with_backup(
-        client,
-        items,
-        connector_name=connector_name,
-    )
-    warnings.extend(backup_warnings)
-    return enriched, len(enriched), warnings
+def is_juya_target_url(url: str) -> bool:
+    if is_juya_website_url(url):
+        return True
+    match = _GITHUB_REPO_URL.search(url or "")
+    if match is None:
+        return False
+    return is_juya_daily_repo(match.group(1), match.group(2))
 
 
-def backup_path_for_entry(
-    title: str,
-    link: str,
-    index: list[dict[str, Any]],
-) -> str | None:
-    """Resolve a BACKUP markdown path from RSS title/date and issue link."""
-    date_match = _DATE_RE.search(title or "")
-    date_token = date_match.group(0) if date_match else None
-    issue_match = _ISSUE_RE.search(link or "")
-    issue_num = issue_match.group(1) if issue_match else None
-
-    for entry in index:
-        name = str(entry.get("name") or "")
-        if not name.endswith(".md"):
-            continue
-        path = str(entry.get("path") or f"BACKUP/{name}")
-        if date_token and date_token in name:
-            return path
-        if issue_num and name.startswith(f"{issue_num}_"):
-            return path
+def markdown_url_for_issue(title: str, link: str) -> str | None:
+    """Derive website markdown URL from issue title or link."""
+    for candidate in (title, link):
+        match = _DATE_RE.search(candidate or "")
+        if match:
+            return f"{JUYA_WEBSITE_BASE}/markdown/{match.group(0)}.md"
     return None
 
 
-def clean_backup_markdown(text: str) -> str:
-    """Flatten BACKUP markdown into bounded plain evidence text."""
+def clean_issue_markdown(text: str) -> str:
+    """Flatten issue markdown into bounded plain evidence text."""
     parts: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -217,95 +81,172 @@ def clean_backup_markdown(text: str) -> str:
     plain = re.sub(r"\s+", " ", " ".join(parts)).strip()
     if not plain:
         return ""
-    return plain[:_BACKUP_MAX]
+    return plain[:_CONTENT_MAX]
 
 
-async def _fetch_backup_index(client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    try:
-        resp = await client.get(JUYA_BACKUP_PATH)
-    except httpx.RequestError:
-        return []
-    if resp.status_code != 200:
-        return []
-    try:
-        payload = resp.json()
-    except ValueError:
-        return []
-    if not isinstance(payload, list):
-        return []
-    return [row for row in payload if isinstance(row, dict)]
+def clean_encoded_html(text: str | None) -> str:
+    """Flatten RSS content:encoded HTML into bounded evidence text."""
+    if not text:
+        return ""
+    unescaped = html.unescape(text)
+    plain = _TAG_RE.sub(" ", unescaped)
+    plain = re.sub(r"\s+", " ", plain).strip()
+    if not plain:
+        return ""
+    return plain[:_CONTENT_MAX]
 
 
-async def _fetch_backup_markdown(client: httpx.AsyncClient, path: str) -> str | None:
-    api_path = f"/repos/{JUYA_OWNER}/{JUYA_REPO}/contents/{path}"
-    try:
-        resp = await client.get(api_path)
-    except httpx.RequestError:
-        return None
-    if resp.status_code != 200:
-        return None
-    try:
-        payload = resp.json()
-    except ValueError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return decode_github_base64_content(payload)
+def parse_juya_rss_entries(
+    xml_text: str,
+    *,
+    max_items: int,
+    collected_at: datetime | None = None,
+) -> list[NewsItem]:
+    """Parse website RSS/Atom XML into NewsItem rows (snippet only)."""
+    rows = parse_juya_rss_rows(xml_text, max_items=max_items, collected_at=collected_at)
+    return [row.item for row in rows]
 
 
-async def enrich_juya_items_with_backup(
+def parse_juya_rss_rows(
+    xml_text: str,
+    *,
+    max_items: int,
+    collected_at: datetime | None = None,
+) -> list[_ParsedJuyaRssRow]:
+    when = collected_at or datetime.now(UTC)
+    root = ET.fromstring(xml_text)
+    rows: list[_ParsedJuyaRssRow] = []
+
+    channel = root.find("channel")
+    if channel is not None:
+        for item_el in channel.findall("item"):
+            parsed = _rss_item_element_to_row(item_el, collected_at=when)
+            if parsed is not None:
+                rows.append(parsed)
+            if len(rows) >= max_items:
+                break
+        return rows
+
+    atom_ns = {"atom": "http://www.w3.org/2005/Atom"}
+    for entry in root.findall("atom:entry", atom_ns):
+        parsed = _atom_entry_to_row(entry, atom_ns, collected_at=when)
+        if parsed is not None:
+            rows.append(parsed)
+        if len(rows) >= max_items:
+            break
+    return rows
+
+
+async def fetch_juya_daily_items(
     client: httpx.AsyncClient,
-    items: list[NewsItem],
+    *,
+    max_items: int,
+    collected_at: datetime,
+    connector_name: str = "github",
+) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
+    warnings: list[ConnectorWarning] = []
+    bounded = max(1, min(max_items, JUYA_RSS_MAX_ENTRIES))
+
+    try:
+        resp = await client.get(JUYA_WEBSITE_RSS_URL)
+    except httpx.RequestError as exc:
+        warnings.append(
+            ConnectorWarning(
+                connector=connector_name,
+                code="juya_rss_unavailable",
+                message="Juya website RSS fetch failed",
+                detail=str(exc),
+            )
+        )
+        return [], 0, warnings
+
+    if resp.status_code != 200:
+        warnings.append(
+            ConnectorWarning(
+                connector=connector_name,
+                code="juya_rss_unavailable",
+                message=(
+                    f"Juya website RSS unavailable (HTTP {resp.status_code})"
+                ),
+                detail=resp.text[:300] if resp.text else None,
+            )
+        )
+        return [], 0, warnings
+
+    xml_text = resp.text
+    if not xml_text.strip():
+        warnings.append(
+            ConnectorWarning(
+                connector=connector_name,
+                code="juya_rss_unavailable",
+                message="Juya website RSS response was empty",
+            )
+        )
+        return [], 0, warnings
+
+    try:
+        rows = parse_juya_rss_rows(xml_text, max_items=bounded, collected_at=collected_at)
+    except ET.ParseError as exc:
+        warnings.append(
+            ConnectorWarning(
+                connector=connector_name,
+                code="juya_rss_unavailable",
+                message="Juya website RSS XML parse failed",
+                detail=str(exc),
+            )
+        )
+        return [], 0, warnings
+
+    if not rows:
+        warnings.append(
+            ConnectorWarning(
+                connector=connector_name,
+                code="juya_rss_unavailable",
+                message="Juya website RSS contained no usable entries",
+            )
+        )
+        return [], 0, warnings
+
+    enriched, enrich_warnings = await enrich_juya_items_with_markdown(
+        client,
+        rows,
+        connector_name=connector_name,
+    )
+    warnings.extend(enrich_warnings)
+    return enriched, len(enriched), warnings
+
+
+async def enrich_juya_items_with_markdown(
+    client: httpx.AsyncClient,
+    rows: list[_ParsedJuyaRssRow],
     *,
     connector_name: str = "github",
 ) -> tuple[list[NewsItem], list[ConnectorWarning]]:
-    """Replace RSS snippets with fuller BACKUP markdown when available."""
+    """Prefer per-issue markdown; fall back to RSS content:encoded."""
     warnings: list[ConnectorWarning] = []
-    index = await _fetch_backup_index(client)
-    if not index:
-        for _ in items:
-            warnings.append(
-                ConnectorWarning(
-                    connector=connector_name,
-                    code="juya_backup_unavailable",
-                    message="Juya BACKUP index unavailable; using RSS snippets only",
-                )
-            )
-        return items, warnings
-
     enriched: list[NewsItem] = []
-    for item in items:
-        path = backup_path_for_entry(item.title, item.url, index)
-        if not path:
-            warnings.append(
-                ConnectorWarning(
-                    connector=connector_name,
-                    code="juya_backup_unavailable",
-                    message=f"No BACKUP markdown matched entry {item.title!r}",
-                )
-            )
-            enriched.append(item)
-            continue
 
-        raw_md = await _fetch_backup_markdown(client, path)
-        if not raw_md:
-            warnings.append(
-                ConnectorWarning(
-                    connector=connector_name,
-                    code="juya_backup_unavailable",
-                    message=f"BACKUP markdown unavailable for {path}",
-                )
-            )
-            enriched.append(item)
-            continue
+    for row in rows:
+        item = row.item
+        md_url = markdown_url_for_issue(item.title, item.url)
+        cleaned = ""
+        source_tag = "juya-markdown"
 
-        cleaned = clean_backup_markdown(raw_md)
+        if md_url:
+            raw_md = await _fetch_issue_markdown(client, md_url)
+            if raw_md:
+                cleaned = clean_issue_markdown(raw_md)
+
+        if not cleaned and row.content_encoded:
+            cleaned = clean_encoded_html(row.content_encoded)
+            source_tag = "juya-rss-content"
+
         if not cleaned:
             warnings.append(
                 ConnectorWarning(
                     connector=connector_name,
-                    code="juya_backup_unavailable",
-                    message=f"BACKUP markdown empty after cleanup for {path}",
+                    code="juya_markdown_unavailable",
+                    message=f"Issue content unavailable for {item.title!r}",
                 )
             )
             enriched.append(item)
@@ -317,30 +258,62 @@ async def enrich_juya_items_with_backup(
                 raw_snippet=cleaned,
                 content_confidence=ConfidenceLevel.HIGH,
                 metadata_completeness=max(item.metadata_completeness, 0.9),
-                tags=[*item.tags, "juya-backup"],
+                tags=[*item.tags, source_tag],
             )
         )
     return enriched, warnings
 
 
-def _rss_item_element_to_news_item(
+# Backward-compatible aliases used by older tests/modules.
+backup_path_for_entry = markdown_url_for_issue
+clean_backup_markdown = clean_issue_markdown
+
+
+async def enrich_juya_items_with_backup(
+    client: httpx.AsyncClient,
+    items: list[NewsItem],
+    *,
+    connector_name: str = "github",
+) -> tuple[list[NewsItem], list[ConnectorWarning]]:
+    rows = [_ParsedJuyaRssRow(item=item) for item in items]
+    return await enrich_juya_items_with_markdown(
+        client,
+        rows,
+        connector_name=connector_name,
+    )
+
+
+async def _fetch_issue_markdown(client: httpx.AsyncClient, url: str) -> str | None:
+    try:
+        resp = await client.get(url)
+    except httpx.RequestError:
+        return None
+    if resp.status_code != 200:
+        return None
+    text = resp.text
+    return text if text.strip() else None
+
+
+def _rss_item_element_to_row(
     item_el: ET.Element,
     *,
     collected_at: datetime,
-) -> NewsItem | None:
+) -> _ParsedJuyaRssRow | None:
     title = _element_text(item_el.find("title"))
     link = _element_text(item_el.find("link"))
     if not title or not link:
         return None
 
     description = _element_text(item_el.find("description"))
+    encoded_el = item_el.find("content:encoded", _CONTENT_NS)
+    content_encoded = _element_text(encoded_el)
     pub_raw = _element_text(item_el.find("pubDate"))
     published_at = _parse_rss_datetime(pub_raw)
 
     snippet = _clean_snippet(description)
     source_id = _stable_source_id(link)
 
-    return NewsItem(
+    item = NewsItem(
         source=SourceKind.GITHUB,
         source_id=source_id,
         url=link,
@@ -353,14 +326,15 @@ def _rss_item_element_to_news_item(
         tags=["github", "juya-daily", "rss"],
         content_confidence=ConfidenceLevel.MEDIUM if snippet else ConfidenceLevel.LOW,
     )
+    return _ParsedJuyaRssRow(item=item, content_encoded=content_encoded)
 
 
-def _atom_entry_to_news_item(
+def _atom_entry_to_row(
     entry: ET.Element,
     ns: dict[str, str],
     *,
     collected_at: datetime,
-) -> NewsItem | None:
+) -> _ParsedJuyaRssRow | None:
     title = _element_text(entry.find("atom:title", ns))
     link_el = entry.find("atom:link[@rel='alternate']", ns)
     if link_el is None:
@@ -380,7 +354,7 @@ def _atom_entry_to_news_item(
     snippet = _clean_snippet(summary)
     source_id = _stable_source_id(link)
 
-    return NewsItem(
+    item = NewsItem(
         source=SourceKind.GITHUB,
         source_id=source_id,
         url=link,
@@ -393,6 +367,7 @@ def _atom_entry_to_news_item(
         tags=["github", "juya-daily", "rss"],
         content_confidence=ConfidenceLevel.MEDIUM if snippet else ConfidenceLevel.LOW,
     )
+    return _ParsedJuyaRssRow(item=item, content_encoded=summary)
 
 
 def _element_text(el: ET.Element | None) -> str | None:

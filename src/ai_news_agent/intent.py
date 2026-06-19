@@ -17,6 +17,10 @@ _BILIBILI_VIDEO_URL = re.compile(
     re.IGNORECASE,
 )
 _URL_TOKEN = re.compile(r"https?://\S+", re.IGNORECASE)
+_JUYA_WEBSITE_URL = re.compile(
+    r"https?://(?:www\.)?daily\.juya\.uk(?:/[^\s]*)?",
+    re.IGNORECASE,
+)
 
 # Owner/org channels only from explicit phrasing — not from bare github.com/owner in a repo URL.
 _GITHUB_CHANNEL = re.compile(
@@ -92,6 +96,11 @@ def parse_digest_intent(message: str) -> DigestRequest:
         if _BILIBILI_VIDEO_URL.search(token) or extract_bvid(token):
             if token not in bilibili_urls:
                 bilibili_urls.append(token)
+            continue
+        if _JUYA_WEBSITE_URL.match(token):
+            if token not in seen_gh_url:
+                seen_gh_url.add(token)
+                github_urls.append(token)
             continue
         ref = parse_github_repo_ref(token)
         if ref and token not in seen_gh_url:

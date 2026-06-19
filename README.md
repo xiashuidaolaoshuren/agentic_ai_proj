@@ -257,6 +257,7 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 | Digest bilibili video BV1gRJs63EYX | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
 | Digest https://github.com/jujuyaya/juya-ai-daily | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
+| Digest https://daily.juya.uk/ | `openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
 | Digest bilibili channel 285286947 | `openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Full commands (from repo root, service running):
@@ -265,10 +266,11 @@ Full commands (from repo root, service running):
 uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili
 uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"
 uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN
+uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml`, then enrich each entry from matching `BACKUP/*.md` markdown when available. Use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index. Ask for a specific issue with `openclaw-followup --message "Digest the first news"` to expand sub-news from BACKUP evidence.
+Targeted Juya digests (`https://daily.juya.uk/` or the legacy `jujuyaya/juya-ai-daily` GitHub URL alias) ingest daily entries from the website RSS feed, then enrich each issue from `daily.juya.uk/markdown/{date}.md` when available (falling back to RSS `content:encoded`). Use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index. Ask for a specific issue with `openclaw-followup --message "Digest the first news"` to expand sub-news from persisted issue evidence.
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 
@@ -290,7 +292,7 @@ uv run ai-news-agent openclaw-followup --message "show sources"
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Rank-targeted follow-up returns deterministic item details from the latest digest list order. For Juya daily issues, it also extracts sub-news from persisted BACKUP evidence.
+Rank-targeted follow-up returns deterministic item details from the latest digest list order. For Juya daily issues, it also extracts sub-news from persisted website markdown evidence.
 
 Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for tool-agent follow-ups.
 

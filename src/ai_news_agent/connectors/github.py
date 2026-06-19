@@ -17,7 +17,8 @@ Warning taxonomy
 - ``invalid_search_response`` — unreadable search JSON or unexpected shape.
 - ``incomplete_results`` — search payload ``incomplete_results=true``.
 - ``skipped_malformed_repo`` — repo row missing ``id``, ``full_name``, or ``html_url``.
-- ``juya_rss_unavailable`` — ``jujuyaya/juya-ai-daily`` RSS fetch/parse failed; falls back to repo metadata.
+- ``juya_rss_unavailable`` — Juya website RSS fetch/parse failed for a targeted Juya URL.
+- ``juya_markdown_unavailable`` — per-issue markdown and RSS content fallback both missing.
 """
 
 from __future__ import annotations
@@ -32,7 +33,11 @@ from urllib.parse import urlparse
 import httpx
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
-from ai_news_agent.connectors.github_juya import fetch_juya_daily_items, is_juya_daily_repo
+from ai_news_agent.connectors.github_juya import (
+    fetch_juya_daily_items,
+    is_juya_daily_repo,
+    is_juya_website_url,
+)
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 
 DEFAULT_BASE_URL = "https://api.github.com"
@@ -107,7 +112,10 @@ class GitHubConnector:
 
         for url in request.github_manual_urls:
             ref = parse_github_repo_ref(url)
-            if ref is not None and is_juya_daily_repo(*ref):
+            is_juya_target = (ref is not None and is_juya_daily_repo(*ref)) or is_juya_website_url(
+                url
+            )
+            if is_juya_target:
                 juya_items, n_raw, ws = await fetch_juya_daily_items(
                     self._client,
                     max_items=request.max_items,
@@ -116,10 +124,9 @@ class GitHubConnector:
                 )
                 raw_total += n_raw
                 warnings.extend(ws)
-                if juya_items:
-                    for item in juya_items:
-                        by_repo_id[item.source_id] = item
-                    continue
+                for item in juya_items:
+                    by_repo_id[item.source_id] = item
+                continue
 
             row, n_raw, ws = await self._fetch_repo_by_url(url, warnings)
             raw_total += n_raw

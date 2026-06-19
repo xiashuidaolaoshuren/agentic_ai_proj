@@ -44,10 +44,17 @@ def test_resolve_openclaw_digest_request_parses_juya_daily_repo_url() -> None:
     assert req.connector_names == ["github"]
 
 
+def test_resolve_openclaw_digest_request_parses_juya_website_url() -> None:
+    req = resolve_openclaw_digest_request(
+        message="Digest https://daily.juya.uk/",
+    )
+    assert any("daily.juya.uk" in u for u in req.github_manual_urls)
+    assert req.connector_names == ["github"]
+
+
 def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -> None:
-    """OpenClaw resolve + GitHub connector should surface daily RSS entries."""
+    """OpenClaw resolve + GitHub connector should surface daily website RSS entries."""
     import asyncio
-    import base64
     from pathlib import Path
 
     import httpx
@@ -60,7 +67,10 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
     fixture = (
         Path(__file__).resolve().parent / "fixtures" / "juya_rss_sample.xml"
     ).read_text(encoding="utf-8")
-    rss_b64 = base64.b64encode(fixture.encode("utf-8")).decode("ascii")
+    markdown = {
+        "/markdown/2026-06-16.md": "# 2026-06-16\n\nGLM-5.2 release and ZCode 3.0 updates.",
+        "/markdown/2026-06-15.md": "# 2026-06-15\n\nPrior day AI news roundup.",
+    }
 
     req = resolve_openclaw_digest_request(
         message="Digest https://github.com/jujuyaya/juya-ai-daily",
@@ -69,9 +79,14 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
     connector_req: ConnectorRequest = parsed["connector_request"]  # type: ignore[index]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
         path = request.url.path
-        if path == "/repos/jujuyaya/juya-ai-daily/contents/rss.xml":
-            return httpx.Response(200, json={"content": rss_b64, "encoding": "base64"})
+        if host == "daily.juya.uk":
+            if path == "/rss.xml":
+                return httpx.Response(200, text=fixture)
+            if path in markdown:
+                return httpx.Response(200, text=markdown[path])
+            return httpx.Response(404)
         return httpx.Response(404, json={"message": "not found"})
 
     async def main() -> None:

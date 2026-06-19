@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title>橘鸦AI早报</title>
+    <item>
+      <title>2026-06-19</title>
+      <link>https://daily.juya.uk/issues/2026-06-19/</link>
+      <pubDate>Fri, 19 Jun 2026 01:12:00 GMT</pubDate>
+      <description>Short RSS description for 2026-06-19.</description>
+      <content:encoded><![CDATA[<h1>AI 早报 2026-06-19</h1><p>DeepSeek 正式上线识图模式</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>2026-06-18</title>
+      <link>https://daily.juya.uk/issues/2026-06-18/</link>
+      <pubDate>Thu, 18 Jun 2026 01:12:00 GMT</pubDate>
+      <description>Short RSS description for 2026-06-18.</description>
+    </item>
+  </channel>
+</rss>

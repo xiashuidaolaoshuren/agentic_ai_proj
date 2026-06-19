@@ -9,10 +9,15 @@ from ai_news_agent.models import DigestEntry, NewsItem
 
 _JUYA_SECTION_MARKERS: tuple[str, ...] = (
     "今日要闻",
+    "要闻",
     "模型发布",
     "产品与应用",
+    "产品应用",
     "技术与研究",
+    "技术与洞察",
     "行业动态",
+    "开发生态",
+    "前瞻与传闻",
 )
 
 _BULLET_SPLIT_RE = re.compile(r"\s+[—\-]\s+")
@@ -30,7 +35,7 @@ class JuyaSubNews:
 def is_juya_news_item(item: NewsItem) -> bool:
     """Return True when a collected item looks like a Juya daily issue row."""
     tags = {t.lower() for t in (item.tags or [])}
-    if "juya-daily" in tags or "juya-backup" in tags:
+    if "juya-daily" in tags or "juya-backup" in tags or "juya-markdown" in tags:
         return True
     url = (item.url or "").lower()
     if "daily.juya.uk" in url:

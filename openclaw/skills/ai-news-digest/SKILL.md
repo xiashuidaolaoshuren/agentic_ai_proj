@@ -1,6 +1,6 @@
 ---
 name: ai-news-digest
-description: "Generate an AI news digest from GitHub and Bilibili via the local warm digest service."
+description: "Generate an AI news digest from GitHub, Bilibili, or daily.juya.uk (橘鸦AI早报) via the local warm digest service. Use exec to call openclaw-digest — never use web_fetch."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["uv"]}}}
 ---
@@ -11,8 +11,7 @@ Generate a markdown AI news digest by calling the **local warm digest service** 
 `ai-news-agent openclaw-digest`. OpenClaw is the channel gateway; this project handles
 retrieval, ranking, summarization, and persistence.
 
-**Do not** use `web_fetch`, RSS lookups, Bilibili API scraping, or other research tools for
-digest requests. Map user intent to the fixed `openclaw-digest` command below.
+> **IMPORTANT:** Never use `web_fetch`, RSS lookups, or manual scraping for digest or follow-up requests. Always use `exec` to call `openclaw-digest` or `openclaw-followup`. This applies to `daily.juya.uk`, GitHub, and Bilibili requests equally.
 
 ## When To Use
 
@@ -29,6 +28,8 @@ Activate this skill when the user asks for a digest in natural language, includi
 - "Digest bilibili video BV1gRJs63EYX"
 - "Digest https://www.bilibili.com/video/BV1gRJs63EYX"
 - "Digest https://github.com/langchain-ai/langgraph"
+- "Digest https://daily.juya.uk/"
+- "Digest https://daily.juya.uk/issues/2026-06-19/"
 - "Digest bilibili channel 285286947"
 
 Targeted requests are **in scope** for this skill. Never treat them as generic research.
@@ -86,13 +87,13 @@ uv run ai-news-agent openclaw-digest --message "<user digest sentence>"
 
 Add `--topics <csv>` only when the user specified topics for broad digests.
 
-**Juya editorial digest template (preferred for `jujuyaya/juya-ai-daily`):**
+**Juya editorial digest template (preferred for `daily.juya.uk` / legacy `jujuyaya/juya-ai-daily` alias):**
 
 ```bash
-uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN
+uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN
 ```
 
-This stays on the local workflow (RSS + BACKUP enrichment, ranking, summarization, persistence).
+This stays on the local workflow (website RSS + per-issue markdown enrichment, ranking, summarization, persistence).
 The top-level output is a **compact issue index**. For sub-news extraction inside one issue,
 use **`ai-news-followup`** (for example: `Digest the first news` or `follow up on item 1`).
 Do **not** substitute `web_fetch` or manual scraping for this path.
@@ -113,6 +114,7 @@ uv run ai-news-agent openclaw-digest --fake --message "Digest bilibili video BV1
 | Digest bilibili video BV1gRJs63EYX | `uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
 | Digest https://github.com/jujuyaya/juya-ai-daily | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
+| Digest https://daily.juya.uk/ | `uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
 | Digest bilibili channel 285286947 | `uv run ai-news-agent openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Return the client stdout (markdown digest) to the user unchanged. Preserve source links and
