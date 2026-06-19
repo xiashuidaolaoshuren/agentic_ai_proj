@@ -268,7 +268,7 @@ uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuya
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml`, then enrich each entry from matching `BACKUP/*.md` markdown when available. Use `--output-style editorial --output-language zh-CN` for newsletter-style Chinese output. If RSS is unavailable, the connector falls back to repository metadata and emits a `juya_rss_unavailable` caveat; missing BACKUP files emit `juya_backup_unavailable` while keeping RSS snippets.
+Targeted `jujuyaya/juya-ai-daily` digests ingest daily entries from the repo's `rss.xml`, then enrich each entry from matching `BACKUP/*.md` markdown when available. Use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index. Ask for a specific issue with `openclaw-followup --message "Digest the first news"` to expand sub-news from BACKUP evidence.
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 
@@ -281,6 +281,7 @@ After generating a digest, use the **`ai-news-followup`** skill for deterministi
 | Show sources | `openclaw-followup --message "show sources"` |
 | Which item should I study first? | `openclaw-followup --message "which item should I study first"` |
 | Follow up on item 1 | `openclaw-followup --message "follow up on item 1"` |
+| Digest the first news (Juya deep dive) | `openclaw-followup --message "Digest the first news"` |
 | Follow up on the second one | `openclaw-followup --message "follow up on the second one"` |
 | Show caveats | `openclaw-followup --message "show caveats"` |
 
@@ -289,7 +290,7 @@ uv run ai-news-agent openclaw-followup --message "show sources"
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Rank-targeted follow-up returns deterministic item details (title, URL, summary, why-it-matters, caveat) from the latest digest list order.
+Rank-targeted follow-up returns deterministic item details from the latest digest list order. For Juya daily issues, it also extracts sub-news from persisted BACKUP evidence.
 
 Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for tool-agent follow-ups.
 

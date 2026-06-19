@@ -162,6 +162,8 @@ def test_parse_rank_from_message_numeric_and_ordinal() -> None:
     assert parse_rank_from_message("rank 3 please") == 3
     assert parse_rank_from_message("the second one") == 2
     assert parse_rank_from_message("followup the first issue") == 1
+    assert parse_rank_from_message("Digest the first news") == 1
+    assert parse_rank_from_message("the first news") == 1
 
 
 def test_parse_rank_from_message_returns_none_when_unrecognized() -> None:

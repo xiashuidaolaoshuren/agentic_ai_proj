@@ -62,7 +62,7 @@ Map user intent into constrained CLI options. Defaults and aliases match
 | Timeframe | `--timeframe` | Default `today`. Map `daily` -> `today`; `week` / `this week` / `last7` -> `last_7_days`. |
 | Sources | `--sources` | Default `github,bilibili` for broad digests. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
 | Topics | `--topics` | Optional comma-separated list. Omit when user does not specify topics. |
-| Output style | `--output-style` | Default bulletin. Use `editorial` or `newsletter` for Chinese newsletter-style sections (Juya daily). |
+| Output style | `--output-style` | Default bulletin. Use `editorial` or `newsletter` for a compact Chinese Juya index (one line per issue). |
 | Output language | `--output-language` | Optional BCP-47 tag. Use `zh-CN` with Juya editorial digests. |
 
 Do not invent new flags or source names.
@@ -93,6 +93,8 @@ uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuya
 ```
 
 This stays on the local workflow (RSS + BACKUP enrichment, ranking, summarization, persistence).
+The top-level output is a **compact issue index**. For sub-news extraction inside one issue,
+use **`ai-news-followup`** (for example: `Digest the first news` or `follow up on item 1`).
 Do **not** substitute `web_fetch` or manual scraping for this path.
 
 **Offline / smoke template** (service must be started with `--fake`):

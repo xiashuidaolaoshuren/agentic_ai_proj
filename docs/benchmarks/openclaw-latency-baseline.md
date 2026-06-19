@@ -81,4 +81,5 @@ Prerequisite: digest service running and a digest already generated in the same 
 3. Expect numbered source links from the latest digest (not a new digest run).
 4. Try `openclaw-followup --message "show caveats"` and `openclaw-followup --message "which item should I study first"`.
 5. Try `openclaw-followup --message "follow up on item 1"` and expect item-level details (title, URL, summary).
-6. Unsupported phrase (e.g. open-ended why-question) should return structured-mode guidance, not `web_fetch`.
+6. For Juya daily digests, try `openclaw-followup --message "Digest the first news"` and expect sub-news extraction for the selected issue.
+7. Unsupported phrase (e.g. open-ended why-question) should return structured-mode guidance, not `web_fetch`.

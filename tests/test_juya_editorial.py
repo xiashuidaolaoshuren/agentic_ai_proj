@@ -181,29 +181,29 @@ def test_resolve_openclaw_digest_request_applies_style_hints() -> None:
     assert req.output_language == "zh-CN"
 
 
-def test_render_digest_editorial_text_groups_sections() -> None:
+def test_render_digest_editorial_text_is_compact_index() -> None:
     digest = Digest(
         generated_at=datetime(2026, 6, 17, 12, 0, tzinfo=UTC),
         entries=[
             DigestEntry(
                 source_kind=SourceKind.GITHUB,
-                source_id="1",
-                title="GLM-5.2 release",
+                source_id="juya-rss-1",
+                title="2026-06-18",
                 source_name="GitHub",
-                source_url="https://example.com/1",
-                summary="智谱开源 GLM-5.2",
+                source_url="https://daily.juya.uk/issue-7/",
+                summary="OpenAI 计划任务；Grok Video 1.5",
                 why_it_matters="模型发布",
                 background_knowledge="",
                 follow_up_action=FollowUpAction.READ,
             ),
             DigestEntry(
                 source_kind=SourceKind.GITHUB,
-                source_id="2",
-                title="Alipay AI beta",
+                source_id="juya-rss-2",
+                title="2026-06-17",
                 source_name="GitHub",
-                source_url="https://example.com/2",
-                summary="支付宝 AI 版邀测",
-                why_it_matters="产品更新",
+                source_url="https://daily.juya.uk/issue-6/",
+                summary="SpaceX 收购 Cursor",
+                why_it_matters="行业动态",
                 background_knowledge="",
                 follow_up_action=FollowUpAction.READ,
             ),
@@ -212,9 +212,11 @@ def test_render_digest_editorial_text_groups_sections() -> None:
         timeframe="today",
     )
     out = render_digest_editorial_text(digest, output_language="zh-CN")
-    assert "模型发布" in out
-    assert "产品与应用" in out
-    assert "https://example.com/1" in out
+    assert "1." in out
+    assert "2." in out
+    assert "\n模型发布\n" not in out
+    assert "https://daily.juya.uk/issue-7/" in out
+    assert "第一条" in out or "follow up" in out.lower()
 
 
 def test_select_digest_renderers_defaults_to_bulletin() -> None:

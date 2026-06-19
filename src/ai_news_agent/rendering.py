@@ -193,19 +193,16 @@ def render_digest_editorial_text(
         parts.append("本期暂无条目。")
         return "\n".join(parts).rstrip() + "\n"
 
-    for section, section_entries in _group_entries_for_editorial(digest.entries):
-        parts.append(section)
+    for index, entry in enumerate(digest.entries, start=1):
+        summary_line = entry.summary or entry.title
+        parts.append(f"{index}. {entry.title}")
+        parts.append(f"   {summary_line}")
+        if entry.why_it_matters:
+            parts.append(f"   要点：{entry.why_it_matters}")
+        parts.append(f"   来源：{entry.source_url}")
         parts.append("")
-        for entry in section_entries:
-            parts.append(f"- {entry.title}")
-            if entry.summary:
-                parts.append(f"  {entry.summary}")
-            if entry.why_it_matters:
-                parts.append(f"  要点：{entry.why_it_matters}")
-            parts.append(f"  来源：{entry.source_url}")
-            if entry.confidence_caveat:
-                parts.append(f"  注意：{entry.confidence_caveat}")
-            parts.append("")
+
+    parts.append("如需查看某条详情，可以说「第一条 news」或「follow up on item 1」。")
     return "\n".join(parts).rstrip() + "\n"
 
 
