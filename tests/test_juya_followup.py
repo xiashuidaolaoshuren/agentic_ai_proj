@@ -94,8 +94,36 @@ def test_format_juya_issue_deep_dive_lists_sub_news() -> None:
     out = format_juya_issue_deep_dive(entry, item, rank=1)
     assert "第 1 条" in out
     assert "daily.juya.uk/issue-5" in out
-    assert "子新闻" in out
+    assert "🔖 要闻" in out or "🔖 今日要闻" in out
+    assert "🧠 模型发布" in out
+    assert "#1 " in out
     assert "GLM-5.2" in out or "SpaceX" in out
+
+
+def test_format_juya_issue_deep_dive_uses_global_numbering_across_sections() -> None:
+    item = _juya_news_item(
+        source_id="juya-rss-1",
+        title="2026-06-16",
+        url="https://daily.juya.uk/issue-5/",
+        snippet=_juya_backup_snippet(),
+    )
+    entry = DigestEntry(
+        source_kind=SourceKind.GITHUB,
+        source_id="juya-rss-1",
+        title="2026-06-16",
+        source_name="GitHub",
+        source_url=item.url,
+        summary="橘鸦早报摘要",
+        why_it_matters="模型与产品动态",
+        background_knowledge="",
+        follow_up_action=FollowUpAction.READ,
+    )
+    out = format_juya_issue_deep_dive(entry, item, rank=1)
+    first_hash = out.find("#1 ")
+    second_hash = out.find("#2 ")
+    model_section = out.find("🧠 模型发布")
+    assert first_hash != -1 and second_hash != -1
+    assert first_hash < model_section < second_hash
 
 
 def _seed_juya_digest_store(store: DigestStore) -> int:

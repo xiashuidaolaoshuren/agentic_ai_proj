@@ -20,6 +20,19 @@ _JUYA_SECTION_MARKERS: tuple[str, ...] = (
     "前瞻与传闻",
 )
 
+_SECTION_ICONS: dict[str, str] = {
+    "今日要闻": "🔖",
+    "要闻": "🔖",
+    "开发生态": "⚙️",
+    "产品与应用": "🚀",
+    "产品应用": "🚀",
+    "模型发布": "🧠",
+    "技术与研究": "🔬",
+    "技术与洞察": "🔬",
+    "行业动态": "🏢",
+    "前瞻与传闻": "📡",
+}
+
 _BULLET_SPLIT_RE = re.compile(r"\s+[—\-]\s+")
 
 
@@ -83,20 +96,23 @@ def format_juya_issue_deep_dive(
     lines = [
         f"第 {rank} 条：{entry.title}",
         f"来源：{entry.source_url}",
-        "",
-        "本期子新闻：",
     ]
 
     sub_items = parse_juya_sub_news(news_item.raw_snippet or "")
     if sub_items:
-        for index, sub in enumerate(sub_items, start=1):
-            lines.append(f"{index}. {sub.title}")
-            if sub.detail and sub.detail != sub.title:
-                lines.append(f"   {sub.detail}")
-            lines.append("")
+        counter = 1
+        for section, section_items in _group_sub_news_by_section(sub_items):
+            heading = _section_heading(section)
+            if heading:
+                lines.extend(["", heading, ""])
+            for sub in section_items:
+                lines.append(f"#{counter} {sub.title}")
+                if sub.detail and sub.detail != sub.title:
+                    lines.append(f"   {sub.detail}")
+                lines.append("")
+                counter += 1
     else:
-        lines.append(f"1. {entry.summary}")
-        lines.append("")
+        lines.extend(["", f"#1 {entry.summary}", ""])
 
     if entry.summary:
         lines.append(f"摘要：{entry.summary}")
@@ -108,6 +124,29 @@ def format_juya_issue_deep_dive(
     lines.append("")
     lines.append("想深入某一条子新闻，可以说编号或关键词。")
     return "\n".join(lines).rstrip()
+
+
+def _section_heading(section: str | None) -> str | None:
+    if not section:
+        return None
+    icon = _SECTION_ICONS.get(section)
+    if icon:
+        return f"{icon} {section}"
+    return section
+
+
+def _group_sub_news_by_section(
+    items: list[JuyaSubNews],
+) -> list[tuple[str | None, list[JuyaSubNews]]]:
+    order: list[str | None] = []
+    buckets: dict[str | None, list[JuyaSubNews]] = {}
+    for item in items:
+        key = item.section
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(item)
+    return [(key, buckets[key]) for key in order]
 
 
 def _locate_sections(text: str) -> list[tuple[str, str]]:
