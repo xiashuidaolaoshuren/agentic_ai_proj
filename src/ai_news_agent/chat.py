@@ -10,8 +10,8 @@ from typing import Any, TypeVar
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.logging_setup import get_logger
+from ai_news_agent.followup_structured import NO_SAVED_DIGEST, answer_structured_followup
 from ai_news_agent.rendering import format_connector_warnings_notice
-from ai_news_agent.models import RankedItem
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
 from ai_news_agent.streaming import iter_text_chunks
@@ -25,12 +25,6 @@ StreamingWorkflowRunner = Callable[
 logger = get_logger("chat")
 
 _StreamPayloadT = TypeVar("_StreamPayloadT")
-
-_NO_SAVED_DIGEST = (
-    "No saved digest yet. Ask for a digest first "
-    '(for example: "Give me today\'s AI digest").'
-)
-
 
 class ChatService:
     """Hybrid routing: digest workflow vs deterministic vs LLM-grounded follow-ups.
@@ -101,9 +95,9 @@ class ChatService:
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
             logger.info("follow-up path=no_saved_digest")
-            return _NO_SAVED_DIGEST
+            return NO_SAVED_DIGEST
 
-        structured = _answer_structured_followup(message, ctx)
+        structured = answer_structured_followup(message, ctx)
         if structured is not None:
             logger.info("follow-up path=structured")
             return structured
@@ -208,10 +202,10 @@ class ChatService:
         ctx = self._store.get_latest_followup_context()
         if ctx.run_id is None and ctx.digest is None:
             logger.info("follow-up path=no_saved_digest")
-            yield _NO_SAVED_DIGEST
+            yield NO_SAVED_DIGEST
             return
 
-        structured = _answer_structured_followup(message, ctx)
+        structured = answer_structured_followup(message, ctx)
         if structured is not None:
             logger.info("follow-up path=structured")
             async for chunk in iter_text_chunks(
@@ -360,89 +354,6 @@ def _message_requests_digest(message: str) -> bool:
         "news digest",
     )
     return any(t in low for t in triggers)
-
-
-def _answer_structured_followup(message: str, ctx: FollowupContext) -> str | None:
-    low = message.strip().lower()
-
-    if _mentions_sources(low):
-        return _format_sources(ctx)
-
-    if _mentions_ranking(low):
-        return _format_ranking_pick(ctx)
-
-    if _mentions_caveats(low):
-        return _format_caveats(ctx)
-
-    return None
-
-
-def _mentions_sources(low: str) -> bool:
-    keys = ("show sources", "list sources", "original links", "source links", "urls")
-    return any(k in low for k in keys)
-
-
-def _mentions_ranking(low: str) -> bool:
-    keys = ("study first", "where should i start", "top pick", "best item", "priority")
-    return any(k in low for k in keys)
-
-
-def _mentions_caveats(low: str) -> bool:
-    keys = ("caveat", "warnings", "confidence", "limitations", "issues")
-    return any(k in low for k in keys)
-
-
-def _format_sources(ctx: FollowupContext) -> str:
-    if not ctx.digest or not ctx.digest.entries:
-        return "No digest entries are available to list sources for."
-    lines: list[str] = ["Sources from the latest digest:"]
-    for i, e in enumerate(ctx.digest.entries, start=1):
-        lines.append(f"{i}. {e.title} — {e.source_url}")
-    return "\n".join(lines)
-
-
-def _format_ranking_pick(ctx: FollowupContext) -> str:
-    ranked = ctx.ranked_items
-    if not ranked:
-        return "No ranking data is available for the latest digest run."
-
-    selected = [r for r in ranked if r.selected]
-    pool: list[RankedItem] = selected if selected else ranked
-    best = max(pool, key=lambda r: r.score_total)
-
-    why = best.selection_reason or "highest score_total among candidates"
-    return (
-        f"Suggested starting point: {best.item.title}\n"
-        f"- URL: {best.item.url}\n"
-        f"- Score: {best.score_total:.3f}\n"
-        f"- Reason: {why}"
-    )
-
-
-def _format_caveats(ctx: FollowupContext) -> str:
-    lines: list[str] = []
-
-    if ctx.warnings:
-        lines.append("Connector warnings:")
-        for w in ctx.warnings:
-            lines.append(f"- [{w.connector}] {w.code}: {w.message}")
-
-    caveats: list[str] = []
-    if ctx.digest:
-        for e in ctx.digest.entries:
-            if e.confidence_caveat:
-                caveats.append(f"- {e.title}: {e.confidence_caveat}")
-
-    if caveats:
-        if lines:
-            lines.append("")
-        lines.append("Per-entry confidence notes:")
-        lines.extend(caveats)
-
-    if not lines:
-        return "No warnings or confidence caveats were recorded for the latest digest."
-
-    return "\n".join(lines)
 
 
 def _try_llm_followup(model: Any | None, question: str, ctx: FollowupContext) -> str | None:

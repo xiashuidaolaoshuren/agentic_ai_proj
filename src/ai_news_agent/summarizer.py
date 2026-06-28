@@ -25,6 +25,8 @@ def summarize_ranked_items(
     topics: list[str] | None = None,
     timeframe: str | None = None,
     model: Any | None = None,
+    output_style: str | None = None,
+    output_language: str | None = None,
 ) -> Digest:
     """Build a digest from selected ranked rows using ``model.generate_entry_fields``."""
     ts = generated_at if generated_at is not None else utcnow()
@@ -50,7 +52,13 @@ def summarize_ranked_items(
     global_topics_payload = topics_list
 
     for r in selected:
-        ctx = _context_payload(r, global_topics_payload, timeframe)
+        ctx = _context_payload(
+            r,
+            global_topics_payload,
+            timeframe,
+            output_style=output_style,
+            output_language=output_language,
+        )
         raw = model.generate_entry_fields(ctx)
         entries.append(_build_digest_entry(r.item, raw))
 
@@ -61,11 +69,16 @@ def _context_payload(
     ranked: RankedItem,
     topics: list[str],
     timeframe: str | None,
+    *,
+    output_style: str | None = None,
+    output_language: str | None = None,
 ) -> dict[str, Any]:
     it = ranked.item
-    return {
+    payload = {
         "digest_topics": topics,
         "digest_timeframe": timeframe,
+        "output_style": output_style or "",
+        "output_language": output_language or "",
         "rank_score_total": ranked.score_total,
         "rank_selection_reason": ranked.selection_reason,
         "score_breakdown": dict(ranked.score_breakdown),
@@ -84,6 +97,7 @@ def _context_payload(
         "content_confidence": it.content_confidence.value if it.content_confidence else "",
         "tags": list(it.tags),
     }
+    return payload
 
 
 def _source_display_name(item: NewsItem) -> str:

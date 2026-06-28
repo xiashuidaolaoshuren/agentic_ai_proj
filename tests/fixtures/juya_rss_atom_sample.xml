@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>橘鸦AI早报</title>
+  <entry>
+    <title>2026-06-16</title>
+    <link rel="alternate" href="https://daily.juya.uk/issue-5/"/>
+    <id>https://github.com/jujuyaya/juya-ai-daily/issues/5</id>
+    <updated>2026-06-16T08:00:00Z</updated>
+    <summary>Short RSS summary only.</summary>
+  </entry>
+</feed>

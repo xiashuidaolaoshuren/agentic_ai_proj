@@ -133,4 +133,50 @@ async def run_digest_streaming(
     yield "", True, result
 
 
-__all__ = ["build_digest_graph", "run_digest", "run_digest_streaming"]
+async def run_digest_instrumented(
+    request: DigestRequest,
+    *,
+    connectors: Sequence[SourceConnector],
+    model: Any,
+    store: DigestStore,
+    on_stage: Callable[[str], None] | None = None,
+    now_provider: Callable[[], datetime] | None = None,
+) -> DigestResult:
+    """Run the digest graph, optionally invoking ``on_stage`` per completed node."""
+    graph = build_digest_graph(
+        connectors=connectors,
+        model=model,
+        store=store,
+        now_provider=now_provider,
+    )
+    start_ts = now_provider() if now_provider is not None else utcnow()
+    seen_nodes: set[str] = set()
+    final_state: DigestGraphState | None = None
+
+    async for mode, chunk in graph.astream(
+        initial_state(request, now=start_ts),
+        stream_mode=["updates", "values"],
+    ):
+        if mode == "values":
+            final_state = chunk
+            continue
+        if on_stage is None:
+            continue
+        for node_name in chunk:
+            if node_name in seen_nodes:
+                continue
+            seen_nodes.add(node_name)
+            on_stage(node_name)
+
+    if final_state is None:
+        raise RuntimeError("digest workflow produced no final state")
+
+    return state_to_result(final_state)
+
+
+__all__ = [
+    "build_digest_graph",
+    "run_digest",
+    "run_digest_instrumented",
+    "run_digest_streaming",
+]

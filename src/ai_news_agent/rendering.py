@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
+
 from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry
+
+_EDITORIAL_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("模型发布", ("model", "glm", "qwen", "llm", "开源", "release", "模型")),
+    ("产品与应用", ("product", "app", "application", "产品", "应用", "邀测", "beta")),
+    ("技术与研究", ("research", "paper", "tech", "技术", "研究", "agent", "coding")),
+    ("行业动态", ("industry", "收购", "融资", "合作", "政策")),
+)
+_EDITORIAL_GENERAL = "今日要闻"
 
 
 def format_connector_warnings_notice(
@@ -129,3 +140,101 @@ def render_digest_text(
     else:
         parts.append("\n\n---\n\n".join(_render_entry_text(e) for e in digest.entries))
     return "\n".join(parts).rstrip() + "\n"
+
+
+def _classify_editorial_section(entry: DigestEntry) -> str:
+    haystack = " ".join(
+        part
+        for part in (entry.title, entry.summary, entry.why_it_matters)
+        if part
+    ).lower()
+    for section, keywords in _EDITORIAL_SECTIONS:
+        if any(keyword.lower() in haystack for keyword in keywords):
+            return section
+    return _EDITORIAL_GENERAL
+
+
+def _group_entries_for_editorial(entries: list[DigestEntry]) -> list[tuple[str, list[DigestEntry]]]:
+    buckets: dict[str, list[DigestEntry]] = {}
+    order: list[str] = []
+    for entry in entries:
+        section = _classify_editorial_section(entry)
+        if section not in buckets:
+            buckets[section] = []
+            order.append(section)
+        buckets[section].append(entry)
+
+    preferred = [_EDITORIAL_GENERAL, *[name for name, _ in _EDITORIAL_SECTIONS]]
+    ordered_names = [name for name in preferred if name in buckets]
+    ordered_names.extend(name for name in order if name not in ordered_names)
+    return [(name, buckets[name]) for name in ordered_names]
+
+
+def render_digest_editorial_text(
+    digest: Digest,
+    *,
+    warnings: list[ConnectorWarning] | None = None,
+    output_language: str | None = None,
+) -> str:
+    del output_language
+    notice = format_connector_warnings_notice(warnings or [], [])
+    parts: list[str] = []
+    if notice:
+        parts.extend([notice, ""])
+
+    header = "橘鸦AI早报" if any("juya" in e.source_id.lower() for e in digest.entries) else "AI 新闻简报"
+    parts.append(header)
+    parts.append(f"生成时间：{digest.generated_at.isoformat()}")
+    if digest.timeframe:
+        parts.append(f"时间范围：{digest.timeframe}")
+    parts.append("")
+
+    if not digest.entries:
+        parts.append("本期暂无条目。")
+        return "\n".join(parts).rstrip() + "\n"
+
+    for index, entry in enumerate(digest.entries, start=1):
+        summary_line = entry.summary or entry.title
+        parts.append(f"{index}. {entry.title}")
+        parts.append(f"   {summary_line}")
+        if entry.why_it_matters:
+            parts.append(f"   要点：{entry.why_it_matters}")
+        parts.append(f"   来源：{entry.source_url}")
+        parts.append("")
+
+    parts.append("如需查看某条详情，可以说「第一条 news」或「follow up on item 1」。")
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def render_digest_editorial_markdown(
+    digest: Digest,
+    *,
+    warnings: list[ConnectorWarning] | None = None,
+    output_language: str | None = None,
+) -> str:
+    plain = render_digest_editorial_text(
+        digest,
+        warnings=warnings,
+        output_language=output_language,
+    )
+    lines: list[str] = []
+    for line in plain.splitlines():
+        if line in {_EDITORIAL_GENERAL, *[name for name, _ in _EDITORIAL_SECTIONS]}:
+            lines.append(f"## {line}")
+        elif line and not line.startswith(("- ", "生成", "时间", "本期", "橘鸦", "AI ")):
+            lines.append(f"# {line}" if not lines else line)
+        else:
+            lines.append(line)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def select_digest_renderers(
+    output_style: str | None,
+) -> tuple[
+    Callable[..., str],
+    Callable[..., str],
+]:
+    """Return markdown/text render callables for the requested output style."""
+    if output_style == "editorial":
+        return render_digest_editorial_markdown, render_digest_editorial_text
+    return render_digest_markdown, render_digest_text
