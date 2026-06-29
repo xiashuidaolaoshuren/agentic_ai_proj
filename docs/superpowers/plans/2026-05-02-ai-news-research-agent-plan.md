@@ -65,10 +65,10 @@ Ship a local-first Python/LangGraph AI News Research Chatbot that generates an o
 
 | Path | Reason Deferred |
 |------|-----------------|
-| `src/ai_news_agent/adapters/openclaw.py` | Milestone 2 after local workflow is stable |
-| `src/ai_news_agent/connectors/arxiv.py` | Milestone 3 broader source expansion |
-| `src/ai_news_agent/connectors/huggingface.py` | Milestone 3 broader source expansion |
-| `src/ai_news_agent/scheduler.py` | Milestone 4 scheduling |
+| `src/ai_news_agent/adapters/openclaw.py` | Milestone 3 after local workflow is stable |
+| `src/ai_news_agent/connectors/arxiv.py` | Milestone 5 broader source expansion |
+| `src/ai_news_agent/connectors/huggingface.py` | Milestone 5 broader source expansion |
+| `src/ai_news_agent/scheduler.py` | Milestone 6 scheduling |
 | vector database integration | Not needed until saved digest volume justifies semantic retrieval |
 
 ### Blast Radius

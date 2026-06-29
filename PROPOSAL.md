@@ -40,9 +40,11 @@ The system follows a modular architecture to ensure flexibility and maintainabil
 
 ## 6. Project Milestones
 - **Milestone 1: Local Digest MVP**: Core agent workflow with GitHub and Bilibili support, Gradio UI, and local storage.
-- **Milestone 2: OpenClaw Integration**: Exposing the agent as a tool within the OpenClaw assistant gateway.
-- **Milestone 3: Source Expansion**: Adding connectors for arXiv, Hugging Face, and RSS feeds.
-- **Milestone 4: Advanced Features**: Scheduled digests, long-term memory, and automated quality evaluation.
+- **Milestone 2: LLM Tool Usage Layer**: Structured tool registry and bounded LangGraph tool-calling loop for follow-up chat and source exploration.
+- **Milestone 3: OpenClaw Adapter**: Exposing the agent as a tool within the OpenClaw assistant gateway.
+- **Milestone 4: Pydantic Schema + LangChain `@tool` Registry Migration**: Migrate domain models and tool schemas to Pydantic v2 and the tool registry to LangChain's `@tool` workflow.
+- **Milestone 5: Source Expansion**: Adding connectors for arXiv, Hugging Face, and RSS feeds.
+- **Milestone 6: Advanced Features**: Scheduled digests, long-term memory, and automated quality evaluation.
 
 ## 7. Expected Outcomes
 - A functional AI agent that significantly reduces the time spent on AI research.

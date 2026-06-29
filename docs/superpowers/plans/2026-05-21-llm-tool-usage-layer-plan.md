@@ -50,10 +50,10 @@ Add a bounded LangGraph tool-calling layer on top of the completed Milestone 1 d
 | Path | Reason Deferred |
 | --- | --- |
 | `src/ai_news_agent/adapters/openclaw.py` | Milestone 3 external adapter, after internal tool usage works |
-| `src/ai_news_agent/connectors/arxiv.py` | Milestone 4 broader source expansion |
-| `src/ai_news_agent/connectors/huggingface.py` | Milestone 4 broader source expansion |
-| RSS/blog connector modules | Milestone 4 broader source expansion |
-| vector store or semantic memory modules | Milestone 5 or later, only if stored digest volume justifies it |
+| `src/ai_news_agent/connectors/arxiv.py` | Milestone 5 broader source expansion |
+| `src/ai_news_agent/connectors/huggingface.py` | Milestone 5 broader source expansion |
+| RSS/blog connector modules | Milestone 5 broader source expansion |
+| vector store or semantic memory modules | Milestone 6 or later, only if stored digest volume justifies it |
 | database schema migration for tool-call logs | Not required for Milestone 2; application logs are enough unless implementation discovers a durable audit need |
 
 ## Blast Radius

@@ -3,6 +3,7 @@
 Date: 2026-05-02  
 Amended: 2026-05-19 (Bilibili connector library refactor)
 Amended: 2026-05-21 (Milestone 2 LLM tool usage layer)
+Amended: 2026-06-29 (Milestone 4 inserted: Pydantic + LangChain @tool migration; former M4 -> M5, former M5 -> M6)
 
 ## Summary
 
@@ -166,7 +167,7 @@ Initial connector tools:
 - `search_github_ai_news`: call the GitHub connector through the shared connector request boundary.
 - `search_bilibili_ai_news`: call the Bilibili connector through the shared connector request boundary.
 
-Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and RSS/blog search tools after Milestone 4 source expansion.
+Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and RSS/blog search tools after Milestone 5 source expansion.
 
 The Milestone 2 agent should use a bounded tool-calling loop: the model decides when to call a registered tool, a tool execution node runs the call, and the model then answers from the returned observations. Tool calls must have typed input schemas, stable tool names, concise descriptions, and outputs that can be serialized to JSON or markdown for the final answer.
 
@@ -451,14 +452,22 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Return digest results through an OpenClaw-supported channel
 - Preserve the same source traces and logging used by the local interface
 
-### Milestone 4: Broader Research Sources
+### Milestone 4: Pydantic Schema + LangChain `@tool` Registry Migration
+
+- Migrate `models.py` domain models and `tools/schemas.py` tool schemas from dataclasses to Pydantic v2
+- Replace hand-written `*_to_dict` / `*_from_dict` / `_encode_value` serialization with `model_dump(mode="json")` / `model_validate()`; preserve stored SQLite row compatibility
+- Migrate the custom tool registry to LangChain `@tool` / `BaseTool` with Pydantic `args_schema` (single source of truth for tool schemas, eliminating dual-schema drift)
+- Keep the bounded LangGraph tool-calling loop, progress-line streaming, and `ToolObservation` return contract
+- See `docs/superpowers/specs/2026-06-29-pydantic-and-langchain-tool-migration-design.md`
+
+### Milestone 5: Broader Research Sources
 
 - Add arXiv connector
 - Add Hugging Face connector
 - Add RSS/blog sources
 - Improve ranking across source types
 
-### Milestone 5: Memory, Scheduling, And Deployment
+### Milestone 6: Memory, Scheduling, And Deployment
 
 - Add scheduled daily or weekly digest generation
 - Add richer local memory or vector search if stored digests become large
