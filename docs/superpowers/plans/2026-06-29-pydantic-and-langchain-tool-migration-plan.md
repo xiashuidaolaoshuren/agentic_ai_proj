@@ -42,6 +42,8 @@ The spec contains two sub-projects, but they are not independent subsystems. The
 | `tests/test_tools_followup.py` | modify | Assert follow-up observations remain JSON-safe and behaviorally unchanged | pytest tests |
 | `tests/test_tools_connectors.py` | modify | Assert connector tool observations remain JSON-safe and behaviorally unchanged | pytest tests |
 | `tests/test_summarizer.py` | modify | Update digest round-trip expectations from removed helpers to Pydantic validation | pytest tests |
+| `src/ai_news_agent/connectors/github_juya.py` | modify | Replace `dataclasses.replace(NewsItem, ...)` with `NewsItem.model_copy(update=...)` after T1 Pydantic migration | article-enrichment path on `NewsItem` |
+| `tests/test_connectors_github_juya.py` | modify | Assert markdown-enrichment still updates `NewsItem` fields after `model_copy` swap | pytest tests |
 
 ### Subsystem 4b: LangChain `@tool` Registry Migration
 
@@ -75,6 +77,7 @@ The spec contains two sub-projects, but they are not independent subsystems. The
 | `src/ai_news_agent/tools/agent.py` | Bounded tool loop can regress into runaway calls or broken streaming | Iteration cap, fallback, `Calling/Done/Failed` progress lines, JSON `ToolMessage` payloads | high |
 | `src/ai_news_agent/tools/__init__.py` | Package-level imports are used by tests and app wiring | Stable exports for kept public APIs; removed helpers fail only after call sites are updated | medium |
 | `pyproject.toml` | Dependency metadata affects every environment and CI run | Existing install/test behavior and Python version support | medium |
+| `src/ai_news_agent/connectors/github_juya.py` | Uses `dataclasses.replace()` on `NewsItem`; breaks when domain models become Pydantic `BaseModel` | Article-enrichment path still updates `raw_snippet`, `content_confidence`, `metadata_completeness`, and `tags` | high |
 
 ## Workflow For Implementers
 
@@ -166,3 +169,4 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 | Date | Change |
 | --- | --- |
 | 2026-06-30 | Initial type-1 plan for Milestone 4a + 4b from approved Pydantic/tool migration spec |
+| 2026-07-01 | T1 planning: add `connectors/github_juya.py` and `tests/test_connectors_github_juya.py` to file map and blast radius (`dataclasses.replace(NewsItem)` call site) |
