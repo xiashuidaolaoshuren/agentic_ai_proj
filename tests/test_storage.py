@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +53,133 @@ def test_empty_store_latest_queries(tmp_path: Path) -> None:
     assert ctx.news_items == []
     assert ctx.ranked_items == []
     assert ctx.warnings == []
+
+
+def test_save_news_item_write_json_persists_pydantic_payload(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "write_json.db")
+    store.init_schema()
+    collected = datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC)
+    published = datetime(2026, 5, 1, 8, 0, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="repo-1",
+        url="https://github.com/a/b",
+        title="a/b",
+        published_at=published,
+        collected_at=collected,
+        author="alice",
+        stars_or_views=99,
+        language="Python",
+        metadata_completeness=0.85,
+        raw_snippet="desc",
+        tags=["t1"],
+        topic_matches=["RAG"],
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(
+        run_id,
+        ConnectorResult(items=[item], warnings=[], raw_count=1),
+    )
+
+    con = sqlite3.connect(tmp_path / "write_json.db")
+    try:
+        row = con.execute(
+            "SELECT raw_payload_json FROM news_items WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+    finally:
+        con.close()
+
+    assert payload == item.model_dump(mode="json")
+
+
+def test_load_legacy_raw_payload_json_for_news_and_ranked_items(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "legacy.db")
+    store.init_schema()
+    collected = datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC)
+    published = datetime(2026, 5, 1, 8, 0, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="repo-legacy",
+        url="https://github.com/a/b",
+        title="a/b",
+        published_at=published,
+        collected_at=collected,
+        author="alice",
+        stars_or_views=99,
+        language="Python",
+        metadata_completeness=0.85,
+        raw_snippet="desc",
+        tags=["t1"],
+        topic_matches=["RAG"],
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(
+        run_id,
+        ConnectorResult(items=[item], warnings=[], raw_count=1),
+    )
+    store.save_ranked_items(
+        run_id,
+        [
+            RankedItem(
+                item=item,
+                score_total=4.2,
+                score_breakdown={"freshness": 2.0},
+                selected=True,
+                selection_reason="best",
+            )
+        ],
+    )
+
+    legacy_payload = {
+        "source": "github",
+        "source_id": "repo-legacy",
+        "url": "https://github.com/a/b",
+        "title": "a/b",
+        "published_at": published.isoformat().replace("+00:00", "Z"),
+        "collected_at": collected.isoformat().replace("+00:00", "Z"),
+        "author": "alice",
+        "stars_or_views": 99,
+        "language": "Python",
+        "metadata_completeness": 0.85,
+        "raw_snippet": "desc",
+        "tags": None,
+        "topic_matches": None,
+        "content_confidence": "high",
+        "_legacy_field": "ignored",
+    }
+    expected = NewsItem.model_validate(legacy_payload)
+
+    con = sqlite3.connect(tmp_path / "legacy.db")
+    try:
+        con.execute(
+            "UPDATE news_items SET raw_payload_json = ? WHERE run_id = ?",
+            (json.dumps(legacy_payload), run_id),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    ctx = store.get_latest_followup_context()
+    assert ctx.run_id == run_id
+    assert len(ctx.news_items) == 1
+    assert ctx.news_items[0] == expected
+    assert len(ctx.ranked_items) == 1
+    assert ctx.ranked_items[0].item == expected
 
 
 def test_full_run_round_trip(tmp_path: Path) -> None:
