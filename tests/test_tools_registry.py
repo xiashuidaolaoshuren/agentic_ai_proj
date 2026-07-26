@@ -7,25 +7,25 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.tools import BaseTool, tool
+
+from pydantic import ValidationError
 
 from ai_news_agent.storage import DigestStore
-from ai_news_agent.tools.registry import ToolDefinition, ToolRegistry, build_tool_registry
-from ai_news_agent.tools.schemas import ToolObservation, ToolObservationStatus
+from ai_news_agent.tools.registry import ToolRegistry, build_tool_registry
+from ai_news_agent.tools.schemas import RankOrSourceArgs, SearchArgs, ToolObservation, ToolObservationStatus
 
 
-def _sample_tool(*, name: str = "sample_tool", description: str = "Sample tool") -> ToolDefinition:
-    async def _execute() -> ToolObservation:
+def _sample_tool(*, name: str = "sample_tool", description: str = "Sample tool") -> BaseTool:
+    async def stub() -> ToolObservation:
         return ToolObservation(
             status=ToolObservationStatus.OK,
             summary="ok",
         )
 
-    return ToolDefinition(
-        name=name,
-        description=description,
-        args_schema={"type": "object", "properties": {}},
-        execute=_execute,
-    )
+    stub.__name__ = name
+    stub.__doc__ = description
+    return tool(stub)
 
 
 def test_tool_registry_get_tool_returns_known_tool() -> None:
@@ -81,6 +81,8 @@ def test_build_tool_registry_exposes_six_stable_tool_names(tmp_path: Path) -> No
     registry = _build_registry_for_tests(tmp_path)
 
     assert registry.tool_names() == list(EXPECTED_TOOL_NAMES)
+    for tool in registry.all_tools():
+        assert isinstance(tool, BaseTool)
 
 
 def test_build_tool_registry_tools_have_non_empty_descriptions(tmp_path: Path) -> None:
@@ -88,6 +90,11 @@ def test_build_tool_registry_tools_have_non_empty_descriptions(tmp_path: Path) -
 
     for tool in registry.all_tools():
         assert tool.description.strip()
+
+
+LOAD_LATEST_DIGEST_DESCRIPTION = (
+    "Load the latest saved digest with topics, entries, and warnings."
+)
 
 
 def test_build_tool_registry_load_latest_digest_execute_uses_injected_store(
@@ -102,10 +109,48 @@ def test_build_tool_registry_load_latest_digest_execute_uses_injected_store(
     )
 
     tool = registry.get_tool("load_latest_digest")
-    observation = asyncio.run(tool.execute())
+    assert isinstance(tool, BaseTool)
+    assert tool.name == "load_latest_digest"
+    assert tool.description == LOAD_LATEST_DIGEST_DESCRIPTION
+    observation = asyncio.run(tool.ainvoke({}))
 
+    assert isinstance(observation, ToolObservation)
     assert observation.status is ToolObservationStatus.EMPTY
     assert "no saved digest" in observation.summary.lower()
+
+
+def test_build_tool_registry_followup_tools_use_rank_or_source_args_schema(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "followup-selectors.db")
+    store.init_schema()
+
+    class _NonBilibiliConnector:
+        def name(self) -> str:
+            return "stub"
+
+    registry = build_tool_registry(
+        store=store,
+        github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        bilibili_factory=lambda: _NonBilibiliConnector(),
+    )
+
+    for name in ("get_digest_item", "get_source_trace", "get_ranking_explanation"):
+        tool = registry.get_tool(name)
+        assert isinstance(tool, BaseTool), name
+        assert tool.args_schema is RankOrSourceArgs, name
+
+    digest_item_obs = asyncio.run(registry.get_tool("get_digest_item").ainvoke({}))
+    assert isinstance(digest_item_obs, ToolObservation)
+    assert digest_item_obs.status is ToolObservationStatus.EMPTY
+
+    trace_obs = asyncio.run(registry.get_tool("get_source_trace").ainvoke({}))
+    assert isinstance(trace_obs, ToolObservation)
+    assert trace_obs.status is ToolObservationStatus.EMPTY
+
+    ranking_obs = asyncio.run(registry.get_tool("get_ranking_explanation").ainvoke({}))
+    assert isinstance(ranking_obs, ToolObservation)
+    assert ranking_obs.status is ToolObservationStatus.EMPTY
 
 
 class _CountingConnectorFactory:
@@ -131,7 +176,7 @@ class _CountingConnector:
         return ConnectorResult(items=[], warnings=[], raw_count=0)
 
 
-def test_build_tool_registry_connector_execute_calls_factory_per_invocation(
+def test_build_tool_registry_github_search_uses_search_args_and_factory_per_call(
     tmp_path: Path,
 ) -> None:
     store = DigestStore(tmp_path / "connector-factory.db")
@@ -144,10 +189,49 @@ def test_build_tool_registry_connector_execute_calls_factory_per_invocation(
     )
 
     tool = registry.get_tool("search_github_ai_news")
-    asyncio.run(tool.execute(query="AI agents"))
-    asyncio.run(tool.execute(query="RAG"))
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is SearchArgs
+
+    asyncio.run(tool.ainvoke({"query": "AI agents"}))
+    asyncio.run(tool.ainvoke({"query": "RAG"}))
 
     assert github_factory.calls == 2
+
+    calls_before_invalid = github_factory.calls
+    with pytest.raises(ValidationError):
+        asyncio.run(tool.ainvoke({"query": "AI agents", "max_results": 0}))
+    assert github_factory.calls == calls_before_invalid
+
+
+def test_build_tool_registry_bilibili_search_uses_search_args_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "bilibili-factory.db")
+    store.init_schema()
+    bilibili_factory = _CountingConnectorFactory(name="bilibili")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=bilibili_factory,
+    )
+
+    tool = registry.get_tool("search_bilibili_ai_news")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is SearchArgs
+
+    asyncio.run(tool.ainvoke({"query": "multimodal AI"}))
+    asyncio.run(tool.ainvoke({"query": "RAG"}))
+
+    assert bilibili_factory.calls == 2
+
+
+def test_registry_module_has_no_legacy_tool_definition_or_handwritten_schemas() -> None:
+    import ai_news_agent.tools.registry as registry_module
+
+    assert not hasattr(registry_module, "ToolDefinition")
+    assert not hasattr(registry_module, "_EMPTY_OBJECT_SCHEMA")
+    assert not hasattr(registry_module, "_RANK_OR_SOURCE_SCHEMA")
+    assert not hasattr(registry_module, "_SEARCH_SCHEMA")
 
 
 def test_build_tool_registry_import_from_tools_package(tmp_path: Path) -> None:
