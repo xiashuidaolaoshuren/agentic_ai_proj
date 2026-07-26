@@ -116,7 +116,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T4 - Pure Tool Observation Serialization Migration
 
-- [ ] **Do:** Update the pure follow-up and connector tool modules to use Pydantic JSON-mode dumps for domain objects and `ToolObservation` payloads, while keeping their injected-dependency function signatures directly testable.
+- [X] **Do:** Update the pure follow-up and connector tool modules to use Pydantic JSON-mode dumps for domain objects and `ToolObservation` payloads, while keeping their injected-dependency function signatures directly testable.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_followup.py tests/test_tools_connectors.py -q`

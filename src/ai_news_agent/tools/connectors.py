@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ai_news_agent.connectors.base import ConnectorRequest, SourceConnector
-from ai_news_agent.models import ConnectorWarning, connector_warning_to_dict, news_item_to_dict
+from ai_news_agent.models import ConnectorWarning
 from ai_news_agent.tools.schemas import SearchQueryInput, ToolObservation, ToolObservationStatus
 
 
@@ -71,8 +71,8 @@ async def _search_connector(
             "query": query,
             "item_count": item_count,
             "raw_count": result.raw_count,
-            "items": [news_item_to_dict(item) for item in result.items],
-            "warnings": [connector_warning_to_dict(warning) for warning in warnings],
+            "items": [item.model_dump(mode="json") for item in result.items],
+            "warnings": [warning.model_dump(mode="json") for warning in warnings],
         },
         caveats=_warning_caveats(warnings),
     )

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
-from ai_news_agent.tools.schemas import SearchQueryInput, ToolObservationStatus, tool_observation_to_dict
+from ai_news_agent.tools.schemas import SearchQueryInput, ToolObservationStatus
 
 
 class _FakeConnector:
@@ -82,7 +82,8 @@ def test_search_github_ai_news_ok_serializes_items() -> None:
     assert obs.data["raw_count"] == 3
     assert obs.data["items"][0]["source_id"] == "repo-1"
     assert obs.data["items"][0]["url"] == "https://example.com/repo-1"
-    json.dumps(tool_observation_to_dict(obs))
+    assert obs.data["items"][0] == item.model_dump(mode="json")
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_search_github_ai_news_delegates_connector_request() -> None:
@@ -119,7 +120,8 @@ def test_search_bilibili_ai_news_ok_serializes_items() -> None:
     assert obs.data["query"] == "multimodal AI"
     assert obs.data["item_count"] == 1
     assert obs.data["items"][0]["source"] == "bilibili"
-    json.dumps(tool_observation_to_dict(obs))
+    assert obs.data["items"][0] == item.model_dump(mode="json")
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_search_bilibili_ai_news_delegates_connector_request() -> None:
@@ -152,8 +154,9 @@ def test_search_github_ai_news_includes_warnings_in_data_and_caveats() -> None:
 
     assert obs.status is ToolObservationStatus.OK
     assert obs.data["warnings"][0]["code"] == "rate_limited"
+    assert obs.data["warnings"][0] == warning.model_dump(mode="json")
     assert any("github:rate_limited" in caveat for caveat in obs.caveats)
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_search_bilibili_ai_news_empty_items_with_warning() -> None:

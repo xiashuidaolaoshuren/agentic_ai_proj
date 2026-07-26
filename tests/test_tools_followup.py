@@ -26,7 +26,7 @@ from ai_news_agent.tools.followup import (
     get_source_trace,
     load_latest_digest,
 )
-from ai_news_agent.tools.schemas import ToolObservationStatus, tool_observation_to_dict
+from ai_news_agent.tools.schemas import ToolObservationStatus
 
 
 def _seed_full_followup_store(tmp_path: Path) -> tuple[DigestStore, int]:
@@ -113,7 +113,7 @@ def test_load_latest_digest_empty_store(tmp_path: Path) -> None:
     assert "no saved digest" in obs.summary.lower()
     assert obs.data == {}
     assert obs.caveats == []
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_load_latest_digest_ok_full_context(tmp_path: Path) -> None:
@@ -129,7 +129,11 @@ def test_load_latest_digest_ok_full_context(tmp_path: Path) -> None:
     assert obs.data["entry_count"] == 1
     assert obs.data["digest"]["entries"][0]["title"] == "a/b"
     assert obs.data["warnings"][0]["code"] == "rate"
-    json.dumps(tool_observation_to_dict(obs))
+    assert obs.data["digest"]["entries"][0]["source_kind"] == SourceKind.GITHUB.value
+    assert obs.data["digest"]["entries"][0]["follow_up_action"] == FollowUpAction.READ.value
+    assert obs.data["digest"]["generated_at"] == "2026-05-07T11:00:00Z"
+    assert obs.data["warnings"][0]["connector"] == "github"
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_get_digest_item_empty_store(tmp_path: Path) -> None:
@@ -139,7 +143,7 @@ def test_get_digest_item_empty_store(tmp_path: Path) -> None:
     obs = get_digest_item(store=store, rank=1)
 
     assert obs.status is ToolObservationStatus.EMPTY
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_get_digest_item_not_found_rank(tmp_path: Path) -> None:
@@ -150,7 +154,7 @@ def test_get_digest_item_not_found_rank(tmp_path: Path) -> None:
     assert obs.status is ToolObservationStatus.NOT_FOUND
     assert obs.data["rank"] == 3
     assert any("Try a lower rank" in caveat for caveat in obs.caveats)
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_get_digest_item_ok_by_rank(tmp_path: Path) -> None:
@@ -163,7 +167,12 @@ def test_get_digest_item_ok_by_rank(tmp_path: Path) -> None:
     assert obs.data["entry"]["title"] == "a/b"
     assert obs.data["news_item"]["source_id"] == "repo-1"
     assert obs.data["ranked_item"]["score_total"] == 4.2
-    json.dumps(tool_observation_to_dict(obs))
+    assert obs.data["entry"]["source_kind"] == SourceKind.GITHUB.value
+    assert obs.data["news_item"]["source"] == SourceKind.GITHUB.value
+    assert obs.data["news_item"]["content_confidence"] == ConfidenceLevel.HIGH.value
+    assert obs.data["news_item"]["collected_at"] == "2026-05-07T10:00:00Z"
+    assert obs.data["news_item"]["published_at"] == "2026-05-01T08:00:00Z"
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_get_digest_item_ok_by_source_id(tmp_path: Path) -> None:
@@ -173,7 +182,7 @@ def test_get_digest_item_ok_by_source_id(tmp_path: Path) -> None:
 
     assert obs.status is ToolObservationStatus.OK
     assert obs.data["entry"]["source_id"] == "repo-1"
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_get_digest_item_requires_selector(tmp_path: Path) -> None:
@@ -205,7 +214,11 @@ def test_get_source_trace_ok_includes_metadata_and_warnings(tmp_path: Path) -> N
     assert obs.data["entry"]["confidence_caveat"] == "caveat"
     assert obs.data["warnings"][0]["code"] == "rate"
     assert "caveat" in obs.caveats
-    json.dumps(tool_observation_to_dict(obs))
+    assert obs.data["entry"]["follow_up_action"] == FollowUpAction.READ.value
+    assert obs.data["news_item"]["source"] == SourceKind.GITHUB.value
+    assert obs.data["news_item"]["content_confidence"] == ConfidenceLevel.HIGH.value
+    assert obs.data["warnings"][0]["connector"] == "github"
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def _seed_bilibili_followup_store(tmp_path: Path) -> tuple[DigestStore, int]:
@@ -504,4 +517,4 @@ def test_get_ranking_explanation_ok_by_source_id(tmp_path: Path) -> None:
     assert obs.data["score_breakdown"]["freshness"] == 2.0
     assert obs.data["selected"] is True
     assert obs.data["selection_reason"] == "best"
-    json.dumps(tool_observation_to_dict(obs))
+    json.dumps(obs.model_dump(mode="json"))

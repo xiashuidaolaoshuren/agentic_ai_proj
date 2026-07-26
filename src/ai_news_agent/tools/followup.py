@@ -10,11 +10,6 @@ from ai_news_agent.models import (
     NewsItem,
     RankedItem,
     SourceKind,
-    connector_warning_to_dict,
-    digest_entry_to_dict,
-    digest_to_dict,
-    news_item_to_dict,
-    ranked_item_to_dict,
 )
 from ai_news_agent.storage import DigestStore, FollowupContext
 from ai_news_agent.tools.schemas import ToolObservation, ToolObservationStatus
@@ -45,8 +40,8 @@ def load_latest_digest(*, store: DigestStore) -> ToolObservation:
             "timeframe": digest.timeframe,
             "generated_at": digest.generated_at.isoformat(),
             "entry_count": len(digest.entries),
-            "digest": digest_to_dict(digest),
-            "warnings": [connector_warning_to_dict(w) for w in ctx.warnings],
+            "digest": digest.model_dump(mode="json"),
+            "warnings": [w.model_dump(mode="json") for w in ctx.warnings],
         },
         caveats=_warning_caveats(ctx.warnings),
     )
@@ -71,12 +66,12 @@ def get_digest_item(
     ranked_item = _find_ranked_item(ctx, entry)
     data: dict[str, object] = {
         "rank": resolved_rank,
-        "entry": digest_entry_to_dict(entry),
+        "entry": entry.model_dump(mode="json"),
     }
     if news_item is not None:
-        data["news_item"] = news_item_to_dict(news_item)
+        data["news_item"] = news_item.model_dump(mode="json")
     if ranked_item is not None:
-        data["ranked_item"] = ranked_item_to_dict(ranked_item)
+        data["ranked_item"] = ranked_item.model_dump(mode="json")
 
     return ToolObservation(
         status=ToolObservationStatus.OK,
@@ -136,9 +131,9 @@ async def get_source_trace(
         summary=f"Source trace for {entry.title!r}.",
         data={
             "rank": resolved_rank,
-            "entry": digest_entry_to_dict(entry),
-            "news_item": news_item_to_dict(news_item),
-            "warnings": [connector_warning_to_dict(w) for w in warnings],
+            "entry": entry.model_dump(mode="json"),
+            "news_item": news_item.model_dump(mode="json"),
+            "warnings": [w.model_dump(mode="json") for w in warnings],
         },
         caveats=caveats + _entry_caveats(entry) + _warning_caveats(warnings) + enrich_caveats,
     )
