@@ -92,7 +92,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T1 - Domain Model Pydantic Foundation
 
-- [ ] **Do:** Add the explicit Pydantic dependency and migrate `models.py` domain models to Pydantic while preserving field names, defaults, enum values, JSON shape, and existing row compatibility expectations. Remove domain helper functions only after tests prove equivalent Pydantic dump/validate behavior.
+- [X] **Do:** Add the explicit Pydantic dependency and migrate `models.py` domain models to Pydantic while preserving field names, defaults, enum values, JSON shape, and existing row compatibility expectations. Remove domain helper functions only after tests prove equivalent Pydantic dump/validate behavior.
 - **TDD suitable:** partial - domain model behavior and helper-removal parity are testable first; dependency metadata is declarative and verified by import/tests.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_models.py -q` and `uv run python -c "from ai_news_agent.models import NewsItem, Digest"`
@@ -100,7 +100,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T2 - Storage Round-Trip Migration
 
-- [ ] **Do:** Update `DigestStore` persistence paths to use Pydantic dump/validation while preserving the SQLite schema and existing serialized payload compatibility. Add or update tests that prove old-style JSON payloads still load.
+- [X] **Do:** Update `DigestStore` persistence paths to use Pydantic dump/validation while preserving the SQLite schema and existing serialized payload compatibility. Add or update tests that prove old-style JSON payloads still load.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_storage.py tests/test_models.py -q`
@@ -108,7 +108,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T3 - Tool Schema Pydantic Foundation
 
-- [ ] **Do:** Convert `ToolObservation` and `SearchQueryInput` to Pydantic, add the LLM-facing args models needed for registry tools, and remove tool serialization helper APIs after call sites are ready. Preserve the observation envelope and validation intent.
+- [X] **Do:** Convert `ToolObservation` and `SearchQueryInput` to Pydantic, add the LLM-facing args models needed for registry tools, and remove tool serialization helper APIs after call sites are ready. Preserve the observation envelope and validation intent.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_schemas.py -q`
