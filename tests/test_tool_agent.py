@@ -6,9 +6,10 @@ import asyncio
 from typing import Any
 
 from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool, tool
 
 from ai_news_agent.tools.agent import ToolAgentRunner, build_tool_agent_runner
-from ai_news_agent.tools.registry import ToolDefinition, ToolRegistry
+from ai_news_agent.tools.registry import ToolRegistry
 from ai_news_agent.tools.schemas import ToolObservation, ToolObservationStatus
 
 
@@ -29,19 +30,16 @@ class _FakeToolCallModel:
 
 
 def _sample_registry(*, execute: Any | None = None) -> ToolRegistry:
-    async def _default_execute() -> ToolObservation:
+    async def load_latest_digest() -> ToolObservation:
+        """Load the latest saved digest."""
+        if execute is not None:
+            return await execute()
         return ToolObservation(
             status=ToolObservationStatus.OK,
             summary="ok",
         )
 
-    tool = ToolDefinition(
-        name="load_latest_digest",
-        description="Load the latest saved digest.",
-        args_schema={"type": "object", "properties": {}},
-        execute=execute or _default_execute,
-    )
-    return ToolRegistry([tool])
+    return ToolRegistry([tool(load_latest_digest)])
 
 
 def test_build_tool_agent_runner_returns_runner() -> None:
@@ -51,12 +49,18 @@ def test_build_tool_agent_runner_returns_runner() -> None:
     runner = build_tool_agent_runner(registry=registry, model=model)
 
     assert isinstance(runner, ToolAgentRunner)
+    assert model.bound_tools is not None
+    assert len(model.bound_tools) == 1
+    assert isinstance(model.bound_tools[0], BaseTool)
 
 
 def test_tool_agent_runner_direct_answer_returns_model_content() -> None:
     registry = _sample_registry()
     model = _FakeToolCallModel([AIMessage(content="Grounded answer.")])
     runner = build_tool_agent_runner(registry=registry, model=model)
+
+    assert model.bound_tools is not None
+    assert all(isinstance(t, BaseTool) for t in model.bound_tools)
 
     answer = asyncio.run(runner.run("What is in the latest digest?"))
 

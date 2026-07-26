@@ -92,20 +92,6 @@ class ToolAgentRunner:
         return self._fallback_text
 
 
-def _registry_tool_schemas(registry: ToolRegistry) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.args_schema,
-            },
-        }
-        for tool in registry.all_tools()
-    ]
-
-
 def _tool_call_name(tool_call: Any) -> str:
     if isinstance(tool_call, dict):
         return str(tool_call.get("name", ""))
@@ -177,7 +163,7 @@ def _build_tool_agent_graph(
             progress_lines.append(_format_tool_call_start(name))
             try:
                 tool = registry.get_tool(name)
-                observation = await tool.execute(**args)
+                observation = await tool.ainvoke(args)
                 if not isinstance(observation, ToolObservation):
                     raise TypeError(f"Tool {name!r} did not return ToolObservation")
                 payload = tool_observation_to_dict(observation)
@@ -231,8 +217,7 @@ def build_tool_agent_runner(
     fallback_text: str = _DEFAULT_FALLBACK,
 ) -> ToolAgentRunner:
     """Construct a bounded tool agent over the given registry and model."""
-    tool_schemas = _registry_tool_schemas(registry)
-    bound_model = model.bind_tools(tool_schemas)
+    bound_model = model.bind_tools(registry.all_tools())
     graph = _build_tool_agent_graph(
         registry=registry,
         bound_model=bound_model,
