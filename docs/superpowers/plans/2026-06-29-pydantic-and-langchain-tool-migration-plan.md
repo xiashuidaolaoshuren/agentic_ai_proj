@@ -140,7 +140,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T7 - Public Surface And Integration Smoke
 
-- [ ] **Do:** Update package exports and any downstream import sites to remove deleted helpers and expose the new schema/registry public surface. Keep ChatService and Gradio construction behavior stable, and use existing integration tests as smoke coverage unless Plan mode discovers a required test update.
+- [X] **Do:** Update package exports and any downstream import sites to remove deleted helpers and expose the new schema/registry public surface. Keep ChatService and Gradio construction behavior stable, and use existing integration tests as smoke coverage unless Plan mode discovers a required test update.
 - **TDD suitable:** partial - import/export cleanup is mostly mechanical, but integration behavior is testable first through package import and existing chat/UI construction tests.
 - **Plan mode:** medium
 - **Verification:** `uv run pytest tests/test_chat.py tests/test_gradio_app.py tests/test_tools_schemas.py tests/test_tool_agent.py -q`
@@ -148,7 +148,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T8 - Milestone 4 Regression Sweep
 
-- [ ] **Do:** Run the focused M4 tests and the full suite. If regressions expose a plan gap, update this plan before fixing; if a real behavior bug is discovered, add a failing test first where feasible.
+- [X] **Do:** Run the focused M4 tests and the full suite. If regressions expose a plan gap, update this plan before fixing; if a real behavior bug is discovered, add a failing test first where feasible.
 - **TDD suitable:** no - verification/stabilization pass; any discovered code fix should be handled with TDD in the relevant earlier subtask.
 - **Plan mode:** skip
 - **Verification:** `uv run pytest`
