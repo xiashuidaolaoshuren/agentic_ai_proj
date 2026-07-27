@@ -124,7 +124,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T5 - BaseTool Registry And `@tool` Wrappers
 
-- [ ] **Do:** Replace `ToolDefinition` and hand-written JSON schemas with LangChain `@tool` wrappers using Pydantic `args_schema`, while keeping a thin `ToolRegistry` lookup/dedup API and preserving six stable tool names/descriptions plus per-call connector factory behavior.
+- [X] **Do:** Replace `ToolDefinition` and hand-written JSON schemas with LangChain `@tool` wrappers using Pydantic `args_schema`, while keeping a thin `ToolRegistry` lookup/dedup API and preserving six stable tool names/descriptions plus per-call connector factory behavior.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_registry.py tests/test_tools_connectors.py -q`
@@ -132,7 +132,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T6 - Bounded Agent BaseTool Dispatch
 
-- [ ] **Do:** Update the bounded tool agent to bind `BaseTool` objects directly and dispatch via `BaseTool.ainvoke`, preserving iteration caps, fallback behavior, progress-line streaming, failure handling, and JSON `ToolMessage` content.
+- [X] **Do:** Update the bounded tool agent to bind `BaseTool` objects directly and dispatch via `BaseTool.ainvoke`, preserving iteration caps, fallback behavior, progress-line streaming, failure handling, and JSON `ToolMessage` content.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py -q`

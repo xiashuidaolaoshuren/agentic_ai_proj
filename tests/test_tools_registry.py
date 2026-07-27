@@ -234,6 +234,24 @@ def test_registry_module_has_no_legacy_tool_definition_or_handwritten_schemas() 
     assert not hasattr(registry_module, "_SEARCH_SCHEMA")
 
 
+def test_tools_package_surface_exports_new_schema_and_not_legacy_helpers() -> None:
+    import ai_news_agent.tools as tools_package
+
+    with pytest.raises(AttributeError):
+        _ = tools_package.ToolDefinition
+
+    assert "ToolDefinition" not in tools_package.__all__
+    assert "encode_tool_value" not in tools_package.__all__
+    assert "tool_observation_to_dict" not in tools_package.__all__
+    assert "RankOrSourceArgs" in tools_package.__all__
+    assert "SearchArgs" in tools_package.__all__
+
+    from ai_news_agent.tools import RankOrSourceArgs, SearchArgs
+
+    assert RankOrSourceArgs is not None
+    assert SearchArgs is not None
+
+
 def test_build_tool_registry_import_from_tools_package(tmp_path: Path) -> None:
     from ai_news_agent.tools import build_tool_registry as package_build_tool_registry
 

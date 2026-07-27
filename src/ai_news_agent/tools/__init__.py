@@ -5,34 +5,32 @@ from __future__ import annotations
 from typing import Any
 
 from ai_news_agent.tools.schemas import (
+    RankOrSourceArgs,
+    SearchArgs,
     SearchQueryInput,
     ToolObservation,
     ToolObservationStatus,
-    encode_tool_value,
-    tool_observation_to_dict,
 )
 
 __all__ = [
+    "RankOrSourceArgs",
+    "SearchArgs",
     "SearchQueryInput",
-    "ToolDefinition",
     "ToolObservation",
     "ToolObservationStatus",
     "ToolRegistry",
     "ToolAgentRunner",
     "build_tool_agent_runner",
     "build_tool_registry",
-    "encode_tool_value",
     "get_digest_item",
     "get_ranking_explanation",
     "get_source_trace",
     "load_latest_digest",
     "search_bilibili_ai_news",
     "search_github_ai_news",
-    "tool_observation_to_dict",
 ]
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
-    "ToolDefinition": ("ai_news_agent.tools.registry", "ToolDefinition"),
     "ToolRegistry": ("ai_news_agent.tools.registry", "ToolRegistry"),
     "build_tool_registry": ("ai_news_agent.tools.registry", "build_tool_registry"),
     "ToolAgentRunner": ("ai_news_agent.tools.agent", "ToolAgentRunner"),
