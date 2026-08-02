@@ -200,7 +200,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T10 - High-Level Digest And Structured Capability Tools
 
-- [ ] **Do:** Extend the registry with `generate_ai_news_digest` (no model-controlled request parameters; captures trusted resolved `DigestRequest` and invokes the existing digest graph once) and structured terminal tools for sources, ranking recommendation, caveats, and item detail by rank. Reuse exact formatters from `followup_structured.py` without changing wording. Preserve the six research tools.
+- [X] **Do:** Extend the registry with `generate_ai_news_digest` (no model-controlled request parameters; captures trusted resolved `DigestRequest` and invokes the existing digest graph once) and structured terminal tools for sources, ranking recommendation, caveats, and item detail by rank. Reuse exact formatters from `followup_structured.py` without changing wording. Preserve the six research tools.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_registry.py tests/test_tools_followup.py -q`

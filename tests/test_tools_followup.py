@@ -518,3 +518,39 @@ def test_get_ranking_explanation_ok_by_source_id(tmp_path: Path) -> None:
     assert obs.data["selected"] is True
     assert obs.data["selection_reason"] == "best"
     json.dumps(obs.model_dump(mode="json"))
+
+
+def test_public_format_helpers_preserve_wording(tmp_path: Path) -> None:
+    from ai_news_agent.followup_structured import (
+        format_caveats,
+        format_rank_item,
+        format_ranking_pick,
+        format_sources,
+    )
+
+    store, _run_id = _seed_full_followup_store(tmp_path)
+    ctx = store.get_latest_followup_context()
+
+    assert format_sources(ctx) == (
+        "Sources from the latest digest:\n1. a/b — https://github.com/a/b"
+    )
+    assert format_ranking_pick(ctx) == (
+        "Suggested starting point: a/b\n"
+        "- URL: https://github.com/a/b\n"
+        "- Score: 4.200\n"
+        "- Reason: best"
+    )
+    assert format_rank_item(ctx, 1) == (
+        "Digest item 1: a/b\n"
+        "- URL: https://github.com/a/b\n"
+        "- Summary: S\n"
+        "- Why it matters: W\n"
+        "- Confidence caveat: caveat"
+    )
+    assert format_caveats(ctx) == (
+        "Connector warnings:\n"
+        "- [github] rate: slow\n"
+        "\n"
+        "Per-entry confidence notes:\n"
+        "- a/b: caveat"
+    )

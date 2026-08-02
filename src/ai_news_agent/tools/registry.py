@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from datetime import datetime
+from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
+from ai_news_agent.followup_structured import (
+    NO_SAVED_DIGEST,
+    format_caveats,
+    format_rank_item,
+    format_ranking_pick,
+    format_sources,
+)
+from ai_news_agent.graph.workflow import run_digest
+from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import (
     search_bilibili_ai_news as _search_bilibili_ai_news_pure,
@@ -19,9 +30,36 @@ from ai_news_agent.tools.followup import (
     get_source_trace as _get_source_trace_pure,
     load_latest_digest as _load_latest_digest_pure,
 )
-from ai_news_agent.tools.schemas import RankOrSourceArgs, SearchArgs, SearchQueryInput, ToolObservation
+from ai_news_agent.tools.schemas import (
+    DigestItemRankArgs,
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+    RankOrSourceArgs,
+    SearchArgs,
+    SearchQueryInput,
+    ToolObservation,
+)
 
 ConnectorFactory = Callable[[], SourceConnector]
+
+
+def _empty_structured_result() -> InterfaceAgentResult:
+    return InterfaceAgentResult(
+        kind=InterfaceAgentResultKind.STRUCTURED,
+        text=NO_SAVED_DIGEST,
+        run_id=None,
+    )
+
+
+def _structured_terminal_result(store: DigestStore, text: str) -> InterfaceAgentResult:
+    ctx = store.get_latest_followup_context()
+    if ctx.run_id is None and ctx.digest is None:
+        return _empty_structured_result()
+    return InterfaceAgentResult(
+        kind=InterfaceAgentResultKind.STRUCTURED,
+        text=text,
+        run_id=ctx.run_id,
+    )
 
 
 class ToolRegistry:
@@ -52,6 +90,10 @@ def build_tool_registry(
     store: DigestStore,
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
+    digest_request: DigestRequest | None = None,
+    connectors: Sequence[SourceConnector] | None = None,
+    model: Any = None,
+    now_provider: Callable[[], datetime] | None = None,
 ) -> ToolRegistry:
     """Assemble LangChain tools with injected store and connector factories."""
 
@@ -133,4 +175,65 @@ def build_tool_registry(
         search_github_ai_news,
         search_bilibili_ai_news,
     ]
+
+    if digest_request is not None:
+        @tool
+        async def generate_ai_news_digest() -> InterfaceAgentResult:
+            """Generate the AI news digest for this request. Use this for any new digest request."""
+            result = await run_digest(
+                digest_request,
+                connectors=connectors or [],
+                model=model,
+                store=store,
+                now_provider=now_provider,
+            )
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.DIGEST,
+                text=result.text,
+                run_id=result.run_id,
+                digest=result.digest,
+            )
+
+        @tool
+        async def list_digest_sources() -> InterfaceAgentResult:
+            """List source URLs from the latest saved digest."""
+            ctx = store.get_latest_followup_context()
+            if ctx.run_id is None and ctx.digest is None:
+                return _empty_structured_result()
+            return _structured_terminal_result(store, format_sources(ctx))
+
+        @tool
+        async def recommend_digest_item() -> InterfaceAgentResult:
+            """Recommend which digest item to study first based on ranking."""
+            ctx = store.get_latest_followup_context()
+            if ctx.run_id is None and ctx.digest is None:
+                return _empty_structured_result()
+            return _structured_terminal_result(store, format_ranking_pick(ctx))
+
+        @tool
+        async def list_digest_caveats() -> InterfaceAgentResult:
+            """List connector warnings and confidence caveats for the latest digest."""
+            ctx = store.get_latest_followup_context()
+            if ctx.run_id is None and ctx.digest is None:
+                return _empty_structured_result()
+            return _structured_terminal_result(store, format_caveats(ctx))
+
+        @tool(args_schema=DigestItemRankArgs)
+        async def get_digest_item_by_rank(rank: int) -> InterfaceAgentResult:
+            """Show details for one digest item by its 1-based rank."""
+            ctx = store.get_latest_followup_context()
+            if ctx.run_id is None and ctx.digest is None:
+                return _empty_structured_result()
+            return _structured_terminal_result(store, format_rank_item(ctx, rank))
+
+        tools.extend(
+            [
+                generate_ai_news_digest,
+                list_digest_sources,
+                recommend_digest_item,
+                list_digest_caveats,
+                get_digest_item_by_rank,
+            ]
+        )
+
     return ToolRegistry(tools)
