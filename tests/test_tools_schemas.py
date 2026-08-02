@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from ai_news_agent.models import ConnectorWarning
+from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, FollowUpAction, SourceKind, utcnow
 from ai_news_agent.tools.schemas import (
     RankOrSourceArgs,
     SearchArgs,
@@ -97,6 +97,108 @@ def test_search_args_matches_registry_contract() -> None:
 
     with pytest.raises(ValidationError):
         SearchArgs(query="RAG", max_results=0)
+
+
+def test_interface_agent_result_kind_values() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResultKind
+
+    assert InterfaceAgentResultKind.DIGEST.value == "digest"
+    assert InterfaceAgentResultKind.STRUCTURED.value == "structured"
+    assert InterfaceAgentResultKind.CONVERSATIONAL.value == "conversational"
+    assert InterfaceAgentResultKind.FALLBACK.value == "fallback"
+
+
+def test_interface_agent_result_requires_kind_and_text() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResult, InterfaceAgentResultKind
+
+    result = InterfaceAgentResult(kind=InterfaceAgentResultKind.DIGEST, text="ok")
+    assert result.kind == InterfaceAgentResultKind.DIGEST
+    assert result.text == "ok"
+
+
+def test_interface_agent_result_rejects_blank_text() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResult, InterfaceAgentResultKind
+
+    with pytest.raises(ValidationError):
+        InterfaceAgentResult(kind=InterfaceAgentResultKind.DIGEST, text="   ")
+
+
+def test_interface_agent_result_optional_field_defaults() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResult, InterfaceAgentResultKind
+
+    result = InterfaceAgentResult(kind=InterfaceAgentResultKind.DIGEST, text="ok")
+    assert result.run_id is None
+    assert result.digest is None
+    assert result.fallback_reason is None
+    assert result.progress_lines == []
+    assert result.correlation_id is None
+
+
+def test_interface_agent_result_digest_round_trips() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResult, InterfaceAgentResultKind
+
+    digest = Digest(
+        generated_at=utcnow(),
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="repo-1",
+                title="Test item",
+                source_name="github",
+                source_url="https://example.com",
+                summary="Summary",
+                why_it_matters="Because",
+                background_knowledge="Background",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["AI"],
+    )
+    original = InterfaceAgentResult(
+        kind=InterfaceAgentResultKind.DIGEST,
+        text="digest text",
+        run_id=42,
+        digest=digest,
+    )
+    dumped = original.model_dump(mode="json")
+    json.dumps(dumped)
+    restored = InterfaceAgentResult.model_validate(dumped)
+    assert restored == original
+
+
+def test_interface_agent_result_fallback_requires_reason() -> None:
+    from ai_news_agent.tools.schemas import InterfaceAgentResult, InterfaceAgentResultKind
+
+    with pytest.raises(ValidationError):
+        InterfaceAgentResult(kind=InterfaceAgentResultKind.FALLBACK, text="x")
+
+    accepted = InterfaceAgentResult(
+        kind=InterfaceAgentResultKind.FALLBACK,
+        text="x",
+        fallback_reason="model_failure",
+    )
+    assert accepted.fallback_reason == "model_failure"
+
+
+def test_digest_item_rank_args_accepts_valid() -> None:
+    from ai_news_agent.tools.schemas import DigestItemRankArgs
+
+    args = DigestItemRankArgs(rank=1)
+    assert args.rank == 1
+
+
+def test_digest_item_rank_args_rejects_zero() -> None:
+    from ai_news_agent.tools.schemas import DigestItemRankArgs
+
+    with pytest.raises(ValidationError):
+        DigestItemRankArgs(rank=0)
+
+
+def test_digest_item_rank_args_rejects_missing() -> None:
+    from ai_news_agent.tools.schemas import DigestItemRankArgs
+
+    with pytest.raises(ValidationError):
+        DigestItemRankArgs()  # type: ignore[call-arg]
 
 
 def test_tools_schemas_module_imports_without_eager_broken_helpers() -> None:

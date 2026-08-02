@@ -6,7 +6,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from ai_news_agent.models import Digest
 
 
 class ToolObservationStatus(StrEnum):
@@ -16,6 +18,44 @@ class ToolObservationStatus(StrEnum):
     NOT_FOUND = "not_found"
     EMPTY = "empty"
     ERROR = "error"
+
+
+class InterfaceAgentResultKind(StrEnum):
+    """Discriminator for terminal interface-agent outcomes (Milestone 4 T9)."""
+
+    DIGEST = "digest"
+    STRUCTURED = "structured"
+    CONVERSATIONAL = "conversational"
+    FALLBACK = "fallback"
+
+
+class InterfaceAgentResult(BaseModel):
+    """Typed terminal outcome from the shared interface tool agent (Milestone 4 T9)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    kind: InterfaceAgentResultKind
+    text: str
+    run_id: int | None = None
+    digest: Digest | None = None
+    fallback_reason: str | None = None
+    progress_lines: list[str] = Field(default_factory=list)
+    correlation_id: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def _fallback_requires_reason(self) -> InterfaceAgentResult:
+        if self.kind == InterfaceAgentResultKind.FALLBACK:
+            reason = self.fallback_reason
+            if reason is None or not reason.strip():
+                raise ValueError("fallback_reason must not be empty when kind is fallback")
+        return self
 
 
 class ToolObservation(BaseModel):
@@ -69,6 +109,14 @@ class SearchArgs(BaseModel):
     query: str
     max_results: int = Field(default=5, ge=1)
     timeframe: str | None = None
+
+
+class DigestItemRankArgs(BaseModel):
+    """LLM-facing args for structured digest item-detail by rank (Milestone 4 T9)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rank: int = Field(ge=1)
 
 
 def encode_tool_value(value: Any) -> Any:

@@ -192,7 +192,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T9 - Terminal Result Types And Structured Rank Args
 
-- [ ] **Do:** Add typed terminal-result models for digest, structured, conversational, and fallback outcomes, plus validated rank args for the structured item-detail tool. Keep research `ToolObservation` unchanged.
+- [X] **Do:** Add typed terminal-result models for digest, structured, conversational, and fallback outcomes, plus validated rank args for the structured item-detail tool. Keep research `ToolObservation` unchanged.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tools_schemas.py -q`
