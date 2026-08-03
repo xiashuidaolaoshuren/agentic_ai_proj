@@ -208,7 +208,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T11 - Agent Terminal Dispatch And Typed Runner API
 
-- [ ] **Do:** Update the bounded agent so a first response without tool calls is a routing failure, terminal digest/structured tool results short-circuit without another model rewrite, research tools keep the `ToolObservation` loop and progress lines, and the runner returns typed terminal results rather than only a bare string.
+- [X] **Do:** Update the bounded agent so a first response without tool calls is a routing failure, terminal digest/structured tool results short-circuit without another model rewrite, research tools keep the `ToolObservation` loop and progress lines, and the runner returns typed terminal results rather than only a bare string.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_tool_agent.py -q`
