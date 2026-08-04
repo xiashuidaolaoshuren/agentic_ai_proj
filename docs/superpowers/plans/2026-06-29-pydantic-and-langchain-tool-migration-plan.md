@@ -216,7 +216,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T12 - Shared Interface Router With Deterministic Fallback
 
-- [ ] **Do:** Create the shared live-mode interface router that builds per-request trusted context, invokes the typed tool agent, logs fallback reasons (model failure, missing first tool call, malformed/unknown call, terminal-type violation, unsafe/ambiguous digest completion, cap exit without terminal result), and applies the existing direct deterministic path when safe. Enforce at-most-one successful persisted digest for a single user request. Lock Gradio/OpenClaw-shared intent precedence for ambiguous phrases (e.g. structured rank vs new digest) and map internal outcomes to interface-facing result shapes without changing transport contracts.
+- [X] **Do:** Create the shared live-mode interface router that builds per-request trusted context, invokes the typed tool agent, logs fallback reasons (model failure, missing first tool call, malformed/unknown call, terminal-type violation, unsafe/ambiguous digest completion, cap exit without terminal result), and applies the existing direct deterministic path when safe. Enforce at-most-one successful persisted digest for a single user request. Lock Gradio/OpenClaw-shared intent precedence for ambiguous phrases (e.g. structured rank vs new digest) and map internal outcomes to interface-facing result shapes without changing transport contracts.
 - **TDD suitable:** yes
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_interface_router.py -q`
