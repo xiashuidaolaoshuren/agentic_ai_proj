@@ -217,6 +217,20 @@ def _build_tool_agent_graph(
                         result.kind,
                     )
                     continue
+                if isinstance(result, InterfaceAgentResult):
+                    violation = RuntimeError(
+                        f"terminal kind {result.kind.value} not allowed from tool"
+                    )
+                    logger.error("tool_call failed name=%r error=%r", name, violation)
+                    payload = {"error": str(violation)}
+                    progress_lines.append(_format_tool_call_failed(name, violation))
+                    tool_messages.append(
+                        ToolMessage(
+                            content=json.dumps(payload, ensure_ascii=False),
+                            tool_call_id=tool_call_id,
+                        )
+                    )
+                    continue
                 if not isinstance(result, ToolObservation):
                     raise TypeError(f"Tool {name!r} did not return ToolObservation")
                 payload = tool_observation_to_dict(result)

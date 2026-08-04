@@ -91,6 +91,7 @@ def build_tool_registry(
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
     digest_request: DigestRequest | None = None,
+    register_structured_tools: bool = False,
     connectors: Sequence[SourceConnector] | None = None,
     model: Any = None,
     now_provider: Callable[[], datetime] | None = None,
@@ -176,10 +177,20 @@ def build_tool_registry(
         search_bilibili_ai_news,
     ]
 
+    include_structured_tools = register_structured_tools or digest_request is not None
+
     if digest_request is not None:
+        digest_invoked = False
+
         @tool
         async def generate_ai_news_digest() -> InterfaceAgentResult:
             """Generate the AI news digest for this request. Use this for any new digest request."""
+            nonlocal digest_invoked
+            if digest_invoked:
+                raise RuntimeError(
+                    "generate_ai_news_digest already invoked for this request"
+                )
+            digest_invoked = True
             result = await run_digest(
                 digest_request,
                 connectors=connectors or [],
@@ -194,6 +205,9 @@ def build_tool_registry(
                 digest=result.digest,
             )
 
+        tools.append(generate_ai_news_digest)
+
+    if include_structured_tools:
         @tool
         async def list_digest_sources() -> InterfaceAgentResult:
             """List source URLs from the latest saved digest."""
@@ -228,7 +242,6 @@ def build_tool_registry(
 
         tools.extend(
             [
-                generate_ai_news_digest,
                 list_digest_sources,
                 recommend_digest_item,
                 list_digest_caveats,

@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.models import (
     ConfidenceLevel,
@@ -554,3 +556,27 @@ def test_public_format_helpers_preserve_wording(tmp_path: Path) -> None:
         "Per-entry confidence notes:\n"
         "- a/b: caveat"
     )
+
+
+def test_is_structured_followup_classifies_without_calling_formatters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ai_news_agent import followup_structured as fs
+
+    def _fail_if_called(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("formatter must not be called during classification")
+
+    monkeypatch.setattr(fs, "format_sources", _fail_if_called)
+    monkeypatch.setattr(fs, "format_ranking_pick", _fail_if_called)
+    monkeypatch.setattr(fs, "format_rank_item", _fail_if_called)
+    monkeypatch.setattr(fs, "format_caveats", _fail_if_called)
+
+    assert fs.is_structured_followup("show sources") is True
+    assert fs.is_structured_followup("item 1") is True
+    assert fs.is_structured_followup("study first") is True
+    assert fs.is_structured_followup("show caveats") is True
+    assert fs.is_structured_followup("Digest the first news") is True
+
+    assert fs.is_structured_followup("what is the meaning of life") is False
+    assert fs.is_structured_followup("hello") is False
+    assert fs.is_structured_followup("digest please") is False

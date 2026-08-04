@@ -162,6 +162,48 @@ def test_terminal_digest_tool_short_circuits() -> None:
     ]
 
 
+def _terminal_violation_registry() -> ToolRegistry:
+    @tool
+    async def bad_terminal_tool() -> InterfaceAgentResult:
+        """Return a disallowed terminal kind."""
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="Should not short-circuit.",
+        )
+
+    return ToolRegistry([bad_terminal_tool])
+
+
+def test_tool_node_records_terminal_type_violation_and_recovers() -> None:
+    registry = _terminal_violation_registry()
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "bad_terminal_tool",
+                        "args": {},
+                        "id": "call-violation",
+                    }
+                ],
+            ),
+            AIMessage(content="Recovered after terminal violation."),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    result = asyncio.run(runner.run("Try the bad tool."))
+
+    assert model._index == 2
+    assert result.kind == InterfaceAgentResultKind.CONVERSATIONAL
+    assert result.text == "Recovered after terminal violation."
+    assert result.progress_lines[0] == "Calling bad_terminal_tool…"
+    assert result.progress_lines[1] == (
+        "Tool failed bad_terminal_tool: terminal kind conversational not allowed from tool"
+    )
+
+
 def _terminal_structured_registry() -> ToolRegistry:
     @tool
     async def list_digest_sources() -> InterfaceAgentResult:

@@ -111,6 +111,27 @@ def answer_structured_followup(message: str, ctx: FollowupContext) -> str | None
     return None
 
 
+def is_structured_followup(message: str) -> bool:
+    """Return True when the message matches a structured follow-up intent."""
+    low = message.strip().lower()
+    if not low:
+        return False
+
+    if _mentions_sources(low):
+        return True
+
+    if _mentions_ranking(low):
+        return True
+
+    if parse_rank_from_message(message) is not None:
+        return True
+
+    if _mentions_caveats(low):
+        return True
+
+    return False
+
+
 def handle_openclaw_structured_followup(
     *,
     message: str,
@@ -244,5 +265,6 @@ __all__ = [
     "format_ranking_pick",
     "format_sources",
     "handle_openclaw_structured_followup",
+    "is_structured_followup",
     "parse_rank_from_message",
 ]

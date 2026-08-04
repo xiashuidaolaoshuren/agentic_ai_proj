@@ -121,6 +121,27 @@ def test_build_tool_registry_with_capability_deps_exposes_eleven_tools(
         assert name in registry.tool_names()
 
 
+def test_build_tool_registry_register_structured_tools_only(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "structured-only-registry.db")
+    store.init_schema()
+    registry = build_tool_registry(
+        store=store,
+        github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        register_structured_tools=True,
+    )
+
+    assert len(registry.tool_names()) == 10
+    assert "generate_ai_news_digest" not in registry.tool_names()
+    for name in (
+        "list_digest_sources",
+        "recommend_digest_item",
+        "list_digest_caveats",
+        "get_digest_item_by_rank",
+    ):
+        assert name in registry.tool_names()
+
+
 def test_generate_ai_news_digest_invokes_run_digest_once(tmp_path: Path) -> None:
     from ai_news_agent.graph.state import DigestResult
     from ai_news_agent.models import Digest
@@ -174,6 +195,50 @@ def test_generate_ai_news_digest_invokes_run_digest_once(tmp_path: Path) -> None
         store=store,
         now_provider=None,
     )
+
+
+def test_generate_ai_news_digest_raises_on_second_invocation(tmp_path: Path) -> None:
+    from ai_news_agent.graph.state import DigestResult
+    from ai_news_agent.models import Digest
+    from ai_news_agent.request import DigestRequest
+
+    store = DigestStore(tmp_path / "digest-once.db")
+    store.init_schema()
+    trusted_request = DigestRequest(topics=["AI agents"])
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=Digest(
+            generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+            entries=[],
+            topics=["AI agents"],
+        ),
+        run_id=7,
+        markdown="# Digest",
+        text="Digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+    run_digest_mock = AsyncMock(return_value=digest_result)
+
+    with patch("ai_news_agent.tools.registry.run_digest", run_digest_mock):
+        registry = build_tool_registry(
+            store=store,
+            github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            digest_request=trusted_request,
+            connectors=[],
+            model=object(),
+        )
+        tool = registry.get_tool("generate_ai_news_digest")
+        asyncio.run(tool.ainvoke({}))
+
+        with pytest.raises(RuntimeError, match="generate_ai_news_digest already invoked"):
+            asyncio.run(tool.ainvoke({}))
+
+    run_digest_mock.assert_awaited_once()
 
 
 def test_generate_ai_news_digest_has_no_args_schema(tmp_path: Path) -> None:
