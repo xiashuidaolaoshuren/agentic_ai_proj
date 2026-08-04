@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
 
 from ai_news_agent.chat import ChatService
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
@@ -19,6 +22,276 @@ from ai_news_agent.models import (
 )
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
+from ai_news_agent.tools.schemas import (
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+)
+
+
+class _FakeInterfaceRouter:
+    def __init__(
+        self,
+        *,
+        result: InterfaceAgentResult | None = None,
+        stream_events: list[tuple[str, bool, InterfaceAgentResult | None]] | None = None,
+    ) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._result = result or InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="unused",
+        )
+        self._stream_events = stream_events
+
+    async def route(
+        self,
+        *,
+        message: str,
+        digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
+        correlation_id: str | None = None,
+    ) -> InterfaceAgentResult:
+        self.calls.append(
+            {
+                "message": message,
+                "digest_request": digest_request,
+                "session_connector_names": session_connector_names,
+                "correlation_id": correlation_id,
+            }
+        )
+        return self._result
+
+    async def route_streaming(
+        self,
+        *,
+        message: str,
+        digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
+        correlation_id: str | None = None,
+    ):
+        self.calls.append(
+            {
+                "message": message,
+                "digest_request": digest_request,
+                "session_connector_names": session_connector_names,
+                "correlation_id": correlation_id,
+                "streaming": True,
+            }
+        )
+        if self._stream_events is not None:
+            for event in self._stream_events:
+                yield event
+            return
+        yield "", True, self._result
+
+
+def test_chat_with_interface_router_routes_digest_through_router(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called directly by ChatService")
+
+    store = DigestStore(tmp_path / "router-digest.db")
+    store.init_schema()
+    incoming = DigestRequest(topics=["RAG"])
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="digest text",
+            run_id=7,
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(
+        svc.handle_message_async("ignored message body", digest_request=incoming)
+    )
+
+    assert reply == "digest text"
+    assert len(router.calls) == 1
+    assert router.calls[0]["digest_request"] is incoming
+    assert router.calls[0]["message"] == "ignored message body"
+
+
+def test_chat_maps_interface_digest_result_with_warnings_notice(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called")
+
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+    digest = Digest(
+        generated_at=now,
+        entries=[],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="digest body",
+            run_id=7,
+            digest=digest,
+        )
+    )
+    store = DigestStore(tmp_path / "router-warnings.db")
+    store.init_schema()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    monkeypatch.setattr(
+        "ai_news_agent.chat.format_connector_warnings_notice",
+        lambda _warnings, _errors: "Notice:",
+    )
+
+    reply = asyncio.run(
+        svc.handle_message_async("digest please", digest_request=DigestRequest(topics=["RAG"]))
+    )
+
+    assert reply == "Notice:\n\ndigest body"
+
+
+def test_chat_with_interface_router_routes_structured_followup_through_router(
+    tmp_path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "router-structured.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.STRUCTURED,
+            text="Sources: https://example.com/r1",
+            run_id=1,
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "ai_news_agent.chat.answer_structured_followup",
+            lambda _message, _ctx: (_ for _ in ()).throw(
+                AssertionError("answer_structured_followup must not be called")
+            ),
+        )
+        reply = asyncio.run(svc.handle_message_async("show sources"))
+
+    assert reply == "Sources: https://example.com/r1"
+    assert len(router.calls) == 1
+    assert router.calls[0]["message"] == "show sources"
+
+
+def test_chat_with_interface_router_routes_open_ended_followup_through_router(
+    tmp_path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "router-open.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="answer",
+        )
+    )
+    runner = _FakeToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("what trends do you see?"))
+
+    assert reply == "answer"
+    assert runner.calls == []
+    assert len(router.calls) == 1
+
+
+def test_chat_with_interface_router_no_saved_digest_returns_router_text(tmp_path) -> None:
+    from ai_news_agent.followup_structured import NO_SAVED_DIGEST
+
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "router-no-digest.db")
+    store.init_schema()
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text=NO_SAVED_DIGEST,
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("show sources"))
+
+    assert reply == NO_SAVED_DIGEST
+    assert len(router.calls) == 1
+
+
+def test_chat_streaming_via_interface_router_yields_progress_then_chunked_text(
+    tmp_path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "router-stream.db")
+    store.init_schema()
+    router = _FakeInterfaceRouter(
+        stream_events=[
+            ("Calling generate_ai_news_digest…", False, None),
+            (
+                "",
+                True,
+                InterfaceAgentResult(
+                    kind=InterfaceAgentResultKind.DIGEST,
+                    text="1234567890",
+                    run_id=7,
+                ),
+            ),
+        ]
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(
+            svc,
+            "Generate digest.",
+            digest_request=DigestRequest(topics=["AI"]),
+            chunk_size=4,
+            chunk_delay_s=0,
+        )
+    )
+
+    assert chunks[0] == "Calling generate_ai_news_digest…"
+    assert chunks[-1] == "1234567890"
+    assert len(chunks) > 2
+    assert "Calling" not in chunks[-1]
 
 
 def test_chat_routes_explicit_digest_request_through_workflow_runner(tmp_path) -> None:

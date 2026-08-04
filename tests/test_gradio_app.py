@@ -193,25 +193,22 @@ def test_create_app_chat_interface_fn_is_async_generator(tmp_path) -> None:
     assert demo.mode == "blocks"
 
 
-def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
-    service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
+def test_build_service_fake_mode_passes_no_interface_router(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "fake-interface-router.db")
 
+    assert getattr(service, "_interface_router", None) is None
     assert getattr(service, "_tool_agent_runner", None) is not None
 
 
-def test_build_service_live_mode_wires_tool_registry_and_agent(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    registry_calls: list[dict] = []
-    agent_calls: list[dict] = []
-    fake_registry = MagicMock(name="ToolRegistry")
-    fake_runner = MagicMock(name="ToolAgentRunner")
+def test_build_service_live_mode_wires_interface_tool_router(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router_calls: list[dict] = []
+    fake_router = MagicMock(name="InterfaceToolRouter")
 
-    def spy_build_tool_registry(**kwargs):
-        registry_calls.append(kwargs)
-        return fake_registry
-
-    def spy_build_tool_agent_runner(**kwargs):
-        agent_calls.append(kwargs)
-        return fake_runner
+    def spy_build_interface_tool_router(**kwargs):
+        router_calls.append(kwargs)
+        return fake_router
 
     monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
     monkeypatch.setattr(
@@ -228,20 +225,51 @@ def test_build_service_live_mode_wires_tool_registry_and_agent(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         gradio_app,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+    registry_called = False
+    agent_called = False
+
+    def fail_build_tool_registry(**_kwargs):
+        nonlocal registry_called
+        registry_called = True
+        raise AssertionError("build_tool_registry should not run at service construction")
+
+    def fail_build_tool_agent_runner(**_kwargs):
+        nonlocal agent_called
+        agent_called = True
+        raise AssertionError("build_tool_agent_runner should not run at service construction")
+
+    monkeypatch.setattr(
+        gradio_app,
         "build_tool_registry",
-        spy_build_tool_registry,
+        fail_build_tool_registry,
         raising=False,
     )
     monkeypatch.setattr(
         gradio_app,
         "build_tool_agent_runner",
-        spy_build_tool_agent_runner,
+        fail_build_tool_agent_runner,
         raising=False,
     )
 
-    service = _build_service(fake=False, db_path=tmp_path / "live-tool-agent.db")
+    service = _build_service(fake=False, db_path=tmp_path / "live-interface-router.db")
 
-    assert len(registry_calls) == 1
-    assert len(agent_calls) == 1
-    assert agent_calls[0]["registry"] is fake_registry
-    assert getattr(service, "_tool_agent_runner", None) is fake_runner
+    assert len(router_calls) == 1
+    assert router_calls[0]["interface_name"] == "gradio"
+    assert router_calls[0]["tool_model"] is not None
+    assert router_calls[0]["digest_model"] is not None
+    assert callable(router_calls[0]["build_connectors_fn"])
+    assert callable(router_calls[0]["workflow_runner"])
+    assert callable(router_calls[0]["streaming_workflow_runner"])
+    assert getattr(service, "_interface_router", None) is fake_router
+    assert not registry_called
+    assert not agent_called
+
+
+def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
+
+    assert getattr(service, "_tool_agent_runner", None) is not None

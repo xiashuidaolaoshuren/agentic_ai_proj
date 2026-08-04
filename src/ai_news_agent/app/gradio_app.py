@@ -29,7 +29,7 @@ from ai_news_agent.sources import (
     build_connectors,
 )
 from ai_news_agent.storage import DigestStore
-from ai_news_agent.tools import build_tool_agent_runner, build_tool_registry
+from ai_news_agent.tools import build_interface_tool_router
 
 _UI_ERROR_MESSAGE = (
     "Something went wrong while processing your request. "
@@ -118,15 +118,15 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
     if fake:
         model: Any = FakeDigestModel()
         tool_agent_runner: Any = _FakeToolAgentRunner()
+        interface_router: Any = None
     else:
         model = build_chat_model()
-        registry = build_tool_registry(
-            store=store,
-            github_factory=build_connector_factory(fake=fake, name="github"),
-            bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
-        )
         tool_model = build_tool_chat_model()
-        tool_agent_runner = build_tool_agent_runner(registry=registry, model=tool_model)
+        tool_agent_runner = None
+        interface_router = None  # set after workflow closures are defined
+
+    def build_connectors_fn(_req: DigestRequest) -> Sequence[SourceConnector]:
+        return build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
         if not fake:
@@ -150,12 +150,26 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         ):
             yield event
 
+    if not fake:
+        interface_router = build_interface_tool_router(
+            store=store,
+            workflow_runner=workflow_runner,
+            streaming_workflow_runner=streaming_workflow_runner,
+            tool_model=tool_model,
+            digest_model=model,
+            github_factory=build_connector_factory(fake=fake, name="github"),
+            bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
+            build_connectors_fn=build_connectors_fn,
+            interface_name="gradio",
+        )
+
     return ChatService(
         store=store,
         workflow_runner=workflow_runner,
         streaming_workflow_runner=streaming_workflow_runner,
         chat_model=model,
         tool_agent_runner=tool_agent_runner,
+        interface_router=interface_router,
     )
 
 

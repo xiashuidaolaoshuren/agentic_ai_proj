@@ -224,7 +224,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T13 - Gradio ChatService Live Shared Routing
 
-- [ ] **Do:** Wire live Gradio/`ChatService` digest and follow-up messages through the shared router while preserving session source toggles, ephemeral progress streaming, and fake-mode direct deterministic behavior (full agent bypass; adapt or remove `_FakeToolAgentRunner` open-ended fake progress expectations). Centralize sync and streaming so they cannot drift.
+- [X] **Do:** Wire live Gradio/`ChatService` digest and follow-up messages through the shared router while preserving session source toggles, ephemeral progress streaming, and fake-mode direct deterministic behavior (full agent bypass; adapt or remove `_FakeToolAgentRunner` open-ended fake progress expectations). Centralize sync and streaming so they cannot drift.
 - **TDD suitable:** partial - routing and streaming contracts are testable with fake tool-call models; visual Gradio UX remains a smoke/manual check.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_chat.py tests/test_gradio_app.py -q`

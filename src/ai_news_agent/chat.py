@@ -15,6 +15,10 @@ from ai_news_agent.rendering import format_connector_warnings_notice
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
 from ai_news_agent.streaming import iter_text_chunks
+from ai_news_agent.tools.schemas import (
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+)
 
 WorkflowRunner = Callable[[DigestRequest], Awaitable[DigestResult]]
 StreamingWorkflowRunner = Callable[
@@ -44,12 +48,14 @@ class ChatService:
         streaming_workflow_runner: StreamingWorkflowRunner | None = None,
         chat_model: Any | None = None,
         tool_agent_runner: Any | None = None,
+        interface_router: Any | None = None,
     ) -> None:
         self._store = store
         self._workflow_runner = workflow_runner
         self._streaming_workflow_runner = streaming_workflow_runner
         self._chat_model = chat_model
         self._tool_agent_runner = tool_agent_runner
+        self._interface_router = interface_router
 
     def handle_message(
         self,
@@ -76,6 +82,14 @@ class ChatService:
     ) -> str:
         preview = _message_preview(message)
         logger.info("chat message received preview=%r", preview)
+
+        if self._interface_router is not None:
+            result = await self._interface_router.route(
+                message=message,
+                digest_request=digest_request,
+                session_connector_names=session_connector_names,
+            )
+            return _interface_result_to_text(result, store=self._store)
 
         if digest_request is not None or _message_requests_digest(message):
             req = _resolve_digest_request(
@@ -128,6 +142,28 @@ class ChatService:
     ) -> AsyncIterator[str]:
         preview = _message_preview(message)
         logger.info("chat streaming message received preview=%r", preview)
+
+        if self._interface_router is not None:
+            async def _router_events() -> AsyncIterator[
+                tuple[str, bool, InterfaceAgentResult | None]
+            ]:
+                async for progress, done, payload in self._interface_router.route_streaming(
+                    message=message,
+                    digest_request=digest_request,
+                    session_connector_names=session_connector_names,
+                ):
+                    yield progress, done, payload
+
+            async for chunk in _stream_ephemeral_progress_then_chunks(
+                _router_events(),
+                chunk_size=chunk_size,
+                chunk_delay_s=chunk_delay_s,
+                extract_final_text=lambda result: _interface_result_to_text(
+                    result, store=self._store
+                ),
+            ):
+                yield chunk
+            return
 
         if digest_request is not None or _message_requests_digest(message):
             req = _resolve_digest_request(
@@ -260,6 +296,27 @@ async def _stream_ephemeral_progress_then_chunks(
             delay_s=chunk_delay_s,
         ):
             yield chunk
+
+
+def _interface_result_to_text(
+    result: InterfaceAgentResult,
+    *,
+    store: DigestStore | None = None,
+) -> str:
+    if result.kind is InterfaceAgentResultKind.DIGEST:
+        warnings: list = []
+        errors: list = []
+        if store is not None and result.run_id is not None:
+            ctx = store.get_latest_followup_context()
+            if ctx.run_id == result.run_id:
+                warnings = ctx.warnings
+        notice = format_connector_warnings_notice(warnings, errors)
+        if not notice:
+            return result.text
+        if notice in result.text:
+            return result.text
+        return f"{notice}\n\n{result.text}"
+    return result.text
 
 
 def _user_facing_digest_text(result: DigestResult) -> str:
