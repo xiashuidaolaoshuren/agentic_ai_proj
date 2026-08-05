@@ -23,19 +23,30 @@ from ai_news_agent.adapters.openclaw import (
 )
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
-from ai_news_agent.followup_structured import handle_openclaw_structured_followup
+from ai_news_agent.followup_structured import (
+    NO_SAVED_DIGEST,
+    OPENCLAW_GUIDANCE_FALLBACK,
+    handle_openclaw_structured_followup,
+)
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest_instrumented
-from ai_news_agent.llm import build_chat_model
+from ai_news_agent.llm import build_chat_model, build_tool_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
+from ai_news_agent.models import utcnow
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     FakeDigestModel,
+    build_connector_factory,
     build_connectors,
 )
 from ai_news_agent.storage import DigestStore
 from ai_news_agent.telemetry import DigestStageTimer, new_correlation_id
+from ai_news_agent.tools import build_interface_tool_router
+from ai_news_agent.tools.schemas import (
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+)
 
 logger = get_logger("digest_service")
 
@@ -125,6 +136,56 @@ async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
             await closer()
 
 
+def _digest_result_from_interface(
+    agent_result: InterfaceAgentResult,
+    request: DigestRequest,
+) -> DigestResult:
+    now = utcnow()
+    return DigestResult(
+        request=request,
+        digest=agent_result.digest,
+        run_id=agent_result.run_id,
+        markdown=agent_result.text,
+        text=agent_result.text,
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=now,
+        finished_at=now,
+    )
+
+
+def _interface_result_to_followup_outcome(
+    result: InterfaceAgentResult,
+) -> dict[str, object]:
+    if result.text == NO_SAVED_DIGEST:
+        return {
+            "text": NO_SAVED_DIGEST,
+            "run_id": None,
+            "path": "no_digest",
+        }
+    if result.kind is InterfaceAgentResultKind.STRUCTURED:
+        return {
+            "text": result.text,
+            "run_id": result.run_id,
+            "path": "structured",
+        }
+    if result.kind in (
+        InterfaceAgentResultKind.CONVERSATIONAL,
+        InterfaceAgentResultKind.FALLBACK,
+    ):
+        return {
+            "text": OPENCLAW_GUIDANCE_FALLBACK,
+            "run_id": result.run_id,
+            "path": "guidance",
+        }
+    return {
+        "text": OPENCLAW_GUIDANCE_FALLBACK,
+        "run_id": result.run_id,
+        "path": "guidance",
+    }
+
+
 def build_followup_request_payload(*, message: str) -> dict[str, Any]:
     """Serialize an OpenClaw structured follow-up request body."""
     return {"message": message.strip()}
@@ -133,15 +194,80 @@ def build_followup_request_payload(*, message: str) -> dict[str, Any]:
 class DigestServiceRuntime:
     """Warm digest runtime: store schema, model, and connector factory."""
 
-    def __init__(self, *, fake: bool, db_path: Path) -> None:
+    def __init__(
+        self,
+        *,
+        fake: bool,
+        db_path: Path,
+        interface_router: Any | None = None,
+    ) -> None:
         self.fake = fake
         self.db_path = db_path
         self._store = DigestStore(db_path)
         self._store.init_schema()
+        self._last_digest_stages: dict[str, float] = {}
+        self._active_correlation_id: str | None = None
+        self._interface_router: Any | None = None
+        self._workflow_runner: Any = None
         if fake:
             self._model: Any = FakeDigestModel()
         else:
             self._model = build_chat_model()
+            tool_model = build_tool_chat_model()
+
+            def build_connectors_fn(req: DigestRequest) -> Sequence[SourceConnector]:
+                names = (
+                    list(req.connector_names)
+                    if req.connector_names is not None
+                    else list(DEFAULT_SOURCE_NAMES)
+                )
+                return build_connectors(fake=False, names=names)
+
+            async def workflow_runner(req: DigestRequest) -> DigestResult:
+                load_local_env(force_reload=True)
+                configure_bilibili_network_from_env(logger)
+                names = (
+                    list(req.connector_names)
+                    if req.connector_names is not None
+                    else list(DEFAULT_SOURCE_NAMES)
+                )
+                connectors = build_connectors(fake=False, names=names)
+                correlation_id = self._active_correlation_id or new_correlation_id()
+                with DigestStageTimer(
+                    correlation_id,
+                    logger_name="digest_service",
+                ) as timer:
+                    try:
+                        result = await run_digest_instrumented(
+                            req,
+                            connectors=list(connectors),
+                            model=self._model,
+                            store=self._store,
+                            on_stage=timer.mark,
+                        )
+                    finally:
+                        await _aclose_connectors(connectors)
+                self._last_digest_stages = dict(timer.stages)
+                return result
+
+            self._workflow_runner = workflow_runner
+            if interface_router is not None:
+                self._interface_router = interface_router
+            else:
+                self._interface_router = build_interface_tool_router(
+                    store=self._store,
+                    workflow_runner=workflow_runner,
+                    streaming_workflow_runner=None,
+                    tool_model=tool_model,
+                    digest_model=self._model,
+                    github_factory=build_connector_factory(fake=False, name="github"),
+                    bilibili_factory=build_connector_factory(
+                        fake=False,
+                        name="bilibili",
+                    ),
+                    build_connectors_fn=build_connectors_fn,
+                    interface_name="openclaw",
+                )
         logger.info(
             "digest service runtime ready fake=%s db_path=%s",
             fake,
@@ -153,39 +279,58 @@ class DigestServiceRuntime:
         request: DigestRequest,
         *,
         correlation_id: str,
+        message: str = "",
     ) -> tuple[DigestResult, dict[str, float], float]:
-        if not self.fake:
-            load_local_env(force_reload=True)
-            configure_bilibili_network_from_env(logger)
+        if self.fake:
+            names = (
+                list(request.connector_names)
+                if request.connector_names is not None
+                else list(DEFAULT_SOURCE_NAMES)
+            )
+            connectors = build_connectors(fake=self.fake, names=names)
+            t0 = time.perf_counter()
 
-        names = (
-            list(request.connector_names)
-            if request.connector_names is not None
-            else list(DEFAULT_SOURCE_NAMES)
-        )
-        connectors = build_connectors(fake=self.fake, names=names)
+            with DigestStageTimer(correlation_id, logger_name="digest_service") as timer:
+                try:
+                    result = await run_digest_instrumented(
+                        request,
+                        connectors=list(connectors),
+                        model=self._model,
+                        store=self._store,
+                        on_stage=timer.mark,
+                    )
+                finally:
+                    await _aclose_connectors(connectors)
+
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "digest_service completed correlation_id=%s run_id=%s elapsed_s=%.2f",
+                correlation_id,
+                result.run_id,
+                elapsed,
+            )
+            return result, dict(timer.stages), elapsed
+
+        load_local_env(force_reload=True)
+        configure_bilibili_network_from_env(logger)
+        self._last_digest_stages = {}
+        self._active_correlation_id = correlation_id
         t0 = time.perf_counter()
-
-        with DigestStageTimer(correlation_id, logger_name="digest_service") as timer:
-            try:
-                result = await run_digest_instrumented(
-                    request,
-                    connectors=list(connectors),
-                    model=self._model,
-                    store=self._store,
-                    on_stage=timer.mark,
-                )
-            finally:
-                await _aclose_connectors(connectors)
-
+        agent_result = await self._interface_router.route(
+            message=message,
+            digest_request=request,
+            correlation_id=correlation_id,
+        )
         elapsed = time.perf_counter() - t0
+        stages = dict(self._last_digest_stages)
+        result = _digest_result_from_interface(agent_result, request)
         logger.info(
             "digest_service completed correlation_id=%s run_id=%s elapsed_s=%.2f",
             correlation_id,
             result.run_id,
             elapsed,
         )
-        return result, dict(timer.stages), elapsed
+        return result, stages, elapsed
 
     def run_followup(
         self,
@@ -193,7 +338,18 @@ class DigestServiceRuntime:
         message: str,
         correlation_id: str,
     ) -> dict[str, object]:
-        outcome = handle_openclaw_structured_followup(message=message, store=self._store)
+        if self.fake:
+            outcome = handle_openclaw_structured_followup(
+                message=message,
+                store=self._store,
+            )
+        else:
+            outcome = asyncio.run(
+                self._run_followup_live(
+                    message=message,
+                    correlation_id=correlation_id,
+                )
+            )
         logger.info(
             "followup_service completed correlation_id=%s run_id=%s path=%s",
             correlation_id,
@@ -201,6 +357,18 @@ class DigestServiceRuntime:
             outcome.get("path"),
         )
         return outcome
+
+    async def _run_followup_live(
+        self,
+        *,
+        message: str,
+        correlation_id: str,
+    ) -> dict[str, object]:
+        agent_result = await self._interface_router.route(
+            message=message,
+            correlation_id=correlation_id,
+        )
+        return _interface_result_to_followup_outcome(agent_result)
 
 
 class DigestServiceServer:
@@ -213,12 +381,17 @@ class DigestServiceServer:
         port: int = _DEFAULT_PORT,
         db_path: Path,
         fake: bool = False,
+        interface_router: Any | None = None,
     ) -> None:
         self.host = host
         self.port: int | None = port if port != 0 else None
         self.db_path = db_path
         self.fake = fake
-        self._runtime = DigestServiceRuntime(fake=fake, db_path=db_path)
+        self._runtime = DigestServiceRuntime(
+            fake=fake,
+            db_path=db_path,
+            interface_router=interface_router,
+        )
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -293,9 +466,14 @@ def _make_handler(runtime: DigestServiceRuntime) -> type[BaseHTTPRequestHandler]
                 self._json_response(400, {"error": str(exc)})
                 return
 
+            message = str(body.get("message") or "").strip()
             try:
                 result, stages, elapsed = asyncio.run(
-                    runtime.run_digest(request, correlation_id=correlation_id)
+                    runtime.run_digest(
+                        request,
+                        correlation_id=correlation_id,
+                        message=message,
+                    )
                 )
             except ValueError as exc:
                 self._json_response(400, {"error": str(exc)})
