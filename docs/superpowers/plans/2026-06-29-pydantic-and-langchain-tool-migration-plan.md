@@ -232,7 +232,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T14 - OpenClaw Digest Service Live Shared Routing
 
-- [ ] **Do:** Wire live OpenClaw `/digest` and `/followup` through the shared router while preserving request normalization, response bodies (`text`/`run_id`/`correlation_id`/`elapsed_s`/`stages` for digest; `text`/`run_id`/`path`/`correlation_id` for follow-up with `path` limited to `no_digest`/`structured`/`guidance`), CLI client behavior, and post-fallback guidance text for unsupported follow-ups. Keep fake service mode on the current direct paths.
+- [X] **Do:** Wire live OpenClaw `/digest` and `/followup` through the shared router while preserving request normalization, response bodies (`text`/`run_id`/`correlation_id`/`elapsed_s`/`stages` for digest; `text`/`run_id`/`path`/`correlation_id` for follow-up with `path` limited to `no_digest`/`structured`/`guidance`), CLI client behavior, and post-fallback guidance text for unsupported follow-ups. Keep fake service mode on the current direct paths.
 - **TDD suitable:** partial - service routing and contract assertions are testable with stubs; live channel UX remains optional smoke.
 - **Plan mode:** high
 - **Verification:** `uv run pytest tests/test_digest_service.py tests/test_digest_service_parity.py tests/test_openclaw_adapter.py tests/test_openclaw_followup.py tests/test_openclaw_client.py tests/test_openclaw_targeted.py -q`
@@ -240,7 +240,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 
 ### T15 - Milestone 4c Regression Sweep
 
-- [ ] **Do:** Run the focused 4c tests and the full suite. If regressions expose a plan gap, update this plan before fixing; if a real behavior bug is discovered, add a failing test first where feasible.
+- [X] **Do:** Run the focused 4c tests and the full suite. If regressions expose a plan gap, update this plan before fixing; if a real behavior bug is discovered, add a failing test first where feasible.
 - **TDD suitable:** no - verification/stabilization pass; any discovered code fix should be handled with TDD in the relevant earlier subtask.
 - **Plan mode:** skip
 - **Verification:** `uv run pytest`
@@ -268,3 +268,4 @@ Dependency notation: `Blocked by: T1` means start after T1 is complete.
 | 2026-07-01 | T1 planning: add `connectors/github_juya.py` and `tests/test_connectors_github_juya.py` to file map and blast radius (`dataclasses.replace(NewsItem)` call site) |
 | 2026-08-02 | Append 4c after T8: shared Gradio/OpenClaw BaseTool routing (T9–T15), file map, blast radius, and acceptance updates from revised M4 spec |
 | 2026-08-02 | Fold Gradio/OpenClaw routing discovery into 4c constraints: digest-vs-structured intent precedence, OpenClaw `path` taxonomy, fake bypass, sync/streaming centralization; expand T12–T14 and digest-service tests |
+| 2026-08-05 | T14 complete: live OpenClaw `/digest` and `/followup` routed through shared `InterfaceToolRouter`; T15 regression sweep passed (`429 passed, 2 skipped`) |
