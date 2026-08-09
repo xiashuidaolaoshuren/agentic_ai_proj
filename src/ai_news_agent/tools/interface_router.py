@@ -91,6 +91,7 @@ class InterfaceToolRouter:
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
+        on_stage: Callable[[str], None] | None = None,
     ) -> InterfaceAgentResult:
         intent, req = self._detect_intent(
             message,
@@ -113,7 +114,11 @@ class InterfaceToolRouter:
                 correlation_id,
             )
 
-        runner = self._build_runner(intent=intent, digest_request=req)
+        runner = self._build_runner(
+            intent=intent,
+            digest_request=req,
+            on_stage=on_stage,
+        )
         try:
             agent_result = await runner.run(message)
         except Exception as exc:
@@ -163,6 +168,7 @@ class InterfaceToolRouter:
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
+        on_stage: Callable[[str], None] | None = None,
     ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
         intent, req = self._detect_intent(
             message,
@@ -180,7 +186,11 @@ class InterfaceToolRouter:
             )
             return
 
-        runner = self._build_runner(intent=intent, digest_request=req)
+        runner = self._build_runner(
+            intent=intent,
+            digest_request=req,
+            on_stage=on_stage,
+        )
         final_state: InterfaceAgentResult | None = None
         try:
             async for progress, done, payload in runner.run_streaming(message):
@@ -259,6 +269,7 @@ class InterfaceToolRouter:
         *,
         intent: _RouteIntent,
         digest_request: DigestRequest | None,
+        on_stage: Callable[[str], None] | None = None,
     ) -> ToolAgentRunner:
         if intent is _RouteIntent.DIGEST:
             assert digest_request is not None
@@ -270,6 +281,7 @@ class InterfaceToolRouter:
                 connectors=self._build_connectors_fn(digest_request),
                 model=self._digest_model,
                 now_provider=self._now_provider,
+                on_stage=on_stage,
             )
         elif intent is _RouteIntent.STRUCTURED_FOLLOWUP:
             registry = build_tool_registry(

@@ -8,7 +8,7 @@ import json
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, TextIO
@@ -205,7 +205,7 @@ class DigestServiceRuntime:
         self.db_path = db_path
         self._store = DigestStore(db_path)
         self._store.init_schema()
-        self._last_digest_stages: dict[str, float] = {}
+        self._active_on_stage: Callable[[str], None] | None = None
         self._active_correlation_id: str | None = None
         self._interface_router: Any | None = None
         self._workflow_runner: Any = None
@@ -232,22 +232,16 @@ class DigestServiceRuntime:
                     else list(DEFAULT_SOURCE_NAMES)
                 )
                 connectors = build_connectors(fake=False, names=names)
-                correlation_id = self._active_correlation_id or new_correlation_id()
-                with DigestStageTimer(
-                    correlation_id,
-                    logger_name="digest_service",
-                ) as timer:
-                    try:
-                        result = await run_digest_instrumented(
-                            req,
-                            connectors=list(connectors),
-                            model=self._model,
-                            store=self._store,
-                            on_stage=timer.mark,
-                        )
-                    finally:
-                        await _aclose_connectors(connectors)
-                self._last_digest_stages = dict(timer.stages)
+                try:
+                    result = await run_digest_instrumented(
+                        req,
+                        connectors=list(connectors),
+                        model=self._model,
+                        store=self._store,
+                        on_stage=self._active_on_stage,
+                    )
+                finally:
+                    await _aclose_connectors(connectors)
                 return result
 
             self._workflow_runner = workflow_runner
@@ -313,16 +307,17 @@ class DigestServiceRuntime:
 
         load_local_env(force_reload=True)
         configure_bilibili_network_from_env(logger)
-        self._last_digest_stages = {}
         self._active_correlation_id = correlation_id
         t0 = time.perf_counter()
-        agent_result = await self._interface_router.route(
-            message=message,
-            digest_request=request,
-            correlation_id=correlation_id,
-        )
+        with DigestStageTimer(correlation_id, logger_name="digest_service") as timer:
+            self._active_on_stage = timer.mark
+            agent_result = await self._interface_router.route(
+                message=message,
+                digest_request=request,
+                correlation_id=correlation_id,
+                on_stage=timer.mark,
+            )
         elapsed = time.perf_counter() - t0
-        stages = dict(self._last_digest_stages)
         result = _digest_result_from_interface(agent_result, request)
         logger.info(
             "digest_service completed correlation_id=%s run_id=%s elapsed_s=%.2f",
@@ -330,7 +325,7 @@ class DigestServiceRuntime:
             result.run_id,
             elapsed,
         )
-        return result, stages, elapsed
+        return result, dict(timer.stages), elapsed
 
     def run_followup(
         self,

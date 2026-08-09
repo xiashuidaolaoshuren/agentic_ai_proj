@@ -126,7 +126,7 @@ def test_route_digest_request_returns_digest_from_agent(tmp_path: Path) -> None:
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
 
     with patch(
-        "ai_news_agent.tools.registry.run_digest",
+        "ai_news_agent.tools.registry.run_digest_instrumented",
         AsyncMock(return_value=digest_result),
     ):
         result = asyncio.run(
@@ -144,6 +144,74 @@ def test_route_digest_request_returns_digest_from_agent(tmp_path: Path) -> None:
     assert result.digest == digest
     assert result.correlation_id == "corr-7"
     assert model._index == 1
+
+
+def test_route_passes_on_stage_to_registry(tmp_path: Path) -> None:
+    trusted_request = DigestRequest(topics=["AI agents"])
+    registry_calls: list[dict[str, object]] = []
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=7,
+        markdown="# Digest",
+        text="Digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+
+    def on_stage(stage: str) -> None:
+        del stage
+
+    def spy_build_tool_registry(**kwargs: object):
+        registry_calls.append(kwargs)
+        return build_tool_registry(**kwargs)
+
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "generate_ai_news_digest",
+                        "args": {},
+                        "id": "call-digest",
+                    }
+                ],
+            ),
+            AIMessage(content="unused"),
+        ]
+    )
+
+    async def _workflow(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow must not run")
+
+    router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
+
+    with patch(
+        "ai_news_agent.tools.interface_router.build_tool_registry",
+        spy_build_tool_registry,
+    ), patch(
+        "ai_news_agent.tools.registry.run_digest_instrumented",
+        AsyncMock(return_value=digest_result),
+    ):
+        asyncio.run(
+            router.route(
+                message="Generate digest.",
+                digest_request=trusted_request,
+                on_stage=on_stage,
+            )
+        )
+
+    assert len(registry_calls) == 1
+    assert registry_calls[0]["on_stage"] is on_stage
 
 
 def test_intent_precedence_structured_wins_over_digest_keyword(tmp_path: Path) -> None:
@@ -484,7 +552,7 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
 
     with patch(
-        "ai_news_agent.tools.registry.run_digest",
+        "ai_news_agent.tools.registry.run_digest_instrumented",
         AsyncMock(return_value=digest_result),
     ):
         events = asyncio.run(

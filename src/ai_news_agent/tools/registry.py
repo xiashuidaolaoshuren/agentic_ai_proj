@@ -17,7 +17,7 @@ from ai_news_agent.followup_structured import (
     format_ranking_pick,
     format_sources,
 )
-from ai_news_agent.graph.workflow import run_digest
+from ai_news_agent.graph.workflow import run_digest_instrumented
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import (
@@ -95,6 +95,7 @@ def build_tool_registry(
     connectors: Sequence[SourceConnector] | None = None,
     model: Any = None,
     now_provider: Callable[[], datetime] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> ToolRegistry:
     """Assemble LangChain tools with injected store and connector factories."""
 
@@ -191,11 +192,12 @@ def build_tool_registry(
                     "generate_ai_news_digest already invoked for this request"
                 )
             digest_invoked = True
-            result = await run_digest(
+            result = await run_digest_instrumented(
                 digest_request,
                 connectors=connectors or [],
                 model=model,
                 store=store,
+                on_stage=on_stage,
                 now_provider=now_provider,
             )
             return InterfaceAgentResult(

@@ -44,6 +44,7 @@ class _FakeInterfaceRouter:
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
+        on_stage=None,
     ) -> InterfaceAgentResult:
         self.calls.append(
             {
@@ -51,8 +52,47 @@ class _FakeInterfaceRouter:
                 "digest_request": digest_request,
                 "session_connector_names": session_connector_names,
                 "correlation_id": correlation_id,
+                "on_stage": on_stage,
             }
         )
+        return self._result
+
+
+class _OnStageInvokingRouter:
+    """Simulates agent-success digest by invoking on_stage without workflow_runner."""
+
+    def __init__(
+        self,
+        *,
+        result: InterfaceAgentResult | None = None,
+    ) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._result = result or InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="digest body",
+            run_id=7,
+        )
+
+    async def route(
+        self,
+        *,
+        message: str,
+        digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
+        correlation_id: str | None = None,
+        on_stage=None,
+    ) -> InterfaceAgentResult:
+        self.calls.append(
+            {
+                "message": message,
+                "digest_request": digest_request,
+                "correlation_id": correlation_id,
+                "on_stage": on_stage,
+            }
+        )
+        if on_stage is not None:
+            on_stage("parse_request")
+            on_stage("collect_sources")
         return self._result
 
 
@@ -70,12 +110,14 @@ class _WorkflowInvokingRouter:
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
+        on_stage=None,
     ) -> InterfaceAgentResult:
         self.calls.append(
             {
                 "message": message,
                 "digest_request": digest_request,
                 "correlation_id": correlation_id,
+                "on_stage": on_stage,
             }
         )
         assert digest_request is not None
@@ -341,6 +383,45 @@ def test_live_digest_fallback_preserves_stage_timings(
     assert "AI News Digest" in result.text
     assert stages
     assert any(name for name in stages)
+
+
+def test_live_digest_agent_success_preserves_stage_timings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: MagicMock(name="ConnectorFactory"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: MagicMock(name="InterfaceToolRouter"),
+        raising=False,
+    )
+    runtime = DigestServiceRuntime(fake=False, db_path=tmp_path / "agent-stages.db")
+    router = _OnStageInvokingRouter()
+    runtime._interface_router = router
+
+    request = DigestRequest(topics=["AI"], connector_names=["github"])
+    result, stages, _elapsed = asyncio.run(
+        runtime.run_digest(request, correlation_id="agent-stage-corr", message="")
+    )
+
+    assert result.run_id == 7
+    assert stages
+    assert "parse_request" in stages
+    assert "collect_sources" in stages
+    assert router.calls[-1]["on_stage"] is not None
 
 
 def test_digest_endpoint_rejects_unknown_source(service_server: DigestServiceServer) -> None:
