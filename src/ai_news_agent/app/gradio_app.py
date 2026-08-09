@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,9 @@ async def _run_digest_async(
     store: DigestStore,
     connectors: Sequence[SourceConnector],
     model: Any,
+    on_stage: Callable[[str], None] | None = None,
 ) -> DigestResult:
+    del on_stage
     try:
         return await run_digest(
             req,
@@ -98,7 +100,9 @@ async def _run_digest_streaming_async(
     store: DigestStore,
     connectors: Sequence[SourceConnector],
     model: Any,
+    on_stage: Callable[[str], None] | None = None,
 ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+    del on_stage
     try:
         async for event in run_digest_streaming(
             req,
@@ -135,15 +139,25 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
     def build_connectors_fn(req: DigestRequest) -> Sequence[SourceConnector]:
         return build_connectors(fake=fake, names=_names_from(req))
 
-    async def workflow_runner(req: DigestRequest) -> DigestResult:
+    async def workflow_runner(
+        req: DigestRequest,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> DigestResult:
         if not fake:
             load_local_env(force_reload=True)
             configure_bilibili_network_from_env(logger)
         connectors = build_connectors(fake=fake, names=_names_from(req))
-        return await _run_digest_async(req, store=store, connectors=connectors, model=model)
+        return await _run_digest_async(
+            req,
+            store=store,
+            connectors=connectors,
+            model=model,
+            on_stage=on_stage,
+        )
 
     async def streaming_workflow_runner(
         req: DigestRequest,
+        on_stage: Callable[[str], None] | None = None,
     ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
         if not fake:
             load_local_env(force_reload=True)
@@ -154,6 +168,7 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
             store=store,
             connectors=connectors,
             model=model,
+            on_stage=on_stage,
         ):
             yield event
 

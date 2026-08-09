@@ -170,6 +170,12 @@ def _interface_result_to_followup_outcome(
             "run_id": result.run_id,
             "path": "structured",
         }
+    if result.kind is InterfaceAgentResultKind.DIGEST:
+        return {
+            "text": result.text,
+            "run_id": result.run_id,
+            "path": "digest",
+        }
     if result.kind in (
         InterfaceAgentResultKind.CONVERSATIONAL,
         InterfaceAgentResultKind.FALLBACK,
@@ -205,8 +211,6 @@ class DigestServiceRuntime:
         self.db_path = db_path
         self._store = DigestStore(db_path)
         self._store.init_schema()
-        self._active_on_stage: Callable[[str], None] | None = None
-        self._active_correlation_id: str | None = None
         self._interface_router: Any | None = None
         self._workflow_runner: Any = None
         if fake:
@@ -223,7 +227,10 @@ class DigestServiceRuntime:
                 )
                 return build_connectors(fake=False, names=names)
 
-            async def workflow_runner(req: DigestRequest) -> DigestResult:
+            async def workflow_runner(
+                req: DigestRequest,
+                on_stage: Callable[[str], None] | None = None,
+            ) -> DigestResult:
                 load_local_env(force_reload=True)
                 configure_bilibili_network_from_env(logger)
                 names = (
@@ -238,7 +245,7 @@ class DigestServiceRuntime:
                         connectors=list(connectors),
                         model=self._model,
                         store=self._store,
-                        on_stage=self._active_on_stage,
+                        on_stage=on_stage,
                     )
                 finally:
                     await _aclose_connectors(connectors)
@@ -307,10 +314,8 @@ class DigestServiceRuntime:
 
         load_local_env(force_reload=True)
         configure_bilibili_network_from_env(logger)
-        self._active_correlation_id = correlation_id
         t0 = time.perf_counter()
         with DigestStageTimer(correlation_id, logger_name="digest_service") as timer:
-            self._active_on_stage = timer.mark
             agent_result = await self._interface_router.route(
                 message=message,
                 digest_request=request,

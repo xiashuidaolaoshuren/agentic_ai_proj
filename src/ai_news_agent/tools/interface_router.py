@@ -46,12 +46,22 @@ class _RouteIntent(enum.Enum):
     NO_SAVED_DIGEST = "no_saved_digest"
 
 
-WorkflowRunner = Callable[[DigestRequest], Awaitable[DigestResult]]
+WorkflowRunner = Callable[
+    [DigestRequest, Callable[[str], None] | None],
+    Awaitable[DigestResult],
+]
 StreamingWorkflowRunner = Callable[
     [DigestRequest],
     AsyncIterator[tuple[str, bool, DigestResult | None]],
 ]
 BuildConnectorsFn = Callable[[DigestRequest], Sequence[Any]]
+
+
+async def _aclose_connectors(connectors: Sequence[Any]) -> None:
+    for connector in connectors:
+        closer = getattr(connector, "aclose", None)
+        if closer is not None:
+            await closer()
 
 
 class InterfaceToolRouter:
@@ -114,52 +124,64 @@ class InterfaceToolRouter:
                 correlation_id,
             )
 
-        runner = self._build_runner(
-            intent=intent,
-            digest_request=req,
-            on_stage=on_stage,
-        )
+        connectors: Sequence[Any] | None = None
+        if intent is _RouteIntent.DIGEST:
+            assert req is not None
+            connectors = self._build_connectors_fn(req)
+
         try:
-            agent_result = await runner.run(message)
-        except Exception as exc:
-            logger.error(
-                "interface agent model_failure interface=%s correlation_id=%s error=%r",
+            runner = self._build_runner(
+                intent=intent,
+                digest_request=req,
+                on_stage=on_stage,
+                connectors=connectors,
+            )
+            try:
+                agent_result = await runner.run(message)
+            except Exception as exc:
+                logger.error(
+                    "interface agent model_failure interface=%s correlation_id=%s error=%r",
+                    self._interface_name,
+                    correlation_id,
+                    exc,
+                )
+                return self._with_correlation(
+                    await self._deterministic_fallback(
+                        intent=intent,
+                        message=message,
+                        digest_request=req,
+                        agent_result=None,
+                        fallback_reason="model_failure",
+                        on_stage=on_stage,
+                    ),
+                    correlation_id,
+                )
+
+            agent_result = self._with_correlation(agent_result, correlation_id)
+            if self._agent_result_matches_intent(intent, agent_result):
+                self._log_agent_success(intent, agent_result, correlation_id)
+                return agent_result
+
+            logger.info(
+                "interface agent mismatch intent=%s kind=%s fallback_reason=%s "
+                "interface=%s correlation_id=%s",
+                intent.value,
+                agent_result.kind.value,
+                agent_result.fallback_reason,
                 self._interface_name,
                 correlation_id,
-                exc,
             )
-            return self._with_correlation(
-                await self._deterministic_fallback(
-                    intent=intent,
-                    message=message,
-                    digest_request=req,
-                    agent_result=None,
-                    fallback_reason="model_failure",
-                ),
-                correlation_id,
+            return await self._deterministic_fallback(
+                intent=intent,
+                message=message,
+                digest_request=req,
+                agent_result=agent_result,
+                fallback_reason=agent_result.fallback_reason or "agent_mismatch",
+                on_stage=on_stage,
             )
-
-        agent_result = self._with_correlation(agent_result, correlation_id)
-        if self._agent_result_matches_intent(intent, agent_result):
-            self._log_agent_success(intent, agent_result, correlation_id)
-            return agent_result
-
-        logger.info(
-            "interface agent mismatch intent=%s kind=%s fallback_reason=%s "
-            "interface=%s correlation_id=%s",
-            intent.value,
-            agent_result.kind.value,
-            agent_result.fallback_reason,
-            self._interface_name,
-            correlation_id,
-        )
-        return await self._deterministic_fallback(
-            intent=intent,
-            message=message,
-            digest_request=req,
-            agent_result=agent_result,
-            fallback_reason=agent_result.fallback_reason or "agent_mismatch",
-        )
+        finally:
+            if connectors is not None:
+                await _aclose_connectors(connectors)
 
     async def route_streaming(
         self,
@@ -186,52 +208,65 @@ class InterfaceToolRouter:
             )
             return
 
-        runner = self._build_runner(
-            intent=intent,
-            digest_request=req,
-            on_stage=on_stage,
-        )
-        final_state: InterfaceAgentResult | None = None
+        connectors: Sequence[Any] | None = None
+        if intent is _RouteIntent.DIGEST:
+            assert req is not None
+            connectors = self._build_connectors_fn(req)
+
         try:
-            async for progress, done, payload in runner.run_streaming(message):
-                if not done:
-                    if progress:
-                        yield progress, False, None
-                    continue
-                final_state = payload
-        except Exception as exc:
-            logger.error(
-                "interface streaming model_failure interface=%s correlation_id=%s error=%r",
-                self._interface_name,
-                correlation_id,
-                exc,
-            )
-            final_state = await self._deterministic_fallback(
+            runner = self._build_runner(
                 intent=intent,
-                message=message,
                 digest_request=req,
-                agent_result=None,
-                fallback_reason="model_failure",
+                on_stage=on_stage,
+                connectors=connectors,
             )
+            final_state: InterfaceAgentResult | None = None
+            try:
+                async for progress, done, payload in runner.run_streaming(message):
+                    if not done:
+                        if progress:
+                            yield progress, False, None
+                        continue
+                    final_state = payload
+            except Exception as exc:
+                logger.error(
+                    "interface streaming model_failure interface=%s correlation_id=%s error=%r",
+                    self._interface_name,
+                    correlation_id,
+                    exc,
+                )
+                final_state = await self._deterministic_fallback(
+                    intent=intent,
+                    message=message,
+                    digest_request=req,
+                    agent_result=None,
+                    fallback_reason="model_failure",
+                    on_stage=on_stage,
+                )
 
-        if final_state is None:
-            final_state = await self._deterministic_fallback(
-                intent=intent,
-                message=message,
-                digest_request=req,
-                agent_result=None,
-                fallback_reason="iteration_cap_exceeded",
-            )
-        elif not self._agent_result_matches_intent(intent, final_state):
-            final_state = await self._deterministic_fallback(
-                intent=intent,
-                message=message,
-                digest_request=req,
-                agent_result=final_state,
-                fallback_reason=final_state.fallback_reason or "agent_mismatch",
-            )
+            if final_state is None:
+                final_state = await self._deterministic_fallback(
+                    intent=intent,
+                    message=message,
+                    digest_request=req,
+                    agent_result=None,
+                    fallback_reason="iteration_cap_exceeded",
+                    on_stage=on_stage,
+                )
+            elif not self._agent_result_matches_intent(intent, final_state):
+                final_state = await self._deterministic_fallback(
+                    intent=intent,
+                    message=message,
+                    digest_request=req,
+                    agent_result=final_state,
+                    fallback_reason=final_state.fallback_reason or "agent_mismatch",
+                    on_stage=on_stage,
+                )
 
-        yield "", True, self._with_correlation(final_state, correlation_id)
+            yield "", True, self._with_correlation(final_state, correlation_id)
+        finally:
+            if connectors is not None:
+                await _aclose_connectors(connectors)
 
     def _detect_intent(
         self,
@@ -270,6 +305,7 @@ class InterfaceToolRouter:
         intent: _RouteIntent,
         digest_request: DigestRequest | None,
         on_stage: Callable[[str], None] | None = None,
+        connectors: Sequence[Any] | None = None,
     ) -> ToolAgentRunner:
         if intent is _RouteIntent.DIGEST:
             assert digest_request is not None
@@ -278,7 +314,7 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 digest_request=digest_request,
-                connectors=self._build_connectors_fn(digest_request),
+                connectors=connectors or [],
                 model=self._digest_model,
                 now_provider=self._now_provider,
                 on_stage=on_stage,
@@ -323,6 +359,7 @@ class InterfaceToolRouter:
         digest_request: DigestRequest | None,
         agent_result: InterfaceAgentResult | None,
         fallback_reason: str,
+        on_stage: Callable[[str], None] | None = None,
     ) -> InterfaceAgentResult:
         logger.info(
             "interface deterministic_fallback intent=%s reason=%s interface=%s",
@@ -332,7 +369,11 @@ class InterfaceToolRouter:
         )
         if intent is _RouteIntent.DIGEST:
             if agent_result is not None and (
-                agent_result.run_id is not None or agent_result.digest is not None
+                agent_result.kind is not InterfaceAgentResultKind.STRUCTURED
+                and (
+                    agent_result.run_id is not None
+                    or agent_result.digest is not None
+                )
             ):
                 progress_lines = list(agent_result.progress_lines or [])
                 return InterfaceAgentResult(
@@ -344,7 +385,7 @@ class InterfaceToolRouter:
                     digest=agent_result.digest,
                 )
             assert digest_request is not None
-            digest_result = await self._workflow_runner(digest_request)
+            digest_result = await self._workflow_runner(digest_request, on_stage)
             return InterfaceAgentResult(
                 kind=InterfaceAgentResultKind.DIGEST,
                 text=digest_result.text,

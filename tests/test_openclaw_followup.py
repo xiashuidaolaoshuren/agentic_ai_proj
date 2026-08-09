@@ -384,6 +384,70 @@ def test_live_followup_routes_structured_through_router(
     assert len(router.calls) == 1
 
 
+def test_live_followup_maps_digest_to_digest_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = DigestStore(tmp_path / "digest-followup.db")
+    store.init_schema()
+    _seed_digest_store(store)
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="# Digest body",
+            run_id=9,
+        )
+    )
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: object())
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: router,
+        raising=False,
+    )
+    server = DigestServiceServer(
+        host="127.0.0.1",
+        port=0,
+        db_path=tmp_path / "digest-followup-svc.db",
+        fake=False,
+        interface_router=router,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while server.port is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.port is not None
+    try:
+        conn = HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.request(
+            "POST",
+            "/followup",
+            body=json.dumps({"message": "generate a digest about AI"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read().decode())
+        assert data["path"] == "digest"
+        assert data["text"] == "# Digest body"
+        assert data["run_id"] == 9
+    finally:
+        server.shutdown()
+
+
 def test_live_followup_maps_conversational_to_guidance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

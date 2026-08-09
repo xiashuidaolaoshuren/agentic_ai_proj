@@ -67,7 +67,10 @@ def _build_router(
         store.init_schema()
     gh, bh = _noop_factories()
 
-    async def _default_workflow(_req: DigestRequest) -> DigestResult:
+    async def _default_workflow(
+        _req: DigestRequest,
+        _on_stage=None,
+    ) -> DigestResult:
         raise AssertionError("workflow_runner should not run")
 
     return build_interface_tool_router(
@@ -120,7 +123,7 @@ def test_route_digest_request_returns_digest_from_agent(tmp_path: Path) -> None:
         ]
     )
 
-    async def _workflow(_req: DigestRequest) -> DigestResult:
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("deterministic digest must not run on happy path")
 
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
@@ -190,7 +193,7 @@ def test_route_passes_on_stage_to_registry(tmp_path: Path) -> None:
         ]
     )
 
-    async def _workflow(_req: DigestRequest) -> DigestResult:
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
 
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
@@ -233,7 +236,7 @@ def test_intent_precedence_structured_wins_over_digest_keyword(tmp_path: Path) -
     )
     workflow_calls: list[DigestRequest] = []
 
-    async def _workflow(req: DigestRequest) -> DigestResult:
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
         workflow_calls.append(req)
         raise AssertionError("digest workflow must not run")
 
@@ -279,7 +282,7 @@ def test_digest_agent_fallback_runs_deterministic_workflow(tmp_path: Path) -> No
     model = _FakeToolCallModel([AIMessage(content="Direct answer without tools.")])
     workflow_calls: list[DigestRequest] = []
 
-    async def _workflow(req: DigestRequest) -> DigestResult:
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
         workflow_calls.append(req)
         return digest_result
 
@@ -306,7 +309,7 @@ def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
     trusted_request = DigestRequest(topics=["AI agents"])
     workflow_calls: list[DigestRequest] = []
 
-    async def _workflow(req: DigestRequest) -> DigestResult:
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
         workflow_calls.append(req)
         raise AssertionError("workflow must not run")
 
@@ -336,6 +339,161 @@ def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
     assert result.fallback_reason == "unsafe_digest_completion"
     assert result.run_id == 7
     assert workflow_calls == []
+
+
+def test_digest_mismatch_structured_result_reruns_workflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_request = DigestRequest(topics=["AI agents"])
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=11,
+        markdown="# Fallback digest",
+        text="Fallback digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+    workflow_calls: list[DigestRequest] = []
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        workflow_calls.append(req)
+        return digest_result
+
+    class _StructuredRunner:
+        async def run(self, _message: str) -> InterfaceAgentResult:
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.STRUCTURED,
+                text="Sources: https://example.com/r1",
+                run_id=7,
+            )
+
+    monkeypatch.setattr(
+        "ai_news_agent.tools.interface_router.build_tool_agent_runner",
+        lambda **_kwargs: _StructuredRunner(),
+    )
+    router = _build_router(tmp_path, workflow_runner=_workflow)
+
+    result = asyncio.run(
+        router.route(
+            message="Generate digest.",
+            digest_request=trusted_request,
+        )
+    )
+
+    assert result.kind == InterfaceAgentResultKind.DIGEST
+    assert result.text == "Fallback digest text"
+    assert result.run_id == 11
+    assert len(workflow_calls) == 1
+    assert workflow_calls[0] is trusted_request
+
+
+class _FakeConnector:
+    def __init__(self, closed: list[str], name: str) -> None:
+        self._closed = closed
+        self._name = name
+
+    async def aclose(self) -> None:
+        self._closed.append(self._name)
+
+
+def test_route_digest_closes_connectors_after_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_request = DigestRequest(topics=["AI agents"])
+    closed: list[str] = []
+
+    class _DigestRunner:
+        async def run(self, _message: str) -> InterfaceAgentResult:
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.DIGEST,
+                text="Digest text",
+                run_id=7,
+            )
+
+    async def _unused_workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
+        raise AssertionError("unused")
+
+    monkeypatch.setattr(
+        "ai_news_agent.tools.interface_router.build_tool_agent_runner",
+        lambda **_kwargs: _DigestRunner(),
+    )
+    router = _build_router(
+        tmp_path,
+        workflow_runner=_unused_workflow,
+    )
+    router._build_connectors_fn = lambda _req: [_FakeConnector(closed, "github")]
+
+    asyncio.run(
+        router.route(
+            message="Generate digest.",
+            digest_request=trusted_request,
+        )
+    )
+
+    assert closed == ["github"]
+
+
+def test_route_digest_closes_connectors_on_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_request = DigestRequest(topics=["AI agents"])
+    closed: list[str] = []
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=11,
+        markdown="# Fallback digest",
+        text="Fallback digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        return digest_result
+
+    class _StructuredRunner:
+        async def run(self, _message: str) -> InterfaceAgentResult:
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.STRUCTURED,
+                text="Sources: https://example.com/r1",
+                run_id=7,
+            )
+
+    monkeypatch.setattr(
+        "ai_news_agent.tools.interface_router.build_tool_agent_runner",
+        lambda **_kwargs: _StructuredRunner(),
+    )
+    router = _build_router(tmp_path, workflow_runner=_workflow)
+    router._build_connectors_fn = lambda _req: [_FakeConnector(closed, "github")]
+
+    asyncio.run(
+        router.route(
+            message="Generate digest.",
+            digest_request=trusted_request,
+        )
+    )
+
+    assert closed == ["github"]
 
 
 def test_structured_agent_fallback_uses_answer_structured_followup(
@@ -406,7 +564,7 @@ def test_open_ended_agent_conversational_passthrough(tmp_path: Path) -> None:
 
     gh, bh = _noop_factories()
 
-    async def _workflow(_req: DigestRequest) -> DigestResult:
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
 
     router = build_interface_tool_router(
@@ -483,7 +641,7 @@ def test_model_failure_runs_deterministic_digest_fallback(tmp_path: Path) -> Non
 
     workflow_calls: list[DigestRequest] = []
 
-    async def _workflow(req: DigestRequest) -> DigestResult:
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
         workflow_calls.append(req)
         return digest_result
 
@@ -546,7 +704,7 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
         ]
     )
 
-    async def _workflow(_req: DigestRequest) -> DigestResult:
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
 
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)

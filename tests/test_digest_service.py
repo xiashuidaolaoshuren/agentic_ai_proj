@@ -121,7 +121,43 @@ class _WorkflowInvokingRouter:
             }
         )
         assert digest_request is not None
-        digest_result = await self._runtime._workflow_runner(digest_request)
+        digest_result = await self._runtime._workflow_runner(digest_request, on_stage=on_stage)
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text=digest_result.text,
+            run_id=digest_result.run_id,
+            digest=digest_result.digest,
+        )
+
+
+class _ConcurrentOverwriteRouter:
+    """Simulates fallback while another request overwrites runtime._active_on_stage."""
+
+    def __init__(self, runtime: DigestServiceRuntime) -> None:
+        self._runtime = runtime
+        self.calls: list[dict[str, object]] = []
+
+    async def route(
+        self,
+        *,
+        message: str,
+        digest_request: DigestRequest | None = None,
+        session_connector_names: list[str] | None = None,
+        correlation_id: str | None = None,
+        on_stage=None,
+    ) -> InterfaceAgentResult:
+        self.calls.append(
+            {
+                "message": message,
+                "digest_request": digest_request,
+                "correlation_id": correlation_id,
+                "on_stage": on_stage,
+            }
+        )
+        assert digest_request is not None
+        if on_stage is not None and hasattr(self._runtime, "_active_on_stage"):
+            self._runtime._active_on_stage = lambda stage: on_stage(f"stale_{stage}")
+        digest_result = await self._runtime._workflow_runner(digest_request, on_stage=on_stage)
         return InterfaceAgentResult(
             kind=InterfaceAgentResultKind.DIGEST,
             text=digest_result.text,
@@ -422,6 +458,49 @@ def test_live_digest_agent_success_preserves_stage_timings(
     assert "parse_request" in stages
     assert "collect_sources" in stages
     assert router.calls[-1]["on_stage"] is not None
+
+
+def test_live_digest_fallback_uses_per_request_on_stage_not_instance_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: MagicMock(name="ConnectorFactory"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: MagicMock(name="InterfaceToolRouter"),
+        raising=False,
+    )
+    original_build_connectors = digest_service.build_connectors
+    monkeypatch.setattr(
+        digest_service,
+        "build_connectors",
+        lambda *, fake, names: original_build_connectors(fake=True, names=names),
+    )
+    runtime = DigestServiceRuntime(fake=False, db_path=tmp_path / "per-request-on-stage.db")
+    runtime._interface_router = _ConcurrentOverwriteRouter(runtime)
+
+    request = DigestRequest(topics=["AI"], connector_names=["github"])
+    _result, stages, _elapsed = asyncio.run(
+        runtime.run_digest(request, correlation_id="per-request-corr", message="")
+    )
+
+    assert not hasattr(runtime, "_active_on_stage")
+    assert stages
+    assert "parse_request" in stages
+    assert "stale_parse_request" not in stages
 
 
 def test_digest_endpoint_rejects_unknown_source(service_server: DigestServiceServer) -> None:
