@@ -125,14 +125,21 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         tool_agent_runner = None
         interface_router = None  # set after workflow closures are defined
 
-    def build_connectors_fn(_req: DigestRequest) -> Sequence[SourceConnector]:
-        return build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
+    def _names_from(req: DigestRequest) -> list[str]:
+        return (
+            list(req.connector_names)
+            if req.connector_names is not None
+            else list(DEFAULT_SOURCE_NAMES)
+        )
+
+    def build_connectors_fn(req: DigestRequest) -> Sequence[SourceConnector]:
+        return build_connectors(fake=fake, names=_names_from(req))
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
         if not fake:
             load_local_env(force_reload=True)
             configure_bilibili_network_from_env(logger)
-        connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
+        connectors = build_connectors(fake=fake, names=_names_from(req))
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
     async def streaming_workflow_runner(
@@ -141,7 +148,7 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
         if not fake:
             load_local_env(force_reload=True)
             configure_bilibili_network_from_env(logger)
-        connectors = build_connectors(fake=fake, names=DEFAULT_SOURCE_NAMES)
+        connectors = build_connectors(fake=fake, names=_names_from(req))
         async for event in _run_digest_streaming_async(
             req,
             store=store,

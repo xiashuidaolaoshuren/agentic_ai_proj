@@ -21,6 +21,7 @@ from ai_news_agent.models import (
     SourceKind,
 )
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 from ai_news_agent.storage import DigestStore
 
 
@@ -267,6 +268,130 @@ def test_build_service_live_mode_wires_interface_tool_router(
     assert getattr(service, "_interface_router", None) is fake_router
     assert not registry_called
     assert not agent_called
+
+
+def test_build_service_live_closures_respect_connector_names(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router_calls: list[dict] = []
+    connector_name_calls: list[list[str]] = []
+    original_build_connectors = gradio_app.build_connectors
+
+    def recording_build_connectors(*, fake: bool, names: list[str]):
+        connector_name_calls.append(list(names))
+        return original_build_connectors(fake=fake, names=names)
+
+    async def fake_run_digest_async(
+        req: DigestRequest,
+        *,
+        store: DigestStore,
+        connectors,
+        model,
+    ) -> DigestResult:
+        del store, connectors, model
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    async def fake_run_digest_streaming_async(
+        req: DigestRequest,
+        *,
+        store: DigestStore,
+        connectors,
+        model,
+    ):
+        del store, connectors, model
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        yield "", True, DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    def spy_build_interface_tool_router(**kwargs):
+        router_calls.append(kwargs)
+        return MagicMock(name="InterfaceToolRouter")
+
+    monkeypatch.setattr(gradio_app, "build_connectors", recording_build_connectors)
+    monkeypatch.setattr(gradio_app, "_run_digest_async", fake_run_digest_async)
+    monkeypatch.setattr(
+        gradio_app,
+        "_run_digest_streaming_async",
+        fake_run_digest_streaming_async,
+    )
+    monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_connector_factory",
+        lambda **kw: MagicMock(name="ConnectorFactory"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+    monkeypatch.setattr(gradio_app, "load_local_env", lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(
+        gradio_app,
+        "configure_bilibili_network_from_env",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+
+    _build_service(fake=False, db_path=tmp_path / "live-connector-names.db")
+
+    assert len(router_calls) == 1
+    build_connectors_fn = router_calls[0]["build_connectors_fn"]
+    workflow_runner = router_calls[0]["workflow_runner"]
+    streaming_workflow_runner = router_calls[0]["streaming_workflow_runner"]
+
+    connector_name_calls.clear()
+    build_connectors_fn(DigestRequest(connector_names=["github"]))
+    assert connector_name_calls[-1] == ["github"]
+
+    connector_name_calls.clear()
+    asyncio.run(workflow_runner(DigestRequest(connector_names=["bilibili"])))
+    assert connector_name_calls[-1] == ["bilibili"]
+
+    connector_name_calls.clear()
+
+    async def consume_stream() -> None:
+        async for _ in streaming_workflow_runner(
+            DigestRequest(connector_names=["github"])
+        ):
+            pass
+
+    asyncio.run(consume_stream())
+    assert connector_name_calls[-1] == ["github"]
+
+    connector_name_calls.clear()
+    build_connectors_fn(DigestRequest())
+    assert connector_name_calls[-1] == list(DEFAULT_SOURCE_NAMES)
 
 
 def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
