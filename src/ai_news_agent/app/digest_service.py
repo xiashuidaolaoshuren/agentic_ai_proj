@@ -361,6 +361,7 @@ class DigestServiceRuntime:
         agent_result = await self._interface_router.route(
             message=message,
             correlation_id=correlation_id,
+            allow_digest=False,
         )
         return _interface_result_to_followup_outcome(agent_result)
 

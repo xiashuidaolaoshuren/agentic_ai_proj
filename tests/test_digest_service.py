@@ -45,6 +45,7 @@ class _FakeInterfaceRouter:
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
         on_stage=None,
+        allow_digest: bool = True,
     ) -> InterfaceAgentResult:
         self.calls.append(
             {
@@ -53,6 +54,7 @@ class _FakeInterfaceRouter:
                 "session_connector_names": session_connector_names,
                 "correlation_id": correlation_id,
                 "on_stage": on_stage,
+                "allow_digest": allow_digest,
             }
         )
         return self._result

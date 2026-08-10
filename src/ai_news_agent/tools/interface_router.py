@@ -51,7 +51,7 @@ WorkflowRunner = Callable[
     Awaitable[DigestResult],
 ]
 StreamingWorkflowRunner = Callable[
-    [DigestRequest],
+    [DigestRequest, Callable[[str], None] | None],
     AsyncIterator[tuple[str, bool, DigestResult | None]],
 ]
 BuildConnectorsFn = Callable[[DigestRequest], Sequence[Any]]
@@ -102,6 +102,7 @@ class InterfaceToolRouter:
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
+        allow_digest: bool = True,
     ) -> InterfaceAgentResult:
         intent, req = self._detect_intent(
             message,
@@ -120,6 +121,16 @@ class InterfaceToolRouter:
                 InterfaceAgentResult(
                     kind=InterfaceAgentResultKind.CONVERSATIONAL,
                     text=NO_SAVED_DIGEST,
+                ),
+                correlation_id,
+            )
+
+        if not allow_digest and intent is _RouteIntent.DIGEST:
+            return self._with_correlation(
+                InterfaceAgentResult(
+                    kind=InterfaceAgentResultKind.FALLBACK,
+                    text=OPENCLAW_GUIDANCE_FALLBACK,
+                    fallback_reason="digest_not_allowed_on_followup",
                 ),
                 correlation_id,
             )
@@ -191,6 +202,7 @@ class InterfaceToolRouter:
         session_connector_names: list[str] | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
+        allow_digest: bool = True,
     ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
         intent, req = self._detect_intent(
             message,
@@ -203,6 +215,17 @@ class InterfaceToolRouter:
                 InterfaceAgentResult(
                     kind=InterfaceAgentResultKind.CONVERSATIONAL,
                     text=NO_SAVED_DIGEST,
+                ),
+                correlation_id,
+            )
+            return
+
+        if not allow_digest and intent is _RouteIntent.DIGEST:
+            yield "", True, self._with_correlation(
+                InterfaceAgentResult(
+                    kind=InterfaceAgentResultKind.FALLBACK,
+                    text=OPENCLAW_GUIDANCE_FALLBACK,
+                    fallback_reason="digest_not_allowed_on_followup",
                 ),
                 correlation_id,
             )
@@ -221,6 +244,8 @@ class InterfaceToolRouter:
                 connectors=connectors,
             )
             final_state: InterfaceAgentResult | None = None
+            fallback_reason: str | None = None
+            agent_result_for_fallback: InterfaceAgentResult | None = None
             try:
                 async for progress, done, payload in runner.run_streaming(message):
                     if not done:
@@ -235,35 +260,32 @@ class InterfaceToolRouter:
                     correlation_id,
                     exc,
                 )
-                final_state = await self._deterministic_fallback(
-                    intent=intent,
-                    message=message,
-                    digest_request=req,
-                    agent_result=None,
-                    fallback_reason="model_failure",
-                    on_stage=on_stage,
-                )
+                fallback_reason = "model_failure"
 
-            if final_state is None:
-                final_state = await self._deterministic_fallback(
-                    intent=intent,
-                    message=message,
-                    digest_request=req,
-                    agent_result=None,
-                    fallback_reason="iteration_cap_exceeded",
-                    on_stage=on_stage,
-                )
-            elif not self._agent_result_matches_intent(intent, final_state):
-                final_state = await self._deterministic_fallback(
-                    intent=intent,
-                    message=message,
-                    digest_request=req,
-                    agent_result=final_state,
-                    fallback_reason=final_state.fallback_reason or "agent_mismatch",
-                    on_stage=on_stage,
-                )
+            if fallback_reason is None and final_state is None:
+                fallback_reason = "iteration_cap_exceeded"
+            elif (
+                fallback_reason is None
+                and final_state is not None
+                and not self._agent_result_matches_intent(intent, final_state)
+            ):
+                fallback_reason = final_state.fallback_reason or "agent_mismatch"
+                agent_result_for_fallback = final_state
+                final_state = None
 
-            yield "", True, self._with_correlation(final_state, correlation_id)
+            if final_state is not None:
+                yield "", True, self._with_correlation(final_state, correlation_id)
+            else:
+                async for progress, done, payload in self._stream_deterministic_fallback(
+                    intent=intent,
+                    message=message,
+                    digest_request=req,
+                    agent_result=agent_result_for_fallback,
+                    fallback_reason=fallback_reason or "model_failure",
+                    on_stage=on_stage,
+                    correlation_id=correlation_id,
+                ):
+                    yield progress, done, payload
         finally:
             if connectors is not None:
                 await _aclose_connectors(connectors)
@@ -418,6 +440,84 @@ class InterfaceToolRouter:
             fallback_reason=fallback_reason,
             progress_lines=progress_lines,
         )
+
+    async def _stream_deterministic_fallback(
+        self,
+        *,
+        intent: _RouteIntent,
+        message: str,
+        digest_request: DigestRequest | None,
+        agent_result: InterfaceAgentResult | None,
+        fallback_reason: str,
+        on_stage: Callable[[str], None] | None,
+        correlation_id: str | None,
+    ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
+        logger.info(
+            "interface deterministic_fallback intent=%s reason=%s interface=%s",
+            intent.value,
+            fallback_reason,
+            self._interface_name,
+        )
+        if intent is _RouteIntent.DIGEST:
+            if agent_result is not None and (
+                agent_result.kind is not InterfaceAgentResultKind.STRUCTURED
+                and (
+                    agent_result.run_id is not None
+                    or agent_result.digest is not None
+                )
+            ):
+                progress_lines = list(agent_result.progress_lines or [])
+                yield "", True, self._with_correlation(
+                    InterfaceAgentResult(
+                        kind=InterfaceAgentResultKind.FALLBACK,
+                        text=_UNSAFE_DIGEST_TEXT,
+                        fallback_reason="unsafe_digest_completion",
+                        progress_lines=progress_lines,
+                        run_id=agent_result.run_id,
+                        digest=agent_result.digest,
+                    ),
+                    correlation_id,
+                )
+                return
+            assert digest_request is not None
+            if self._streaming_workflow_runner is not None:
+                final_state: InterfaceAgentResult | None = None
+                async for progress, done, digest_result in self._streaming_workflow_runner(
+                    digest_request,
+                    on_stage,
+                ):
+                    if not done:
+                        if progress:
+                            yield progress, False, None
+                        continue
+                    if digest_result is not None:
+                        final_state = InterfaceAgentResult(
+                            kind=InterfaceAgentResultKind.DIGEST,
+                            text=digest_result.text,
+                            run_id=digest_result.run_id,
+                            digest=digest_result.digest,
+                        )
+                if final_state is None:
+                    final_state = await self._deterministic_fallback(
+                        intent=intent,
+                        message=message,
+                        digest_request=digest_request,
+                        agent_result=agent_result,
+                        fallback_reason=fallback_reason,
+                        on_stage=on_stage,
+                    )
+                yield "", True, self._with_correlation(final_state, correlation_id)
+                return
+
+        result = await self._deterministic_fallback(
+            intent=intent,
+            message=message,
+            digest_request=digest_request,
+            agent_result=agent_result,
+            fallback_reason=fallback_reason,
+            on_stage=on_stage,
+        )
+        yield "", True, self._with_correlation(result, correlation_id)
 
     def _with_correlation(
         self,

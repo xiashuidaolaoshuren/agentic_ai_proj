@@ -13,7 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, tool
 
-from ai_news_agent.followup_structured import NO_SAVED_DIGEST, format_sources
+from ai_news_agent.followup_structured import NO_SAVED_DIGEST, OPENCLAW_GUIDANCE_FALLBACK, format_sources
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.models import Digest
 from ai_news_agent.request import DigestRequest
@@ -57,6 +57,7 @@ def _build_router(
     *,
     store: DigestStore | None = None,
     workflow_runner: Any | None = None,
+    streaming_workflow_runner: Any | None = None,
     tool_model: Any | None = None,
     digest_model: Any = object(),
 ) -> Any:
@@ -76,7 +77,7 @@ def _build_router(
     return build_interface_tool_router(
         store=store,
         workflow_runner=workflow_runner or _default_workflow,
-        streaming_workflow_runner=None,
+        streaming_workflow_runner=streaming_workflow_runner,
         tool_model=tool_model or _FakeToolCallModel([AIMessage(content="unused")]),
         digest_model=digest_model,
         github_factory=gh,
@@ -341,6 +342,29 @@ def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
     assert workflow_calls == []
 
 
+def test_route_allow_digest_false_skips_digest_intent(tmp_path: Path) -> None:
+    store, _run_id = _seed_full_followup_store(tmp_path)
+    workflow_calls: list[DigestRequest] = []
+
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
+        workflow_calls.append(_req)
+        raise AssertionError("workflow must not run")
+
+    router = _build_router(tmp_path, store=store, workflow_runner=_workflow)
+
+    result = asyncio.run(
+        router.route(
+            message="generate a digest about AI",
+            allow_digest=False,
+        )
+    )
+
+    assert result.kind == InterfaceAgentResultKind.FALLBACK
+    assert result.text == OPENCLAW_GUIDANCE_FALLBACK
+    assert result.fallback_reason == "digest_not_allowed_on_followup"
+    assert workflow_calls == []
+
+
 def test_digest_mismatch_structured_result_reruns_workflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -494,6 +518,85 @@ def test_route_digest_closes_connectors_on_mismatch(
     )
 
     assert closed == ["github"]
+
+
+def test_route_streaming_digest_fallback_uses_streaming_workflow_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trusted_request = DigestRequest(topics=["AI agents"])
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=11,
+        markdown="# Fallback digest",
+        text="Fallback digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
+        raise AssertionError("non-streaming workflow must not run")
+
+    async def _streaming_workflow(
+        _req: DigestRequest,
+        _on_stage=None,
+    ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
+        yield "Collecting…", False, None
+        yield "", True, digest_result
+
+    class _StructuredRunner:
+        async def run(self, _message: str) -> InterfaceAgentResult:
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.STRUCTURED,
+                text="Sources: https://example.com/r1",
+                run_id=7,
+            )
+
+        async def run_streaming(
+            self, _message: str
+        ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
+            yield "", True, InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.STRUCTURED,
+                text="Sources: https://example.com/r1",
+                run_id=7,
+            )
+
+    monkeypatch.setattr(
+        "ai_news_agent.tools.interface_router.build_tool_agent_runner",
+        lambda **_kwargs: _StructuredRunner(),
+    )
+    router = _build_router(
+        tmp_path,
+        workflow_runner=_workflow,
+        streaming_workflow_runner=_streaming_workflow,
+    )
+
+    async def _collect() -> list[tuple[str, bool, InterfaceAgentResult | None]]:
+        events: list[tuple[str, bool, InterfaceAgentResult | None]] = []
+        async for progress, done, payload in router.route_streaming(
+            message="Generate digest.",
+            digest_request=trusted_request,
+        ):
+            events.append((progress, done, payload))
+        return events
+
+    events = asyncio.run(_collect())
+    progress_events = [progress for progress, done, _payload in events if not done and progress]
+    final = events[-1][2]
+
+    assert "Collecting…" in progress_events
+    assert final is not None
+    assert final.kind == InterfaceAgentResultKind.DIGEST
+    assert final.text == "Fallback digest text"
 
 
 def test_structured_agent_fallback_uses_answer_structured_followup(

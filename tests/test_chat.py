@@ -1187,6 +1187,43 @@ def test_chat_open_ended_follow_up_routes_to_tool_agent_when_configured(tmp_path
     assert reply == "Grounded tool answer."
 
 
+class _InterfaceResultToolAgentRunner:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def run(self, question: str) -> InterfaceAgentResult:
+        self.calls.append(question)
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.STRUCTURED,
+            text="Grounded answer",
+        )
+
+
+def test_chat_tool_agent_runner_interface_result_normalized_to_text(
+    tmp_path: Path,
+) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow should not run")
+
+    store = DigestStore(tmp_path / "tool-agent-interface-result.db")
+    store.init_schema()
+    _save_minimal_digest(store)
+
+    runner = _InterfaceResultToolAgentRunner()
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        tool_agent_runner=runner,
+    )
+
+    question = "Why does this matter?"
+    reply = asyncio.run(svc.handle_message_async(question))
+
+    assert runner.calls == [question]
+    assert reply == "Grounded answer"
+    assert isinstance(reply, str)
+
+
 def test_chat_streaming_follow_up_uses_tool_agent_when_configured(tmp_path) -> None:
     async def fake_runner(_: DigestRequest) -> DigestResult:
         raise AssertionError("workflow should not run")

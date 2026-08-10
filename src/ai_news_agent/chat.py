@@ -118,7 +118,8 @@ class ChatService:
 
         if self._tool_agent_runner is not None:
             logger.info("follow-up path=tool_agent")
-            return await self._tool_agent_runner.run(message)
+            result = await self._tool_agent_runner.run(message)
+            return _tool_agent_result_to_text(result, store=self._store)
 
         llm_text = _try_llm_followup(self._chat_model, message, ctx)
         if llm_text is not None:
@@ -260,12 +261,18 @@ class ChatService:
                 run_streaming(message),
                 chunk_size=chunk_size,
                 chunk_delay_s=chunk_delay_s,
-                extract_final_text=str,
+                extract_final_text=lambda result: _tool_agent_result_to_text(
+                    result,
+                    store=self._store,
+                ),
             ):
                 yield chunk
             return
 
-        text = await runner.run(message)
+        text = _tool_agent_result_to_text(
+            await runner.run(message),
+            store=self._store,
+        )
         async for chunk in iter_text_chunks(
             text,
             chunk_size=chunk_size,
@@ -296,6 +303,12 @@ async def _stream_ephemeral_progress_then_chunks(
             delay_s=chunk_delay_s,
         ):
             yield chunk
+
+
+def _tool_agent_result_to_text(result: Any, *, store: DigestStore | None = None) -> str:
+    if isinstance(result, InterfaceAgentResult):
+        return _interface_result_to_text(result, store=store)
+    return str(result)
 
 
 def _interface_result_to_text(
