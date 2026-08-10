@@ -384,7 +384,7 @@ def test_live_followup_routes_structured_through_router(
     assert len(router.calls) == 1
 
 
-def test_live_followup_maps_digest_to_guidance_path(
+def test_live_followup_maps_digest_to_digest_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -441,8 +441,8 @@ def test_live_followup_maps_digest_to_guidance_path(
         resp = conn.getresponse()
         assert resp.status == 200
         data = json.loads(resp.read().decode())
-        assert data["path"] == "guidance"
-        assert data["text"] == OPENCLAW_GUIDANCE_FALLBACK
+        assert data["path"] == "digest"
+        assert data["text"] == "# Digest body"
         assert data["run_id"] == 9
     finally:
         server.shutdown()

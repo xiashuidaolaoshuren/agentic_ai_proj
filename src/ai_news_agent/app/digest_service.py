@@ -170,6 +170,12 @@ def _interface_result_to_followup_outcome(
             "run_id": result.run_id,
             "path": "structured",
         }
+    if result.kind is InterfaceAgentResultKind.DIGEST:
+        return {
+            "text": result.text,
+            "run_id": result.run_id,
+            "path": "digest",
+        }
     if result.kind in (
         InterfaceAgentResultKind.CONVERSATIONAL,
         InterfaceAgentResultKind.FALLBACK,
