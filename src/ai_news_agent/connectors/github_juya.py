@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
@@ -253,12 +253,13 @@ async def enrich_juya_items_with_markdown(
             continue
 
         enriched.append(
-            replace(
-                item,
-                raw_snippet=cleaned,
-                content_confidence=ConfidenceLevel.HIGH,
-                metadata_completeness=max(item.metadata_completeness, 0.9),
-                tags=[*item.tags, source_tag],
+            item.model_copy(
+                update={
+                    "raw_snippet": cleaned,
+                    "content_confidence": ConfidenceLevel.HIGH,
+                    "metadata_completeness": max(item.metadata_completeness, 0.9),
+                    "tags": [*item.tags, source_tag],
+                }
             )
         )
     return enriched, warnings

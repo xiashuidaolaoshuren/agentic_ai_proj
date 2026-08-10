@@ -96,19 +96,40 @@ def answer_structured_followup(message: str, ctx: FollowupContext) -> str | None
     low = message.strip().lower()
 
     if _mentions_sources(low):
-        return _format_sources(ctx)
+        return format_sources(ctx)
 
     if _mentions_ranking(low):
-        return _format_ranking_pick(ctx)
+        return format_ranking_pick(ctx)
 
     rank = parse_rank_from_message(message)
     if rank is not None:
-        return _format_rank_item(ctx, rank)
+        return format_rank_item(ctx, rank)
 
     if _mentions_caveats(low):
-        return _format_caveats(ctx)
+        return format_caveats(ctx)
 
     return None
+
+
+def is_structured_followup(message: str) -> bool:
+    """Return True when the message matches a structured follow-up intent."""
+    low = message.strip().lower()
+    if not low:
+        return False
+
+    if _mentions_sources(low):
+        return True
+
+    if _mentions_ranking(low):
+        return True
+
+    if parse_rank_from_message(message) is not None:
+        return True
+
+    if _mentions_caveats(low):
+        return True
+
+    return False
 
 
 def handle_openclaw_structured_followup(
@@ -155,7 +176,7 @@ def _mentions_caveats(low: str) -> bool:
     return any(k in low for k in keys)
 
 
-def _format_sources(ctx: FollowupContext) -> str:
+def format_sources(ctx: FollowupContext) -> str:
     if not ctx.digest or not ctx.digest.entries:
         return "No digest entries are available to list sources for."
     lines: list[str] = ["Sources from the latest digest:"]
@@ -164,7 +185,7 @@ def _format_sources(ctx: FollowupContext) -> str:
     return "\n".join(lines)
 
 
-def _format_ranking_pick(ctx: FollowupContext) -> str:
+def format_ranking_pick(ctx: FollowupContext) -> str:
     ranked = ctx.ranked_items
     if not ranked:
         return "No ranking data is available for the latest digest run."
@@ -182,7 +203,7 @@ def _format_ranking_pick(ctx: FollowupContext) -> str:
     )
 
 
-def _format_rank_item(ctx: FollowupContext, rank: int) -> str:
+def format_rank_item(ctx: FollowupContext, rank: int) -> str:
     if ctx.digest is None or not ctx.digest.entries:
         return "No digest entries are available for rank-targeted follow-up."
 
@@ -209,7 +230,7 @@ def _format_digest_entry_detail(entry: DigestEntry, *, rank: int) -> str:
     return "\n".join(lines)
 
 
-def _format_caveats(ctx: FollowupContext) -> str:
+def format_caveats(ctx: FollowupContext) -> str:
     lines: list[str] = []
 
     if ctx.warnings:
@@ -239,6 +260,11 @@ __all__ = [
     "NO_SAVED_DIGEST",
     "OPENCLAW_GUIDANCE_FALLBACK",
     "answer_structured_followup",
+    "format_caveats",
+    "format_rank_item",
+    "format_ranking_pick",
+    "format_sources",
     "handle_openclaw_structured_followup",
+    "is_structured_followup",
     "parse_rank_from_message",
 ]

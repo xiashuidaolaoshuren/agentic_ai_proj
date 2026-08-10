@@ -19,8 +19,6 @@ from ai_news_agent.models import (
     NewsItem,
     RankedItem,
     SourceKind,
-    news_item_from_dict,
-    news_item_to_dict,
     utcnow,
 )
 
@@ -203,8 +201,7 @@ class DigestStore:
         self._insert_news_item(run_id, item)
 
     def _insert_news_item(self, run_id: int, item: NewsItem) -> None:
-        d = news_item_to_dict(item)
-        payload_json = json.dumps(d, ensure_ascii=False)
+        payload_json = json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -402,7 +399,7 @@ class DigestStore:
             ).fetchall()
         out: list[NewsItem] = []
         for r in rows:
-            out.append(news_item_from_dict(json.loads(r["raw_payload_json"])))
+            out.append(NewsItem.model_validate(json.loads(r["raw_payload_json"])))
         return out
 
     def _load_warnings(self, run_id: int) -> list[ConnectorWarning]:
@@ -435,7 +432,7 @@ class DigestStore:
             ).fetchall()
         out: list[RankedItem] = []
         for r in rows:
-            item = news_item_from_dict(json.loads(r["item_json"]))
+            item = NewsItem.model_validate(json.loads(r["item_json"]))
             ri = RankedItem(
                 item=item,
                 score_total=float(r["score_total"]),

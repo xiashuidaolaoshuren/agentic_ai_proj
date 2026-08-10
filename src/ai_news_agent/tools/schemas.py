@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from ai_news_agent.models import _encode_value
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from ai_news_agent.models import Digest
 
 
 class ToolObservationStatus(StrEnum):
@@ -18,43 +20,121 @@ class ToolObservationStatus(StrEnum):
     ERROR = "error"
 
 
-@dataclass
-class ToolObservation:
+class InterfaceAgentResultKind(StrEnum):
+    """Discriminator for terminal interface-agent outcomes (Milestone 4 T9)."""
+
+    DIGEST = "digest"
+    STRUCTURED = "structured"
+    CONVERSATIONAL = "conversational"
+    FALLBACK = "fallback"
+
+
+class InterfaceAgentResult(BaseModel):
+    """Typed terminal outcome from the shared interface tool agent (Milestone 4 T9)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    kind: InterfaceAgentResultKind
+    text: str
+    run_id: int | None = None
+    digest: Digest | None = None
+    fallback_reason: str | None = None
+    progress_lines: list[str] = Field(default_factory=list)
+    correlation_id: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def _fallback_requires_reason(self) -> InterfaceAgentResult:
+        if self.kind == InterfaceAgentResultKind.FALLBACK:
+            reason = self.fallback_reason
+            if reason is None or not reason.strip():
+                raise ValueError("fallback_reason must not be empty when kind is fallback")
+        return self
+
+
+class ToolObservation(BaseModel):
     """LLM-facing envelope for any tool return value."""
+
+    model_config = ConfigDict(extra="ignore")
 
     status: ToolObservationStatus
     summary: str
-    data: dict[str, Any] = field(default_factory=dict)
-    caveats: list[str] = field(default_factory=list)
+    data: dict[str, Any] = Field(default_factory=dict)
+    caveats: list[str] = Field(default_factory=list)
 
-    def __post_init__(self) -> None:
-        if isinstance(self.status, str) and not isinstance(self.status, ToolObservationStatus):
-            try:
-                self.status = ToolObservationStatus(self.status)
-            except ValueError as exc:
-                raise ValueError(f"Invalid status: {self.status!r}") from exc
-        if not self.summary.strip():
+    @field_validator("summary")
+    @classmethod
+    def _summary_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
             raise ValueError("summary must not be empty")
+        return value
 
 
-@dataclass
-class SearchQueryInput:
+class SearchQueryInput(BaseModel):
     """Shared connector search arguments for Milestone 2 source tools."""
 
-    query: str
-    max_results: int = 5
+    model_config = ConfigDict(extra="ignore")
 
-    def __post_init__(self) -> None:
-        if not self.query.strip():
+    query: str
+    max_results: int = Field(default=5, ge=1)
+
+    @field_validator("query")
+    @classmethod
+    def _query_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
             raise ValueError("query must not be empty")
-        if self.max_results < 1:
-            raise ValueError("max_results must be at least 1")
+        return value
+
+
+class RankOrSourceArgs(BaseModel):
+    """LLM-facing args for rank/source_id follow-up tools."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rank: int | None = Field(default=None, ge=1)
+    source_id: str | None = None
+
+
+class SearchArgs(BaseModel):
+    """LLM-facing args for connector search tools."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    query: str
+    max_results: int = Field(default=5, ge=1)
+    timeframe: str | None = None
+
+
+class DigestItemRankArgs(BaseModel):
+    """LLM-facing args for structured digest item-detail by rank (Milestone 4 T9)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rank: int = Field(ge=1)
 
 
 def encode_tool_value(value: Any) -> Any:
-    """Return a JSON-safe value using the same rules as domain model encoding."""
-    return _encode_value(value)
+    """Return a JSON-safe value using Pydantic JSON-mode dumps where applicable."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, StrEnum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {k: encode_tool_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [encode_tool_value(v) for v in value]
+    raise TypeError(f"Unsupported type for JSON-like encoding: {type(value)!r}")
 
 
 def tool_observation_to_dict(observation: ToolObservation) -> dict[str, Any]:
-    return encode_tool_value(observation)  # type: ignore[return-value]
+    return observation.model_dump(mode="json")

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from ai_news_agent.models import (
     ConfidenceLevel,
+    Digest,
     FollowUpAction,
     NewsItem,
     RankedItem,
@@ -401,7 +402,6 @@ def test_missing_raw_snippet_triggers_metadata_only_caveat() -> None:
 
 
 def test_digest_round_trips_through_models_codec() -> None:
-    from ai_news_agent.models import digest_from_dict, digest_to_dict
     from ai_news_agent.summarizer import summarize_ranked_items
 
     ni = NewsItem(
@@ -420,7 +420,7 @@ def test_digest_round_trips_through_models_codec() -> None:
         timeframe="week",
         model=FakeChatModel(),
     )
-    d1 = digest_from_dict(digest_to_dict(d0))
+    d1 = Digest.model_validate(d0.model_dump(mode="json"))
     assert len(d1.entries) == 1
     assert d1.entries[0].summary == d0.entries[0].summary
 

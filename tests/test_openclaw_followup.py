@@ -17,6 +17,7 @@ from ai_news_agent.adapters.openclaw_client import (
     followup_main,
     request_followup_text,
 )
+from ai_news_agent.app import digest_service
 from ai_news_agent.app.digest_service import DigestServiceServer, build_followup_request_payload
 from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.followup_structured import (
@@ -35,6 +36,43 @@ from ai_news_agent.models import (
     SourceKind,
 )
 from ai_news_agent.storage import DigestStore
+from ai_news_agent.tools.schemas import (
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+)
+
+
+class _FakeInterfaceRouter:
+    def __init__(
+        self,
+        *,
+        result: InterfaceAgentResult | None = None,
+    ) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._result = result or InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="unused",
+        )
+
+    async def route(
+        self,
+        *,
+        message: str,
+        digest_request=None,
+        session_connector_names: list[str] | None = None,
+        correlation_id: str | None = None,
+        allow_digest: bool = True,
+    ) -> InterfaceAgentResult:
+        self.calls.append(
+            {
+                "message": message,
+                "digest_request": digest_request,
+                "session_connector_names": session_connector_names,
+                "correlation_id": correlation_id,
+                "allow_digest": allow_digest,
+            }
+        )
+        return self._result
 
 
 def _seed_digest_store(store: DigestStore) -> int:
@@ -281,6 +319,284 @@ def test_build_followup_request_payload() -> None:
         "--message",
         "show sources",
     ]
+
+
+@pytest.fixture
+def live_followup_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> DigestServiceServer:
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: object())
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: object(),
+        raising=False,
+    )
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.STRUCTURED,
+            text="Sources: https://example.com/r1",
+            run_id=3,
+        )
+    )
+    server = DigestServiceServer(
+        host="127.0.0.1",
+        port=0,
+        db_path=tmp_path / "live-followup.db",
+        fake=False,
+        interface_router=router,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while server.port is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.port is not None
+    yield server
+    server.shutdown()
+
+
+def test_live_followup_routes_structured_through_router(
+    live_followup_server: DigestServiceServer,
+) -> None:
+    router = live_followup_server._runtime._interface_router
+    assert isinstance(router, _FakeInterfaceRouter)
+
+    conn = HTTPConnection("127.0.0.1", live_followup_server.port, timeout=5)
+    conn.request(
+        "POST",
+        "/followup",
+        body=json.dumps({"message": "show sources", "correlation_id": "f-structured"}),
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read().decode())
+    assert data["path"] == "structured"
+    assert data["text"] == "Sources: https://example.com/r1"
+    assert data["run_id"] == 3
+    assert data["correlation_id"] == "f-structured"
+    assert len(router.calls) == 1
+
+
+def test_live_followup_maps_digest_to_guidance_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = DigestStore(tmp_path / "digest-followup.db")
+    store.init_schema()
+    _seed_digest_store(store)
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="# Digest body",
+            run_id=9,
+        )
+    )
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: object())
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: router,
+        raising=False,
+    )
+    server = DigestServiceServer(
+        host="127.0.0.1",
+        port=0,
+        db_path=tmp_path / "digest-followup-svc.db",
+        fake=False,
+        interface_router=router,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while server.port is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.port is not None
+    try:
+        conn = HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.request(
+            "POST",
+            "/followup",
+            body=json.dumps({"message": "generate a digest about AI"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read().decode())
+        assert data["path"] == "guidance"
+        assert data["text"] == OPENCLAW_GUIDANCE_FALLBACK
+        assert data["run_id"] == 9
+    finally:
+        server.shutdown()
+
+
+def test_live_followup_maps_conversational_to_guidance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="agent answer",
+            run_id=5,
+        )
+    )
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: object())
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: router,
+        raising=False,
+    )
+    server = DigestServiceServer(
+        host="127.0.0.1",
+        port=0,
+        db_path=tmp_path / "guidance.db",
+        fake=False,
+        interface_router=router,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while server.port is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.port is not None
+    try:
+        conn = HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.request(
+            "POST",
+            "/followup",
+            body=json.dumps({"message": "why does this matter?"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read().decode())
+        assert data["path"] == "guidance"
+        assert data["text"] == OPENCLAW_GUIDANCE_FALLBACK
+        assert data["run_id"] == 5
+    finally:
+        server.shutdown()
+
+
+def test_live_followup_maps_no_saved_digest_to_no_digest_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text=NO_SAVED_DIGEST,
+        )
+    )
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: object())
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        lambda **kw: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        lambda **kwargs: router,
+        raising=False,
+    )
+    server = DigestServiceServer(
+        host="127.0.0.1",
+        port=0,
+        db_path=tmp_path / "no-digest-live.db",
+        fake=False,
+        interface_router=router,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while server.port is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.port is not None
+    try:
+        conn = HTTPConnection("127.0.0.1", server.port, timeout=5)
+        conn.request(
+            "POST",
+            "/followup",
+            body=json.dumps({"message": "show sources"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read().decode())
+        assert data["path"] == "no_digest"
+        assert data["text"] == NO_SAVED_DIGEST
+        assert data["run_id"] is None
+    finally:
+        server.shutdown()
+
+
+def test_live_followup_passes_correlation_id_to_router(
+    live_followup_server: DigestServiceServer,
+) -> None:
+    router = live_followup_server._runtime._interface_router
+    assert isinstance(router, _FakeInterfaceRouter)
+
+    conn = HTTPConnection("127.0.0.1", live_followup_server.port, timeout=5)
+    conn.request(
+        "POST",
+        "/followup",
+        body=json.dumps({"message": "show sources", "correlation_id": "f-9"}),
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    data = json.loads(resp.read().decode())
+    assert data["correlation_id"] == "f-9"
+    assert router.calls[-1]["correlation_id"] == "f-9"
+
+
+def test_digest_service_runtime_fake_mode_has_no_interface_router(tmp_path: Path) -> None:
+    runtime = digest_service.DigestServiceRuntime(
+        fake=True,
+        db_path=tmp_path / "fake-runtime.db",
+    )
+    assert runtime._interface_router is None
 
 
 @pytest.fixture

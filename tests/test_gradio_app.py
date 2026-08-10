@@ -21,6 +21,7 @@ from ai_news_agent.models import (
     SourceKind,
 )
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 from ai_news_agent.storage import DigestStore
 
 
@@ -193,25 +194,22 @@ def test_create_app_chat_interface_fn_is_async_generator(tmp_path) -> None:
     assert demo.mode == "blocks"
 
 
-def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
-    service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
+def test_build_service_fake_mode_passes_no_interface_router(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "fake-interface-router.db")
 
+    assert getattr(service, "_interface_router", None) is None
     assert getattr(service, "_tool_agent_runner", None) is not None
 
 
-def test_build_service_live_mode_wires_tool_registry_and_agent(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    registry_calls: list[dict] = []
-    agent_calls: list[dict] = []
-    fake_registry = MagicMock(name="ToolRegistry")
-    fake_runner = MagicMock(name="ToolAgentRunner")
+def test_build_service_live_mode_wires_interface_tool_router(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router_calls: list[dict] = []
+    fake_router = MagicMock(name="InterfaceToolRouter")
 
-    def spy_build_tool_registry(**kwargs):
-        registry_calls.append(kwargs)
-        return fake_registry
-
-    def spy_build_tool_agent_runner(**kwargs):
-        agent_calls.append(kwargs)
-        return fake_runner
+    def spy_build_interface_tool_router(**kwargs):
+        router_calls.append(kwargs)
+        return fake_router
 
     monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
     monkeypatch.setattr(
@@ -228,20 +226,177 @@ def test_build_service_live_mode_wires_tool_registry_and_agent(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         gradio_app,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+    registry_called = False
+    agent_called = False
+
+    def fail_build_tool_registry(**_kwargs):
+        nonlocal registry_called
+        registry_called = True
+        raise AssertionError("build_tool_registry should not run at service construction")
+
+    def fail_build_tool_agent_runner(**_kwargs):
+        nonlocal agent_called
+        agent_called = True
+        raise AssertionError("build_tool_agent_runner should not run at service construction")
+
+    monkeypatch.setattr(
+        gradio_app,
         "build_tool_registry",
-        spy_build_tool_registry,
+        fail_build_tool_registry,
         raising=False,
     )
     monkeypatch.setattr(
         gradio_app,
         "build_tool_agent_runner",
-        spy_build_tool_agent_runner,
+        fail_build_tool_agent_runner,
         raising=False,
     )
 
-    service = _build_service(fake=False, db_path=tmp_path / "live-tool-agent.db")
+    service = _build_service(fake=False, db_path=tmp_path / "live-interface-router.db")
 
-    assert len(registry_calls) == 1
-    assert len(agent_calls) == 1
-    assert agent_calls[0]["registry"] is fake_registry
-    assert getattr(service, "_tool_agent_runner", None) is fake_runner
+    assert len(router_calls) == 1
+    assert router_calls[0]["interface_name"] == "gradio"
+    assert router_calls[0]["tool_model"] is not None
+    assert router_calls[0]["digest_model"] is not None
+    assert callable(router_calls[0]["build_connectors_fn"])
+    assert callable(router_calls[0]["workflow_runner"])
+    assert callable(router_calls[0]["streaming_workflow_runner"])
+    assert getattr(service, "_interface_router", None) is fake_router
+    assert not registry_called
+    assert not agent_called
+
+
+def test_build_service_live_closures_respect_connector_names(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router_calls: list[dict] = []
+    connector_name_calls: list[list[str]] = []
+    original_build_connectors = gradio_app.build_connectors
+
+    def recording_build_connectors(*, fake: bool, names: list[str]):
+        connector_name_calls.append(list(names))
+        return original_build_connectors(fake=fake, names=names)
+
+    async def fake_run_digest_async(
+        req: DigestRequest,
+        *,
+        store: DigestStore,
+        connectors,
+        model,
+        on_stage=None,
+    ) -> DigestResult:
+        del store, connectors, model, on_stage
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    async def fake_run_digest_streaming_async(
+        req: DigestRequest,
+        *,
+        store: DigestStore,
+        connectors,
+        model,
+        on_stage=None,
+    ):
+        del store, connectors, model, on_stage
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        yield "", True, DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    def spy_build_interface_tool_router(**kwargs):
+        router_calls.append(kwargs)
+        return MagicMock(name="InterfaceToolRouter")
+
+    monkeypatch.setattr(gradio_app, "build_connectors", recording_build_connectors)
+    monkeypatch.setattr(gradio_app, "_run_digest_async", fake_run_digest_async)
+    monkeypatch.setattr(
+        gradio_app,
+        "_run_digest_streaming_async",
+        fake_run_digest_streaming_async,
+    )
+    monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_connector_factory",
+        lambda **kw: MagicMock(name="ConnectorFactory"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+    monkeypatch.setattr(gradio_app, "load_local_env", lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(
+        gradio_app,
+        "configure_bilibili_network_from_env",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+
+    _build_service(fake=False, db_path=tmp_path / "live-connector-names.db")
+
+    assert len(router_calls) == 1
+    build_connectors_fn = router_calls[0]["build_connectors_fn"]
+    workflow_runner = router_calls[0]["workflow_runner"]
+    streaming_workflow_runner = router_calls[0]["streaming_workflow_runner"]
+
+    connector_name_calls.clear()
+    build_connectors_fn(DigestRequest(connector_names=["github"]))
+    assert connector_name_calls[-1] == ["github"]
+
+    connector_name_calls.clear()
+    asyncio.run(workflow_runner(DigestRequest(connector_names=["bilibili"])))
+    assert connector_name_calls[-1] == ["bilibili"]
+
+    connector_name_calls.clear()
+
+    async def consume_stream() -> None:
+        async for _ in streaming_workflow_runner(
+            DigestRequest(connector_names=["github"])
+        ):
+            pass
+
+    asyncio.run(consume_stream())
+    assert connector_name_calls[-1] == ["github"]
+
+    connector_name_calls.clear()
+    build_connectors_fn(DigestRequest())
+    assert connector_name_calls[-1] == list(DEFAULT_SOURCE_NAMES)
+
+
+def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
+    service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
+
+    assert getattr(service, "_tool_agent_runner", None) is not None

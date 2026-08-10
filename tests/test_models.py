@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import BaseModel
 
 from ai_news_agent import topics
 from ai_news_agent.models import (
@@ -16,15 +17,12 @@ from ai_news_agent.models import (
     NewsItem,
     RankedItem,
     SourceKind,
-    connector_warning_from_dict,
-    connector_warning_to_dict,
-    digest_from_dict,
-    digest_to_dict,
-    news_item_from_dict,
-    news_item_to_dict,
-    ranked_item_from_dict,
-    ranked_item_to_dict,
 )
+
+
+def test_domain_models_are_pydantic_basemodels() -> None:
+    for cls in (NewsItem, RankedItem, DigestEntry, Digest, ConnectorWarning):
+        assert issubclass(cls, BaseModel), f"{cls.__name__} should be a Pydantic BaseModel"
 
 
 def test_default_topics_match_design_taxonomy() -> None:
@@ -52,6 +50,52 @@ def test_build_queries_respects_max_terms() -> None:
 def test_build_queries_appends_timeframe_when_present() -> None:
     q = topics.build_queries(["RAG"], "last_7_days", 5)
     assert q == ["RAG (last_7_days)"]
+
+
+def test_news_item_model_validate_coalesces_none_lists_and_collected_at() -> None:
+    item = NewsItem.model_validate(
+        {
+            "source": "github",
+            "source_id": "1",
+            "url": "https://x",
+            "title": "t",
+            "tags": None,
+            "topic_matches": None,
+            "collected_at": None,
+        }
+    )
+    assert item.tags == []
+    assert item.topic_matches == []
+    assert isinstance(item.collected_at, datetime)
+
+
+def test_ranked_item_model_validate_coalesces_none_score_breakdown() -> None:
+    collected = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
+    ranked = RankedItem.model_validate(
+        {
+            "item": {
+                "source": "github",
+                "source_id": "1",
+                "url": "https://x",
+                "title": "t",
+                "collected_at": collected.isoformat(),
+            },
+            "score_total": 1.0,
+            "score_breakdown": None,
+        }
+    )
+    assert ranked.score_breakdown == {}
+
+
+def test_digest_model_validate_coalesces_none_entries_and_generated_at() -> None:
+    digest = Digest.model_validate(
+        {
+            "generated_at": None,
+            "entries": None,
+        }
+    )
+    assert digest.entries == []
+    assert isinstance(digest.generated_at, datetime)
 
 
 def test_news_item_required_fields_and_defaults() -> None:
@@ -131,8 +175,8 @@ def test_connector_warning_optional_detail() -> None:
 
 def test_connector_warning_dict_roundtrip() -> None:
     w = ConnectorWarning(connector="bilibili", code="x", message="m", detail="d")
-    d = connector_warning_to_dict(w)
-    assert connector_warning_from_dict(d) == w
+    d = w.model_dump(mode="json")
+    assert ConnectorWarning.model_validate(d) == w
 
 
 def test_news_item_and_ranked_item_dict_roundtrip() -> None:
@@ -154,8 +198,8 @@ def test_news_item_and_ranked_item_dict_roundtrip() -> None:
         topic_matches=["AI agents"],
         content_confidence=ConfidenceLevel.MEDIUM,
     )
-    d = news_item_to_dict(item)
-    item2 = news_item_from_dict(d)
+    d = item.model_dump(mode="json")
+    item2 = NewsItem.model_validate(d)
     assert item2 == item
 
     ranked = RankedItem(
@@ -165,8 +209,8 @@ def test_news_item_and_ranked_item_dict_roundtrip() -> None:
         selected=False,
         selection_reason="dup",
     )
-    rd = ranked_item_to_dict(ranked)
-    ranked2 = ranked_item_from_dict(rd)
+    rd = ranked.model_dump(mode="json")
+    ranked2 = RankedItem.model_validate(rd)
     assert ranked2 == ranked
 
 
@@ -189,8 +233,8 @@ def test_digest_dict_roundtrip() -> None:
         ],
         topics=["multimodal AI"],
     )
-    dd = digest_to_dict(digest)
-    digest2 = digest_from_dict(dd)
+    dd = digest.model_dump(mode="json")
+    digest2 = Digest.model_validate(dd)
     assert digest2 == digest
 
 
@@ -212,4 +256,4 @@ def test_invalid_enum_in_deserialize_raises() -> None:
         "content_confidence": None,
     }
     with pytest.raises(ValueError):
-        news_item_from_dict(d)
+        NewsItem.model_validate(d)

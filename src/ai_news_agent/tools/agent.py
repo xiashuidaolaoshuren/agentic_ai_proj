@@ -11,11 +11,21 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from ai_news_agent.logging_setup import get_logger
 from ai_news_agent.tools.registry import ToolRegistry
-from ai_news_agent.tools.schemas import ToolObservation, tool_observation_to_dict
+from ai_news_agent.tools.schemas import (
+    InterfaceAgentResult,
+    InterfaceAgentResultKind,
+    ToolObservation,
+    tool_observation_to_dict,
+)
 
 logger = get_logger("tool_agent")
 
 _DEFAULT_FALLBACK = "Unable to complete the answer within the allowed steps."
+
+_TERMINAL_TOOL_KINDS = {
+    InterfaceAgentResultKind.DIGEST,
+    InterfaceAgentResultKind.STRUCTURED,
+}
 
 
 def _append_progress_lines(
@@ -30,6 +40,7 @@ def _append_progress_lines(
 class ToolAgentState(MessagesState):
     iterations: int
     progress_lines: Annotated[list[str], _append_progress_lines]
+    terminal_result: InterfaceAgentResult | None
 
 
 @runtime_checkable
@@ -51,13 +62,13 @@ class ToolAgentRunner:
         self._graph = graph
         self._fallback_text = fallback_text
 
-    async def run(self, question: str) -> str:
+    async def run(self, question: str) -> InterfaceAgentResult:
         result = await self._graph.ainvoke(self._initial_state(question))
         return self._final_answer_from_state(result)
 
     async def run_streaming(
         self, question: str
-    ) -> AsyncIterator[tuple[str, bool, str | None]]:
+    ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
         """Yield tool progress lines, then a final done event with the answer."""
         final_state: dict[str, Any] | None = None
         async for mode, chunk in self._graph.astream(
@@ -74,7 +85,11 @@ class ToolAgentRunner:
         answer = (
             self._final_answer_from_state(final_state)
             if final_state is not None
-            else self._fallback_text
+            else InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.FALLBACK,
+                text=self._fallback_text,
+                fallback_reason="iteration_cap_exceeded",
+            )
         )
         yield "", True, answer
 
@@ -85,25 +100,32 @@ class ToolAgentRunner:
             "progress_lines": [],
         }
 
-    def _final_answer_from_state(self, state: dict[str, Any]) -> str:
+    def _final_answer_from_state(self, state: dict[str, Any]) -> InterfaceAgentResult:
+        progress_lines = list(state.get("progress_lines") or [])
+        terminal_result = state.get("terminal_result")
+        if terminal_result is not None:
+            return terminal_result.model_copy(update={"progress_lines": progress_lines})
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.content:
-            return str(last.content)
-        return self._fallback_text
-
-
-def _registry_tool_schemas(registry: ToolRegistry) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.args_schema,
-            },
-        }
-        for tool in registry.all_tools()
-    ]
+            iterations = state.get("iterations", 0)
+            if iterations > 1:
+                return InterfaceAgentResult(
+                    kind=InterfaceAgentResultKind.CONVERSATIONAL,
+                    text=str(last.content),
+                    progress_lines=progress_lines,
+                )
+            return InterfaceAgentResult(
+                kind=InterfaceAgentResultKind.FALLBACK,
+                text=self._fallback_text,
+                fallback_reason="no_first_tool_call",
+                progress_lines=progress_lines,
+            )
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.FALLBACK,
+            text=self._fallback_text,
+            fallback_reason="iteration_cap_exceeded",
+            progress_lines=progress_lines,
+        )
 
 
 def _tool_call_name(tool_call: Any) -> str:
@@ -138,6 +160,10 @@ def _format_tool_call_done(name: str, observation: ToolObservation) -> str:
     return f"Done {name}: {observation.summary}"
 
 
+def _format_terminal_tool_call_done(name: str, result: InterfaceAgentResult) -> str:
+    return f"Done {name}: {result.text}"
+
+
 def _format_tool_call_failed(name: str, exc: BaseException) -> str:
     return f"Tool failed {name}: {exc}"
 
@@ -169,6 +195,7 @@ def _build_tool_agent_graph(
 
         tool_messages: list[ToolMessage] = []
         progress_lines: list[str] = []
+        terminal_result: InterfaceAgentResult | None = None
         for tool_call in ai_message.tool_calls:
             name = _tool_call_name(tool_call)
             args = _tool_call_args(tool_call)
@@ -177,15 +204,41 @@ def _build_tool_agent_graph(
             progress_lines.append(_format_tool_call_start(name))
             try:
                 tool = registry.get_tool(name)
-                observation = await tool.execute(**args)
-                if not isinstance(observation, ToolObservation):
+                result = await tool.ainvoke(args)
+                if (
+                    isinstance(result, InterfaceAgentResult)
+                    and result.kind in _TERMINAL_TOOL_KINDS
+                ):
+                    progress_lines.append(_format_terminal_tool_call_done(name, result))
+                    terminal_result = result
+                    logger.info(
+                        "tool_call end name=%r terminal_kind=%r",
+                        name,
+                        result.kind,
+                    )
+                    continue
+                if isinstance(result, InterfaceAgentResult):
+                    violation = RuntimeError(
+                        f"terminal kind {result.kind.value} not allowed from tool"
+                    )
+                    logger.error("tool_call failed name=%r error=%r", name, violation)
+                    payload = {"error": str(violation)}
+                    progress_lines.append(_format_tool_call_failed(name, violation))
+                    tool_messages.append(
+                        ToolMessage(
+                            content=json.dumps(payload, ensure_ascii=False),
+                            tool_call_id=tool_call_id,
+                        )
+                    )
+                    continue
+                if not isinstance(result, ToolObservation):
                     raise TypeError(f"Tool {name!r} did not return ToolObservation")
-                payload = tool_observation_to_dict(observation)
-                progress_lines.append(_format_tool_call_done(name, observation))
+                payload = tool_observation_to_dict(result)
+                progress_lines.append(_format_tool_call_done(name, result))
                 logger.info(
                     "tool_call end name=%r status=%r",
                     name,
-                    observation.status,
+                    result.status,
                 )
             except Exception as exc:
                 logger.error("tool_call failed name=%r error=%r", name, exc)
@@ -197,7 +250,18 @@ def _build_tool_agent_graph(
                     tool_call_id=tool_call_id,
                 )
             )
-        return {"messages": tool_messages, "progress_lines": progress_lines}
+        out: dict[str, Any] = {
+            "messages": tool_messages,
+            "progress_lines": progress_lines,
+        }
+        if terminal_result is not None:
+            out["terminal_result"] = terminal_result
+        return out
+
+    def route_after_tool_node(state: ToolAgentState) -> str:
+        if state.get("terminal_result") is not None:
+            return END
+        return "agent_node"
 
     def route_after_agent(state: ToolAgentState) -> str:
         if state.get("iterations", 0) >= max_iterations:
@@ -219,7 +283,14 @@ def _build_tool_agent_graph(
             END: END,
         },
     )
-    builder.add_edge("tool_node", "agent_node")
+    builder.add_conditional_edges(
+        "tool_node",
+        route_after_tool_node,
+        {
+            "agent_node": "agent_node",
+            END: END,
+        },
+    )
     return builder.compile()
 
 
@@ -231,8 +302,7 @@ def build_tool_agent_runner(
     fallback_text: str = _DEFAULT_FALLBACK,
 ) -> ToolAgentRunner:
     """Construct a bounded tool agent over the given registry and model."""
-    tool_schemas = _registry_tool_schemas(registry)
-    bound_model = model.bind_tools(tool_schemas)
+    bound_model = model.bind_tools(registry.all_tools())
     graph = _build_tool_agent_graph(
         registry=registry,
         bound_model=bound_model,
