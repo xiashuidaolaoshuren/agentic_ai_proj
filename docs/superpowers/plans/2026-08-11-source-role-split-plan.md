@@ -152,7 +152,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T1 — Establish Juya as a first-class connector
 
-- **Do:** Add `SourceKind.JUYA`, move Juya RSS/markdown behavior from GitHub ownership into a dedicated `JuyaConnector`, and ensure collected bulletin rows use connector `"juya"` and `SourceKind.JUYA`. Update Juya follow-up detection to prefer that source kind while retaining tag/URL compatibility for historical rows. Delete/rename the GitHub-named helper module and tests once callers move. Remove Juya delegation from `GitHubConnector`; its existing normal repository URL/org behavior remains.
+- [ ] **Do:** Add `SourceKind.JUYA`, move Juya RSS/markdown behavior from GitHub ownership into a dedicated `JuyaConnector`, and ensure collected bulletin rows use connector `"juya"` and `SourceKind.JUYA`. Update Juya follow-up detection to prefer that source kind while retaining tag/URL compatibility for historical rows. Delete/rename the GitHub-named helper module and tests once callers move. Remove Juya delegation from `GitHubConnector`; its existing normal repository URL/org behavior remains.
 - **TDD suitable:** yes — new connector API, source identity, and regression-sensitive network/warning behavior have clear mocked inputs and outputs.
 - **Verification:** `uv run pytest tests/test_models.py tests/test_connectors_juya.py tests/test_connectors_github.py tests/test_sources.py tests/test_juya_followup.py tests/test_juya_editorial.py -q`
 - **Dependencies:** none
@@ -160,7 +160,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T2 — Register Juya and make the runtime default deterministic
 
-- **Do:** Add real/fake Juya factories and `"juya"` to the canonical registry; make its ordered default source set Juya-only. Ensure CLI, direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than treating omitted source selection as “all injected connectors.”
+- [ ] **Do:** Add real/fake Juya factories and `"juya"` to the canonical registry; make its ordered default source set Juya-only. Ensure CLI, direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than treating omitted source selection as “all injected connectors.”
 - **TDD suitable:** yes — registry/default selection and fake end-to-end behavior are deterministic contracts.
 - **Verification:** `uv run pytest tests/test_sources.py tests/test_cli.py tests/test_workflow.py tests/test_mvp_smoke.py -q`
 - **Dependencies:** T1
@@ -168,7 +168,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T3 — Implement deterministic source intent and target selection
 
-- **Do:** Give `DigestRequest`/`ConnectorRequest` a Juya target representation and carry it through parsing. Implement the approved selection precedence consistently in chat/Gradio, CLI, and OpenClaw: bare request → Juya; explicit source list, clear GitHub trending-repo/Bilibili intent, or platform target → implied/named sources; platform cue replaces Juya unless Juya is also selected. Accept only `daily.juya.uk` as a Juya URL and reject `github.com/jujuyaya/juya-ai-daily` with actionable website guidance. Preserve source-selector conflict validation and record a primary source for mixed-digest section order.
+- [ ] **Do:** Give `DigestRequest`/`ConnectorRequest` a Juya target representation and carry it through parsing. Implement the approved selection precedence consistently in chat/Gradio, CLI, and OpenClaw: bare request → Juya; explicit source list, clear GitHub trending-repo/Bilibili intent, or platform target → implied/named sources; platform cue replaces Juya unless Juya is also selected. Accept only `daily.juya.uk` as a Juya URL and reject `github.com/jujuyaya/juya-ai-daily` with actionable website guidance. Preserve source-selector conflict validation and record a primary source for mixed-digest section order.
 - **TDD suitable:** yes — parser and normalization behavior are deterministic public inputs/outputs, including errors.
 - **Verification:** `uv run pytest tests/test_intent.py tests/test_workflow.py tests/test_cli.py tests/test_openclaw_adapter.py tests/test_openclaw_targeted.py -q`
 - **Dependencies:** T2
@@ -176,7 +176,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T4 — Re-purpose GitHub collection as a transparent trending-repo signal
 
-- **Do:** Keep GitHub manual repo/org collection available as opt-in ecosystem targeting, but change topic discovery and ranking inputs to prioritize repositories by the documented stars-and-recent-activity momentum heuristic. Keep README text as evidence only, preserve warning/error handling, and expose inspectable ranking factors without claiming historical star velocity.
+- [ ] **Do:** Keep GitHub manual repo/org collection available as opt-in ecosystem targeting, but change topic discovery and ranking inputs to prioritize repositories by the documented stars-and-recent-activity momentum heuristic. Keep README text as evidence only, preserve warning/error handling, and expose inspectable ranking factors without claiming historical star velocity.
 - **TDD suitable:** yes — query construction, candidate ordering/metadata, and score evidence are deterministic under mocked GitHub payloads.
 - **Verification:** `uv run pytest tests/test_connectors_github.py tests/test_ranking.py -q`
 - **Dependencies:** T1
@@ -184,7 +184,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T5 — Add kind-aware ranking and source-section digest presentation
 
-- **Do:** Apply source-kind-aware score factors for Juya issues, GitHub trending repos, and Bilibili videos while retaining shared dedupe and the newest-in-window Bilibili guarantee. Keep `top_n` as the existing overall cap (no source quotas). For an intentionally mixed digest, order selected entries and render them in source sections: primary intent first, otherwise Juya → GitHub → Bilibili, omitting empty sections. Keep one-source default Markdown/text/editorial output stable except for correct Juya labeling.
+- [ ] **Do:** Apply source-kind-aware score factors for Juya issues, GitHub trending repos, and Bilibili videos while retaining shared dedupe and the newest-in-window Bilibili guarantee. Keep `top_n` as the existing overall cap (no source quotas). For an intentionally mixed digest, order selected entries and render them in source sections: primary intent first, otherwise Juya → GitHub → Bilibili, omitting empty sections. Keep one-source default Markdown/text/editorial output stable except for correct Juya labeling.
 - **TDD suitable:** yes — scoring evidence, ordering, and rendered section structure have deterministic contracts.
 - **Verification:** `uv run pytest tests/test_ranking.py tests/test_summarizer.py tests/test_rendering.py tests/test_workflow.py -q`
 - **Dependencies:** T1, T3, T4
@@ -192,7 +192,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T6 — Expose Juya through connector tools and shared live interfaces
 
-- **Do:** Add a pure `search_juya_ai_news` wrapper and register it with injected Juya factories. Thread the factory/default source set through the interface router, Gradio, and OpenClaw runtime so all live and fake entrypoints use the same source roles. Update Gradio source toggles, examples, and user-facing validation for Juya; retain the existing tool-loop, streaming, HTTP, and follow-up contracts.
+- [ ] **Do:** Add a pure `search_juya_ai_news` wrapper and register it with injected Juya factories. Thread the factory/default source set through the interface router, Gradio, and OpenClaw runtime so all live and fake entrypoints use the same source roles. Update Gradio source toggles, examples, and user-facing validation for Juya; retain the existing tool-loop, streaming, HTTP, and follow-up contracts.
 - **TDD suitable:** yes — tool delegation/JSON output, registry dependencies, and interface request wiring are testable contracts.
 - **Verification:** `uv run pytest tests/test_tools_connectors.py tests/test_tools_registry.py tests/test_interface_router.py tests/test_gradio_app.py tests/test_digest_service.py tests/test_digest_service_parity.py tests/test_mvp_smoke.py -q`
 - **Dependencies:** T2, T3, T5
@@ -200,7 +200,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T7 — Update usage and benchmark documentation
 
-- **Do:** Replace obsolete GitHub/Bilibili-default and Juya GitHub-alias claims in user-facing commands, source lists, examples, and baseline notes. Document Juya-only bare defaults, explicit/mixed source options, website-only Juya targeting, the expected legacy-alias error, and the difference between current GitHub momentum heuristic and true velocity.
+- [ ] **Do:** Replace obsolete GitHub/Bilibili-default and Juya GitHub-alias claims in user-facing commands, source lists, examples, and baseline notes. Document Juya-only bare defaults, explicit/mixed source options, website-only Juya targeting, the expected legacy-alias error, and the difference between current GitHub momentum heuristic and true velocity.
 - **TDD suitable:** no — static documentation only; no runtime behavior.
 - **Verification:** review `git diff --check`; run every changed fake CLI command where practical; confirm no repository documentation still presents `jujuyaya/juya-ai-daily` as a valid Juya command.
 - **Dependencies:** T2, T3, T4, T5, T6
@@ -208,7 +208,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T8 — Run milestone-level regression and acceptance checks
 
-- **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
+- [ ] **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
 - **TDD suitable:** no — verification-only integration pass; production behavior was already driven test-first in T1–T6.
 - **Verification:** `uv run pytest -q`; fake CLI bare digest; fake CLI explicit `--sources github,bilibili`; fake OpenClaw/HTTP bare request; targeted `https://daily.juya.uk/`; legacy URL rejection; a mixed-source render with intent-first section order.
 - **Dependencies:** T1, T2, T3, T4, T5, T6, T7
