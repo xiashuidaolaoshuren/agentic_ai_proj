@@ -2,20 +2,53 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from ai_news_agent.models import SourceKind
+from ai_news_agent.connectors.juya import JuyaConnector
 from ai_news_agent.sources import (
     ALLOWED_SOURCES,
     DEFAULT_SOURCE_NAMES,
+    FakeJuyaConnector,
     build_connector_factory,
     build_connectors,
     normalize_source_names,
     parse_sources_csv,
+    resolve_connector_names,
 )
 
 
-def test_default_source_names_match_allowed_registry() -> None:
-    assert set(DEFAULT_SOURCE_NAMES) == set(ALLOWED_SOURCES)
+def test_default_sources_are_juya_only() -> None:
+    assert DEFAULT_SOURCE_NAMES == ("juya",)
+    assert "juya" in ALLOWED_SOURCES
+    assert set(DEFAULT_SOURCE_NAMES) <= ALLOWED_SOURCES
+
+
+def test_fake_juya_connector() -> None:
+    connector = FakeJuyaConnector()
+    assert connector.name() == "juya"
+
+    async def _collect() -> None:
+        result = await connector.collect(None)  # noqa: ARG002
+        assert len(result.items) == 1
+        assert result.items[0].source is SourceKind.JUYA
+
+    asyncio.run(_collect())
+
+
+def test_build_connectors_includes_juya() -> None:
+    fake_connectors = build_connectors(fake=True, names=["juya"])
+    assert fake_connectors[0].name() == "juya"
+
+    real_connectors = build_connectors(fake=False, names=["juya"])
+    assert isinstance(real_connectors[0], JuyaConnector)
+
+
+def test_resolve_connector_names() -> None:
+    assert resolve_connector_names(None) == ["juya"]
+    assert resolve_connector_names(["github", "bilibili"]) == ["github", "bilibili"]
 
 
 def test_parse_sources_csv_normalizes_case_and_whitespace() -> None:

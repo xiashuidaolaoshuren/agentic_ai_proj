@@ -19,6 +19,7 @@ from ai_news_agent.app.digest_service import (
     build_digest_request_payload,
 )
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 from ai_news_agent.tools.schemas import (
     InterfaceAgentResult,
     InterfaceAgentResultKind,
@@ -182,7 +183,7 @@ def test_build_digest_request_payload_maps_hints() -> None:
 def test_build_digest_request_payload_omits_topics_when_absent() -> None:
     payload = build_digest_request_payload()
     assert payload["timeframe"] == "today"
-    assert payload["sources"] == "github,bilibili"
+    assert payload["sources"] == ",".join(DEFAULT_SOURCE_NAMES)
     assert "topics" not in payload
 
 

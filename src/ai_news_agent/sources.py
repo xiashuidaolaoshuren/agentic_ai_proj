@@ -9,10 +9,11 @@ from typing import Any
 from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
 from ai_news_agent.connectors.bilibili import BilibiliConnector
 from ai_news_agent.connectors.github import GitHubConnector
+from ai_news_agent.connectors.juya import JuyaConnector
 from ai_news_agent.models import NewsItem, SourceKind
 
-ALLOWED_SOURCES: frozenset[str] = frozenset({"github", "bilibili"})
-DEFAULT_SOURCE_NAMES: tuple[str, ...] = ("github", "bilibili")
+ALLOWED_SOURCES: frozenset[str] = frozenset({"juya", "github", "bilibili"})
+DEFAULT_SOURCE_NAMES: tuple[str, ...] = ("juya",)
 
 
 class FakeDigestModel:
@@ -55,6 +56,24 @@ class FakeBilibiliConnector:
         return ConnectorResult(items=[], warnings=[], raw_count=0)
 
 
+class FakeJuyaConnector:
+    """Deterministic offline stand-in for Juya."""
+
+    def name(self) -> str:
+        return "juya"
+
+    async def collect(self, request) -> ConnectorResult:  # noqa: ANN001
+        now = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
+        item = NewsItem(
+            source=SourceKind.JUYA,
+            source_id="fake-juya-1",
+            url="https://daily.juya.uk/fake-juya",
+            title="Fake Juya bulletin",
+            collected_at=now,
+        )
+        return ConnectorResult(items=[item], warnings=[], raw_count=1)
+
+
 def parse_sources_csv(value: str | None) -> list[str]:
     if value is None or value.strip() == "":
         return []
@@ -87,15 +106,23 @@ def build_connectors(*, fake: bool, names: Sequence[str]) -> list[SourceConnecto
     selected = normalize_source_names(names)
     if fake:
         factories: dict[str, SourceConnector] = {
+            "juya": FakeJuyaConnector(),
             "github": FakeGitHubConnector(),
             "bilibili": FakeBilibiliConnector(),
         }
     else:
         factories = {
+            "juya": JuyaConnector(),
             "github": GitHubConnector(),
             "bilibili": BilibiliConnector(),
         }
     return [factories[name] for name in selected]
+
+
+def resolve_connector_names(connector_names: list[str] | None) -> list[str]:
+    if connector_names is None:
+        return list(DEFAULT_SOURCE_NAMES)
+    return list(connector_names)
 
 
 def build_connector_factory(*, fake: bool, name: str) -> Callable[[], SourceConnector]:
@@ -114,8 +141,10 @@ __all__ = [
     "FakeBilibiliConnector",
     "FakeDigestModel",
     "FakeGitHubConnector",
+    "FakeJuyaConnector",
     "build_connector_factory",
     "build_connectors",
     "normalize_source_names",
     "parse_sources_csv",
+    "resolve_connector_names",
 ]

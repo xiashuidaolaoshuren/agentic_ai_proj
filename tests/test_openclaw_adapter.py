@@ -10,11 +10,12 @@ from ai_news_agent.adapters.openclaw import (
     normalize_timeframe_hint,
     normalize_topic_hint,
 )
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 
 
 def test_normalize_source_hint_empty_defaults_to_canonical_sources() -> None:
-    assert normalize_source_hint(None) == ["github", "bilibili"]
-    assert normalize_source_hint("") == ["github", "bilibili"]
+    assert normalize_source_hint(None) == list(DEFAULT_SOURCE_NAMES)
+    assert normalize_source_hint("") == list(DEFAULT_SOURCE_NAMES)
 
 
 def test_normalize_source_hint_parses_csv_sources() -> None:
@@ -64,7 +65,7 @@ def test_build_digest_cli_argv_returns_token_list_with_defaults() -> None:
         "--timeframe",
         "today",
         "--sources",
-        "github,bilibili",
+        ",".join(DEFAULT_SOURCE_NAMES),
     ]
 
 
