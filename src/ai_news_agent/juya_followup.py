@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ai_news_agent.models import DigestEntry, NewsItem
+from ai_news_agent.models import DigestEntry, NewsItem, SourceKind
 
 _JUYA_SECTION_MARKERS: tuple[str, ...] = (
     "今日要闻",
@@ -47,6 +47,8 @@ class JuyaSubNews:
 
 def is_juya_news_item(item: NewsItem) -> bool:
     """Return True when a collected item looks like a Juya daily issue row."""
+    if item.source is SourceKind.JUYA:
+        return True
     tags = {t.lower() for t in (item.tags or [])}
     if "juya-daily" in tags or "juya-backup" in tags or "juya-markdown" in tags:
         return True

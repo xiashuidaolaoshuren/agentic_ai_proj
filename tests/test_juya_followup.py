@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ai_news_agent.connectors.base import ConnectorResult
-from ai_news_agent.connectors.github_juya import clean_backup_markdown
+from ai_news_agent.connectors.juya import clean_backup_markdown
 from ai_news_agent.followup_structured import (
     answer_structured_followup,
     parse_rank_from_message,
@@ -70,6 +70,31 @@ def test_is_juya_news_item_detects_tags_and_url() -> None:
         url="https://daily.juya.uk/issue-5/",
         snippet="x",
     )
+    assert is_juya_news_item(item) is True
+
+
+def test_is_juya_news_item_prefers_source_kind_juya() -> None:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.JUYA,
+        source_id="other-source-1",
+        url="https://example.com/not-juya",
+        title="2026-06-16",
+        collected_at=now,
+        raw_snippet="x",
+        tags=[],
+    )
+    assert is_juya_news_item(item) is True
+
+
+def test_is_juya_news_item_keeps_historical_github_tagged_rows() -> None:
+    item = _juya_news_item(
+        source_id="juya-rss-historical",
+        title="2026-06-16",
+        url="https://example.com/not-juya",
+        snippet="x",
+    )
+    assert item.source is SourceKind.GITHUB
     assert is_juya_news_item(item) is True
 
 

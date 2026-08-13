@@ -238,6 +238,33 @@ def test_digest_dict_roundtrip() -> None:
     assert digest2 == digest
 
 
+def test_source_kind_juya_value_and_news_item_roundtrip() -> None:
+    assert SourceKind.JUYA.value == "juya"
+    now = datetime.now(UTC)
+    item = NewsItem.model_validate(
+        {
+            "source": "juya",
+            "source_id": "juya-rss-abc123",
+            "url": "https://daily.juya.uk/issues/2026-06-19/",
+            "title": "2026-06-19",
+            "published_at": None,
+            "collected_at": now.isoformat(),
+            "author": None,
+            "stars_or_views": None,
+            "language": None,
+            "metadata_completeness": 0.75,
+            "raw_snippet": "Sample bulletin snippet",
+            "tags": ["juya", "juya-daily", "rss"],
+            "topic_matches": [],
+            "content_confidence": None,
+        }
+    )
+    assert item.source is SourceKind.JUYA
+    d = item.model_dump(mode="json")
+    item2 = NewsItem.model_validate(d)
+    assert item2 == item
+
+
 def test_invalid_enum_in_deserialize_raises() -> None:
     d = {
         "source": "not-a-real-source",

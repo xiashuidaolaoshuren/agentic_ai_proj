@@ -52,10 +52,9 @@ def test_resolve_openclaw_digest_request_parses_juya_website_url() -> None:
     assert req.connector_names == ["github"]
 
 
-def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -> None:
-    """OpenClaw resolve + GitHub connector should surface daily website RSS entries."""
+def test_juya_targeted_openclaw_path_does_not_fetch_website_rss_via_github() -> None:
+    """GitHub connector must not delegate Juya website RSS after T1 split."""
     import asyncio
-    from pathlib import Path
 
     import httpx
 
@@ -64,29 +63,17 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
     from ai_news_agent.graph.nodes.parse import parse_request_node
     from ai_news_agent.graph.state import DigestGraphState
 
-    fixture = (
-        Path(__file__).resolve().parent / "fixtures" / "juya_rss_sample.xml"
-    ).read_text(encoding="utf-8")
-    markdown = {
-        "/markdown/2026-06-16.md": "# 2026-06-16\n\nGLM-5.2 release and ZCode 3.0 updates.",
-        "/markdown/2026-06-15.md": "# 2026-06-15\n\nPrior day AI news roundup.",
-    }
-
     req = resolve_openclaw_digest_request(
         message="Digest https://github.com/jujuyaya/juya-ai-daily",
     )
     parsed = parse_request_node(DigestGraphState(request=req))
     connector_req: ConnectorRequest = parsed["connector_request"]  # type: ignore[index]
+    requested_hosts: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        path = request.url.path
-        if host == "daily.juya.uk":
-            if path == "/rss.xml":
-                return httpx.Response(200, text=fixture)
-            if path in markdown:
-                return httpx.Response(200, text=markdown[path])
-            return httpx.Response(404)
+        requested_hosts.append(request.url.host or "")
+        if request.url.path == "/repos/jujuyaya/juya-ai-daily":
+            return httpx.Response(404, json={"message": "Not Found"})
         return httpx.Response(404, json={"message": "not found"})
 
     async def main() -> None:
@@ -97,10 +84,8 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
         ) as client:
             out = await GitHubConnector(token=None, client=client).collect(connector_req)
 
-        assert len(out.items) >= 1
-        assert out.items[0].title == "2026-06-16"
-        assert "daily.juya.uk" in out.items[0].url
-        assert out.items[0].title != "jujuyaya/juya-ai-daily"
+        assert "daily.juya.uk" not in requested_hosts
+        assert out.items == []
 
     asyncio.run(main())
 

@@ -1,4 +1,4 @@
-"""RSS-first ingestion helpers for jujuyaya/juya-ai-daily (website-primary)."""
+"""Dedicated Juya bulletin connector (Milestone 5 T1)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
+from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 
 JUYA_OWNER = "jujuyaya"
@@ -26,6 +27,10 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _JUYA_WEBSITE_URL = re.compile(r"https?://(?:www\.)?daily\.juya\.uk", re.IGNORECASE)
 _CONTENT_NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
+_GITHUB_REPO_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -40,12 +45,6 @@ def is_juya_daily_repo(owner: str, repo: str) -> bool:
 
 def is_juya_website_url(url: str) -> bool:
     return bool(_JUYA_WEBSITE_URL.search(url or ""))
-
-
-_GITHUB_REPO_URL = re.compile(
-    r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
-    re.IGNORECASE,
-)
 
 
 def is_juya_target_url(url: str) -> bool:
@@ -137,12 +136,52 @@ def parse_juya_rss_rows(
     return rows
 
 
+# Backward-compatible aliases used by older tests/modules.
+backup_path_for_entry = markdown_url_for_issue
+clean_backup_markdown = clean_issue_markdown
+
+
+class JuyaConnector:
+    """Collects Juya daily bulletin items from website RSS + markdown enrichment."""
+
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._owns_client = client is None
+        if client is not None:
+            self._client = client
+        else:
+            self._client = httpx.AsyncClient(
+                headers={"User-Agent": "ai-news-agent/0.1"},
+                timeout=httpx.Timeout(30.0),
+            )
+
+    def name(self) -> str:
+        return "juya"
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def collect(self, request: ConnectorRequest) -> ConnectorResult:
+        now = datetime.now(UTC)
+        items, raw_count, warnings = await fetch_juya_daily_items(
+            self._client,
+            max_items=request.max_items,
+            collected_at=now,
+            connector_name=self.name(),
+        )
+        return ConnectorResult(items=items, warnings=warnings, raw_count=raw_count)
+
+
 async def fetch_juya_daily_items(
     client: httpx.AsyncClient,
     *,
     max_items: int,
     collected_at: datetime,
-    connector_name: str = "github",
+    connector_name: str = "juya",
 ) -> tuple[list[NewsItem], int, list[ConnectorWarning]]:
     warnings: list[ConnectorWarning] = []
     bounded = max(1, min(max_items, JUYA_RSS_MAX_ENTRIES))
@@ -220,7 +259,7 @@ async def enrich_juya_items_with_markdown(
     client: httpx.AsyncClient,
     rows: list[_ParsedJuyaRssRow],
     *,
-    connector_name: str = "github",
+    connector_name: str = "juya",
 ) -> tuple[list[NewsItem], list[ConnectorWarning]]:
     """Prefer per-issue markdown; fall back to RSS content:encoded."""
     warnings: list[ConnectorWarning] = []
@@ -265,16 +304,11 @@ async def enrich_juya_items_with_markdown(
     return enriched, warnings
 
 
-# Backward-compatible aliases used by older tests/modules.
-backup_path_for_entry = markdown_url_for_issue
-clean_backup_markdown = clean_issue_markdown
-
-
 async def enrich_juya_items_with_backup(
     client: httpx.AsyncClient,
     items: list[NewsItem],
     *,
-    connector_name: str = "github",
+    connector_name: str = "juya",
 ) -> tuple[list[NewsItem], list[ConnectorWarning]]:
     rows = [_ParsedJuyaRssRow(item=item) for item in items]
     return await enrich_juya_items_with_markdown(
@@ -315,7 +349,7 @@ def _rss_item_element_to_row(
     source_id = _stable_source_id(link)
 
     item = NewsItem(
-        source=SourceKind.GITHUB,
+        source=SourceKind.JUYA,
         source_id=source_id,
         url=link,
         title=title,
@@ -324,7 +358,7 @@ def _rss_item_element_to_row(
         author=JUYA_OWNER,
         metadata_completeness=0.75 if snippet else 0.55,
         raw_snippet=snippet,
-        tags=["github", "juya-daily", "rss"],
+        tags=["juya", "juya-daily", "rss"],
         content_confidence=ConfidenceLevel.MEDIUM if snippet else ConfidenceLevel.LOW,
     )
     return _ParsedJuyaRssRow(item=item, content_encoded=content_encoded)
@@ -356,7 +390,7 @@ def _atom_entry_to_row(
     source_id = _stable_source_id(link)
 
     item = NewsItem(
-        source=SourceKind.GITHUB,
+        source=SourceKind.JUYA,
         source_id=source_id,
         url=link,
         title=title,
@@ -365,7 +399,7 @@ def _atom_entry_to_row(
         author=JUYA_OWNER,
         metadata_completeness=0.75 if snippet else 0.55,
         raw_snippet=snippet,
-        tags=["github", "juya-daily", "rss"],
+        tags=["juya", "juya-daily", "rss"],
         content_confidence=ConfidenceLevel.MEDIUM if snippet else ConfidenceLevel.LOW,
     )
     return _ParsedJuyaRssRow(item=item, content_encoded=summary)
