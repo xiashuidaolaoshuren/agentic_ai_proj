@@ -152,7 +152,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T1 — Establish Juya as a first-class connector
 
-- [ ] **Do:** Add `SourceKind.JUYA`, move Juya RSS/markdown behavior from GitHub ownership into a dedicated `JuyaConnector`, and ensure collected bulletin rows use connector `"juya"` and `SourceKind.JUYA`. Update Juya follow-up detection to prefer that source kind while retaining tag/URL compatibility for historical rows. Delete/rename the GitHub-named helper module and tests once callers move. Remove Juya delegation from `GitHubConnector`; its existing normal repository URL/org behavior remains.
+- [X] **Do:** Add `SourceKind.JUYA`, move Juya RSS/markdown behavior from GitHub ownership into a dedicated `JuyaConnector`, and ensure collected bulletin rows use connector `"juya"` and `SourceKind.JUYA`. Update Juya follow-up detection to prefer that source kind while retaining tag/URL compatibility for historical rows. Delete/rename the GitHub-named helper module and tests once callers move. Remove Juya delegation from `GitHubConnector`; its existing normal repository URL/org behavior remains.
 - **TDD suitable:** yes — new connector API, source identity, and regression-sensitive network/warning behavior have clear mocked inputs and outputs.
 - **Verification:** `uv run pytest tests/test_models.py tests/test_connectors_juya.py tests/test_connectors_github.py tests/test_sources.py tests/test_juya_followup.py tests/test_juya_editorial.py -q`
 - **Dependencies:** none
