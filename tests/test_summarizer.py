@@ -142,10 +142,10 @@ def test_summarize_keeps_selected_order_aligned_with_input_rank_list() -> None:
     from ai_news_agent.summarizer import summarize_ranked_items
 
     n1 = NewsItem(
-        source=SourceKind.BILIBILI,
-        source_id="BVaaa",
-        url="https://www.bilibili.com/video/BVaaa",
-        title="Video A",
+        source=SourceKind.GITHUB,
+        source_id="g1",
+        url="https://github.com/o/one",
+        title="one",
         collected_at=_fixed_now(),
         raw_snippet="a",
         content_confidence=ConfidenceLevel.HIGH,
@@ -165,11 +165,11 @@ def test_summarize_keeps_selected_order_aligned_with_input_rank_list() -> None:
     ]
 
     outs = {
-        (SourceKind.BILIBILI, "BVaaa", "Video A"): {
+        (SourceKind.GITHUB, "g1", "one"): {
             "summary": "S-A",
             "why_it_matters": "W",
             "background_knowledge": "B",
-            "follow_up_action": "watch",
+            "follow_up_action": "read",
         },
         (SourceKind.GITHUB, "g2", "two"): {
             "summary": "S-B",
@@ -181,7 +181,7 @@ def test_summarize_keeps_selected_order_aligned_with_input_rank_list() -> None:
     fake = FakeChatModel(per_source=outs)
     digest = summarize_ranked_items(ranked, generated_at=_fixed_now(), topics=["t"], model=fake)
     assert [x.summary for x in digest.entries] == ["S-A", "S-B"]
-    assert digest.entries[0].follow_up_action is FollowUpAction.WATCH
+    assert digest.entries[0].follow_up_action is FollowUpAction.READ
     assert digest.entries[1].follow_up_action is FollowUpAction.TRY
 
 
@@ -255,9 +255,89 @@ def test_summarize_order_places_newest_in_window_bilibili_first() -> None:
         model=fake,
     )
 
-    assert digest.entries[0].source_id == "BVnewest"
-    assert digest.entries[0].summary == "NEW"
-    assert [e.source_id for e in digest.entries] == ["BVnewest", "gh1", "BVolder"]
+    assert [e.source_id for e in digest.entries] == ["gh1", "BVnewest", "BVolder"]
+    assert [e.source_kind for e in digest.entries] == [
+        SourceKind.GITHUB,
+        SourceKind.BILIBILI,
+        SourceKind.BILIBILI,
+    ]
+
+
+def test_summarize_juya_entry_uses_juya_source_display_name() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.JUYA,
+        source_id="juya-1",
+        url="https://daily.juya.uk/2026/05/13",
+        title="Juya bulletin",
+        collected_at=_fixed_now(),
+        author="jujuyaya",
+        raw_snippet="Daily AI news bulletin.",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    assert len(digest.entries) == 1
+    assert digest.entries[0].source_name == "Juya"
+
+
+def test_summarize_ranked_items_primary_source_bilibili_first() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    github = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh1",
+        url="https://github.com/o/gh1",
+        title="GitHub repo",
+        collected_at=_fixed_now(),
+        raw_snippet="readme",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    bilibili = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1",
+        url="https://www.bilibili.com/video/BV1",
+        title="Bilibili video",
+        collected_at=_fixed_now(),
+        raw_snippet="video",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    ranked = [
+        RankedItem(item=github, score_total=9.0, selected=True),
+        RankedItem(item=bilibili, score_total=1.0, selected=True),
+    ]
+    outs = {
+        (SourceKind.GITHUB, "gh1", "GitHub repo"): {
+            "summary": "GH",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "read",
+        },
+        (SourceKind.BILIBILI, "BV1", "Bilibili video"): {
+            "summary": "BILI",
+            "why_it_matters": "W",
+            "background_knowledge": "B",
+            "follow_up_action": "watch",
+        },
+    }
+    fake = FakeChatModel(per_source=outs)
+    digest = summarize_ranked_items(
+        ranked,
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+        primary_source="bilibili",
+    )
+    assert [e.source_kind for e in digest.entries] == [
+        SourceKind.BILIBILI,
+        SourceKind.GITHUB,
+    ]
 
 
 def test_summarize_order_no_reorder_without_timeframe() -> None:

@@ -5,7 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry
+from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, SourceKind
+
+_SECTION_LABELS: dict[SourceKind, str] = {
+    SourceKind.JUYA: "Juya",
+    SourceKind.GITHUB: "GitHub",
+    SourceKind.BILIBILI: "Bilibili",
+}
 
 _EDITORIAL_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("模型发布", ("model", "glm", "qwen", "llm", "开源", "release", "模型")),
@@ -44,6 +50,33 @@ def format_connector_warnings_notice(
     return "\n".join(lines)
 
 
+def _is_mixed_digest(entries: list[DigestEntry]) -> bool:
+    return len({entry.source_kind for entry in entries}) > 1
+
+
+def _group_entries_by_section(
+    entries: list[DigestEntry],
+) -> list[tuple[str, list[DigestEntry]]]:
+    sections: list[tuple[str, list[DigestEntry]]] = []
+    kind_to_index: dict[SourceKind, int] = {}
+    for entry in entries:
+        kind = entry.source_kind
+        if kind not in kind_to_index:
+            label = _SECTION_LABELS.get(kind, str(kind.value).title())
+            kind_to_index[kind] = len(sections)
+            sections.append((label, [entry]))
+            continue
+        index = kind_to_index[kind]
+        label, group = sections[index]
+        group.append(entry)
+        sections[index] = (label, group)
+    return sections
+
+
+def _digest_has_juya(entries: list[DigestEntry]) -> bool:
+    return any(entry.source_kind is SourceKind.JUYA for entry in entries)
+
+
 def _escape_markdown_inline(text: str) -> str:
     """Escape minimal Markdown special characters in user/LLM text."""
     out: list[str] = []
@@ -66,9 +99,10 @@ def _render_header_markdown(digest: Digest) -> str:
     return "\n".join(lines)
 
 
-def _render_entry_markdown(entry: DigestEntry) -> str:
+def _render_entry_markdown(entry: DigestEntry, *, heading_level: int = 2) -> str:
+    hashes = "#" * heading_level
     parts = [
-        f"## {_escape_markdown_inline(entry.title)}",
+        f"{hashes} {_escape_markdown_inline(entry.title)}",
         "",
         f"- **Source:** {entry.source_name} (`{entry.source_kind.value}`)",
         f"- **Link:** <{entry.source_url}>",
@@ -80,6 +114,14 @@ def _render_entry_markdown(entry: DigestEntry) -> str:
     if entry.confidence_caveat:
         parts.append(f"- **Confidence:** {_escape_markdown_inline(entry.confidence_caveat)}")
     return "\n".join(parts)
+
+
+def _render_mixed_entries_markdown(entries: list[DigestEntry]) -> str:
+    blocks: list[str] = []
+    for label, group in _group_entries_by_section(entries):
+        blocks.extend([f"## {label}", ""])
+        blocks.append("\n\n".join(_render_entry_markdown(entry, heading_level=3) for entry in group))
+    return "\n\n".join(blocks)
 
 
 def render_digest_markdown(
@@ -94,6 +136,8 @@ def render_digest_markdown(
     blocks.extend([_render_header_markdown(digest), ""])
     if not digest.entries:
         blocks.append("*No entries in this digest.*")
+    elif _is_mixed_digest(digest.entries):
+        blocks.append(_render_mixed_entries_markdown(digest.entries))
     else:
         blocks.append("\n\n".join(_render_entry_markdown(e) for e in digest.entries))
     return "\n".join(blocks).rstrip() + "\n"
@@ -125,6 +169,15 @@ def _render_entry_text(entry: DigestEntry) -> str:
     return "\n".join(lines)
 
 
+def _render_mixed_entries_text(entries: list[DigestEntry]) -> str:
+    blocks: list[str] = []
+    for label, group in _group_entries_by_section(entries):
+        blocks.append(label)
+        blocks.append("")
+        blocks.append("\n\n---\n\n".join(_render_entry_text(entry) for entry in group))
+    return "\n\n---\n\n".join(blocks)
+
+
 def render_digest_text(
     digest: Digest,
     *,
@@ -137,6 +190,8 @@ def render_digest_text(
     parts.extend([_render_header_text(digest), ""])
     if not digest.entries:
         parts.append("No entries in this digest.")
+    elif _is_mixed_digest(digest.entries):
+        parts.append(_render_mixed_entries_text(digest.entries))
     else:
         parts.append("\n\n---\n\n".join(_render_entry_text(e) for e in digest.entries))
     return "\n".join(parts).rstrip() + "\n"
@@ -182,7 +237,7 @@ def render_digest_editorial_text(
     if notice:
         parts.extend([notice, ""])
 
-    header = "橘鸦AI早报" if any("juya" in e.source_id.lower() for e in digest.entries) else "AI 新闻简报"
+    header = "橘鸦AI早报" if _digest_has_juya(digest.entries) else "AI 新闻简报"
     parts.append(header)
     parts.append(f"生成时间：{digest.generated_at.isoformat()}")
     if digest.timeframe:
@@ -193,14 +248,27 @@ def render_digest_editorial_text(
         parts.append("本期暂无条目。")
         return "\n".join(parts).rstrip() + "\n"
 
-    for index, entry in enumerate(digest.entries, start=1):
-        summary_line = entry.summary or entry.title
-        parts.append(f"{index}. {entry.title}")
-        parts.append(f"   {summary_line}")
-        if entry.why_it_matters:
-            parts.append(f"   要点：{entry.why_it_matters}")
-        parts.append(f"   来源：{entry.source_url}")
-        parts.append("")
+    if _is_mixed_digest(digest.entries):
+        for label, group in _group_entries_by_section(digest.entries):
+            parts.append(label)
+            parts.append("")
+            for index, entry in enumerate(group, start=1):
+                summary_line = entry.summary or entry.title
+                parts.append(f"{index}. {entry.title}")
+                parts.append(f"   {summary_line}")
+                if entry.why_it_matters:
+                    parts.append(f"   要点：{entry.why_it_matters}")
+                parts.append(f"   来源：{entry.source_url}")
+                parts.append("")
+    else:
+        for index, entry in enumerate(digest.entries, start=1):
+            summary_line = entry.summary or entry.title
+            parts.append(f"{index}. {entry.title}")
+            parts.append(f"   {summary_line}")
+            if entry.why_it_matters:
+                parts.append(f"   要点：{entry.why_it_matters}")
+            parts.append(f"   来源：{entry.source_url}")
+            parts.append("")
 
     parts.append("如需查看某条详情，可以说「第一条 news」或「follow up on item 1」。")
     return "\n".join(parts).rstrip() + "\n"
@@ -217,9 +285,12 @@ def render_digest_editorial_markdown(
         warnings=warnings,
         output_language=output_language,
     )
+    source_section_labels = set(_SECTION_LABELS.values())
     lines: list[str] = []
     for line in plain.splitlines():
         if line in {_EDITORIAL_GENERAL, *[name for name, _ in _EDITORIAL_SECTIONS]}:
+            lines.append(f"## {line}")
+        elif line in source_section_labels:
             lines.append(f"## {line}")
         elif line and not line.startswith(("- ", "生成", "时间", "本期", "橘鸦", "AI ")):
             lines.append(f"# {line}" if not lines else line)

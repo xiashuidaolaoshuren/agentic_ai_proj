@@ -28,6 +28,7 @@ def make_summarize_items_node(model: Any):
                 topics=req.topics,
                 timeframe=req.timeframe,
                 generated_at=state.get("finished_at") or state.get("started_at"),
+                primary_source=req.primary_source,
                 model=model,
                 output_style=req.output_style,
                 output_language=req.output_language,

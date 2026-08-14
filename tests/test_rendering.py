@@ -26,6 +26,92 @@ def _sample_entry(*, with_caveat: bool) -> DigestEntry:
     )
 
 
+def _github_entry(*, title: str = "Trending agent toolkit") -> DigestEntry:
+    return DigestEntry(
+        source_kind=SourceKind.GITHUB,
+        source_id="gh-1",
+        title=title,
+        source_name="GitHub",
+        source_url="https://github.com/o/repo",
+        summary="GH summary.",
+        why_it_matters="Why GH.",
+        background_knowledge="BG GH.",
+        follow_up_action=FollowUpAction.READ,
+    )
+
+
+def _bilibili_entry(*, title: str = "New model overview") -> DigestEntry:
+    return DigestEntry(
+        source_kind=SourceKind.BILIBILI,
+        source_id="BV1",
+        title=title,
+        source_name="Bilibili",
+        source_url="https://www.bilibili.com/video/BV1",
+        summary="Bili summary.",
+        why_it_matters="Why Bili.",
+        background_knowledge="BG Bili.",
+        follow_up_action=FollowUpAction.WATCH,
+    )
+
+
+def _juya_entry(*, title: str = "Juya bulletin") -> DigestEntry:
+    return DigestEntry(
+        source_kind=SourceKind.JUYA,
+        source_id="issue-2026-05-13",
+        title=title,
+        source_name="Juya",
+        source_url="https://daily.juya.uk/2026/05/13",
+        summary="Juya summary.",
+        why_it_matters="Why Juya.",
+        background_knowledge="BG Juya.",
+        follow_up_action=FollowUpAction.READ,
+    )
+
+
+def test_render_digest_markdown_mixed_sources_use_section_headers() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_github_entry(), _bilibili_entry()],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(digest)
+    assert "\n## GitHub\n" in out
+    assert "\n## Bilibili\n" in out
+    assert out.index("\n## GitHub\n") < out.index("\n## Bilibili\n")
+    assert "### Trending agent toolkit" in out
+    assert "### New model overview" in out
+
+
+def test_render_digest_markdown_single_source_has_no_section_wrapper() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_sample_entry(with_caveat=False)],
+        topics=["LLM"],
+        timeframe="last_7_days",
+    )
+    out = render_digest_markdown(digest)
+    assert "## GitHub" not in out
+    assert "## Neural nets \\_primer\\_" in out
+
+
+def test_render_digest_editorial_juya_header_when_source_kind_juya() -> None:
+    from ai_news_agent.rendering import render_digest_editorial_text
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_juya_entry()],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_editorial_text(digest)
+    assert out.startswith("橘鸦AI早报")
+
+
 def test_render_digest_markdown_includes_header_metadata_and_entry_sections() -> None:
     from ai_news_agent.rendering import render_digest_markdown
 

@@ -569,6 +569,46 @@ def test_summarize_items_node_builds_digest_with_fake_model() -> None:
     assert "low-confidence" in entry.confidence_caveat.lower()
 
 
+def test_summarize_items_node_forwards_primary_source() -> None:
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    juya = NewsItem(
+        source=SourceKind.JUYA,
+        source_id="juya-1",
+        url="https://daily.juya.uk/2026/05/16",
+        title="Juya bulletin",
+        collected_at=now,
+        author="jujuyaya",
+        raw_snippet="bulletin",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    bilibili = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BV1",
+        url="https://www.bilibili.com/video/BV1",
+        title="Bilibili video",
+        collected_at=now,
+        raw_snippet="video",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    ranked = [
+        RankedItem(item=juya, score_total=9.0, selected=True),
+        RankedItem(item=bilibili, score_total=1.0, selected=True),
+    ]
+    req = DigestRequest(topics=["AI"], primary_source="bilibili")
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "ranked_items": ranked,
+    }
+    node = make_summarize_items_node(_FakeDigestModel())
+    out = node(state)
+    digest = out["digest"]
+    assert [entry.source_kind for entry in digest.entries] == [
+        SourceKind.BILIBILI,
+        SourceKind.JUYA,
+    ]
+
+
 def test_summarize_items_node_handles_empty_ranked_items() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     req = DigestRequest(topics=["RAG"])

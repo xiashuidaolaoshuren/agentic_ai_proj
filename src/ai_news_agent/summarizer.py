@@ -24,6 +24,7 @@ def summarize_ranked_items(
     generated_at: datetime | None = None,
     topics: list[str] | None = None,
     timeframe: str | None = None,
+    primary_source: str | None = None,
     model: Any | None = None,
     output_style: str | None = None,
     output_language: str | None = None,
@@ -36,6 +37,7 @@ def summarize_ranked_items(
         ranked_items,
         timeframe=timeframe,
         now=ts,
+        primary_source=primary_source,
     )
     if not selected:
         return Digest(
@@ -101,6 +103,8 @@ def _context_payload(
 
 
 def _source_display_name(item: NewsItem) -> str:
+    if item.source is SourceKind.JUYA:
+        return "Juya"
     if item.author:
         return str(item.author)
     if item.source is SourceKind.GITHUB:

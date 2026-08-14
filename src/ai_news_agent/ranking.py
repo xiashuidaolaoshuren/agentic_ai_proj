@@ -21,6 +21,7 @@ _W_CONFIDENCE = 0.4
 
 _GITHUB_BASE = 1.0
 _BILIBILI_BASE = 0.88
+_JUYA_BASE = 1.05
 _MAX_ENGAGEMENT_REF = 50_000.0
 
 
@@ -141,24 +142,87 @@ def find_newest_in_window_bilibili_candidate(
     )
 
 
+_FALLBACK_KIND_ORDER: tuple[SourceKind, ...] = (
+    SourceKind.JUYA,
+    SourceKind.GITHUB,
+    SourceKind.BILIBILI,
+)
+
+
 def order_selected_for_digest(
     ranked_items: list[RankedItem],
     *,
     timeframe: str | None,
     now: datetime,
+    primary_source: str | None = None,
 ) -> list[RankedItem]:
-    """Return selected rows in digest iteration order (relevance order with newest Bilibili first)."""
+    """Return selected rows in digest iteration order.
+
+    Single-kind digests keep relevance order with newest-in-window Bilibili first
+    when a timeframe is set. Mixed digests group by source section: primary intent
+    first, otherwise Juya → GitHub → Bilibili, omitting empty kinds.
+    """
     selected = [r for r in ranked_items if r.selected]
-    if not timeframe or not selected:
+    if not selected:
         return selected
+
+    kinds = {r.item.source for r in selected}
+    if len(kinds) < 2:
+        if not timeframe:
+            return selected
+        newest = find_newest_in_window_bilibili_candidate(
+            ranked_items,
+            timeframe=timeframe,
+            now=now,
+        )
+        if newest is None or not newest.selected:
+            return selected
+        return [newest] + [r for r in selected if r is not newest]
+
+    kind_to_rows: dict[SourceKind, list[RankedItem]] = {}
+    for row in selected:
+        kind_to_rows.setdefault(row.item.source, []).append(row)
+
+    ordered: list[RankedItem] = []
+    for kind in _digest_section_kind_order(primary_source):
+        rows = kind_to_rows.get(kind)
+        if not rows:
+            continue
+        if kind is SourceKind.BILIBILI:
+            ordered.extend(_order_bilibili_section(rows, timeframe=timeframe, now=now))
+        else:
+            ordered.extend(rows)
+    return ordered
+
+
+def _digest_section_kind_order(primary_source: str | None) -> tuple[SourceKind, ...]:
+    if primary_source:
+        try:
+            primary = SourceKind(primary_source)
+        except ValueError:
+            primary = None
+        if primary is not None and primary in _FALLBACK_KIND_ORDER:
+            rest = [kind for kind in _FALLBACK_KIND_ORDER if kind != primary]
+            return (primary, *rest)
+    return _FALLBACK_KIND_ORDER
+
+
+def _order_bilibili_section(
+    rows: list[RankedItem],
+    *,
+    timeframe: str | None,
+    now: datetime,
+) -> list[RankedItem]:
+    if not timeframe or not rows:
+        return rows
     newest = find_newest_in_window_bilibili_candidate(
-        ranked_items,
+        rows,
         timeframe=timeframe,
         now=now,
     )
-    if newest is None or not newest.selected:
-        return selected
-    return [newest] + [r for r in selected if r is not newest]
+    if newest is None or newest not in rows:
+        return rows
+    return [newest] + [r for r in rows if r is not newest]
 
 
 def _timeframe_bounds_at(
@@ -271,7 +335,13 @@ def _score_item(item: NewsItem, reference: datetime) -> tuple[dict[str, float], 
     bd["relevance"] = round(rel * _W_RELEVANCE, 6)
     bd["metadata"] = round(meta * _W_METADATA, 6)
     bd["source_quality"] = round(src * _W_SOURCE, 6)
-    bd["engagement"] = round(eng * _W_ENGAGEMENT, 6)
+    if item.source is SourceKind.GITHUB:
+        bd["momentum"] = round(eng * fresh_r * _W_ENGAGEMENT, 6)
+    elif item.source is SourceKind.JUYA:
+        bulletin = 1.0 if item.raw_snippet and str(item.raw_snippet).strip() else 0.4
+        bd["bulletin"] = round(bulletin * _W_ENGAGEMENT, 6)
+    else:
+        bd["engagement"] = round(eng * _W_ENGAGEMENT, 6)
     bd["confidence_adj"] = round(conf * _W_CONFIDENCE, 6)
 
     if item.raw_snippet is None or not str(item.raw_snippet).strip():
@@ -283,6 +353,8 @@ def _score_item(item: NewsItem, reference: datetime) -> tuple[dict[str, float], 
 def _source_base(source: SourceKind) -> float:
     if source is SourceKind.GITHUB:
         return _GITHUB_BASE
+    if source is SourceKind.JUYA:
+        return _JUYA_BASE
     return _BILIBILI_BASE
 
 
