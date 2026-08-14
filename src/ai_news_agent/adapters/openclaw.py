@@ -77,20 +77,20 @@ def normalize_output_language_hint(hint: str | None) -> str | None:
 
 def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | None:
     """Infer connector scope from explicit URL/channel selectors when unset."""
-    has_github = bool(req.github_manual_urls or req.github_target_channels)
+    implied: list[str] = []
+    if req.github_manual_urls or req.github_target_channels:
+        implied.append("github")
     has_bilibili = bool(
         req.bilibili_manual_urls
         or req.bilibili_target_channels
         or req.manual_urls
         or req.target_channels
     )
-    if has_github and has_bilibili:
-        return list(DEFAULT_SOURCE_NAMES)
-    if has_github:
-        return ["github"]
     if has_bilibili:
-        return ["bilibili"]
-    return None
+        implied.append("bilibili")
+    if req.juya_manual_urls:
+        implied.append("juya")
+    return implied if implied else None
 
 
 def validate_source_selector_consistency(req: DigestRequest) -> None:
@@ -106,16 +106,37 @@ def validate_source_selector_consistency(req: DigestRequest) -> None:
         or req.target_channels
     )
     has_github_selector = bool(req.github_manual_urls or req.github_target_channels)
+    has_juya_selector = bool(req.juya_manual_urls)
 
     if names == ["github"] and has_bilibili_selector:
         raise ValueError(
             "Source selection is 'github only' but the request includes Bilibili "
             "video/channel selectors. Remove the conflicting source toggle or selector."
         )
+    if names == ["github"] and has_juya_selector:
+        raise ValueError(
+            "Source selection is 'github only' but the request includes Juya "
+            "website selectors. Remove the conflicting source toggle or selector."
+        )
     if names == ["bilibili"] and has_github_selector:
         raise ValueError(
             "Source selection is 'bilibili only' but the request includes GitHub "
             "repo/channel selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["bilibili"] and has_juya_selector:
+        raise ValueError(
+            "Source selection is 'bilibili only' but the request includes Juya "
+            "website selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["juya"] and has_github_selector:
+        raise ValueError(
+            "Source selection is 'juya only' but the request includes GitHub "
+            "repo/channel selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["juya"] and has_bilibili_selector:
+        raise ValueError(
+            "Source selection is 'juya only' but the request includes Bilibili "
+            "video/channel selectors. Remove the conflicting source toggle or selector."
         )
 
 

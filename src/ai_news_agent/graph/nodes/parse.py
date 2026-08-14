@@ -49,5 +49,6 @@ def parse_request_node(state: DigestGraphState) -> dict[str, object]:
             bilibili_manual_urls=_merged_bilibili_urls(req),
             github_target_channels=list(req.github_target_channels),
             github_manual_urls=list(req.github_manual_urls),
+            juya_manual_urls=list(req.juya_manual_urls),
         )
     }

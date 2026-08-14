@@ -31,11 +31,16 @@ class DigestRequest:
     bilibili_manual_urls: list[str] = field(default_factory=_empty_str_list)
     github_target_channels: list[str] = field(default_factory=_empty_str_list)
     github_manual_urls: list[str] = field(default_factory=_empty_str_list)
+    #: Juya website (``daily.juya.uk``) target URLs; routed to the Juya connector.
+    juya_manual_urls: list[str] = field(default_factory=_empty_str_list)
     connector_names: list[str] | None = None
     #: ``editorial`` selects newsletter-style rendering; ``None`` keeps the default bulletin.
     output_style: str | None = None
     #: BCP-47 language tag for summarization/rendering (e.g. ``zh-CN``).
     output_language: str | None = None
+    #: Resolved primary source name (first of ``connector_names``); recorded for
+    #: downstream ranking/rendering (T5). Defaults to ``None`` until resolved.
+    primary_source: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_items_per_source < 1:
@@ -59,4 +64,5 @@ class DigestRequest:
             or self.bilibili_manual_urls
             or self.github_target_channels
             or self.github_manual_urls
+            or self.juya_manual_urls
         )

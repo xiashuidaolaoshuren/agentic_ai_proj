@@ -273,6 +273,16 @@ def test_parse_request_node_maps_required_fields() -> None:
     assert cr.manual_urls == ["u"]
 
 
+def test_parse_request_node_maps_juya_manual_urls() -> None:
+    req = DigestRequest(
+        topics=["RAG"],
+        juya_manual_urls=["https://daily.juya.uk/", "https://daily.juya.uk/markdown/2026-08-11.md"],
+    )
+    out = parse_request_node({"request": req})
+    cr = out["connector_request"]
+    assert cr.juya_manual_urls == req.juya_manual_urls
+
+
 def test_parse_request_node_missing_request_emits_error() -> None:
     out = parse_request_node({})
     assert "connector_request" not in out
@@ -292,7 +302,7 @@ def test_collect_sources_node_accumulates_items_and_warnings() -> None:
         name="b",
         items=[_news_item("b1"), _news_item("b2")],
     )
-    req = DigestRequest(topics=["RAG"])
+    req = DigestRequest(topics=["RAG"], connector_names=["a", "b"])
     state: DigestGraphState = {"request": req, "connector_request": parse_request_node({"request": req})["connector_request"]}
     node = make_collect_sources_node([conn_a, conn_b])
 
@@ -331,7 +341,7 @@ def test_collect_sources_node_catches_connector_exceptions() -> None:
         name="b",
         items=[_news_item("b1")],
     )
-    req = DigestRequest(topics=["RAG"])
+    req = DigestRequest(topics=["RAG"], connector_names=["a", "b"])
     state: DigestGraphState = {
         "request": req,
         "connector_request": parse_request_node({"request": req})["connector_request"],
@@ -380,6 +390,25 @@ def test_collect_sources_node_unmatched_filter_emits_error() -> None:
     assert err.message == "no matching connectors"
     assert err.detail == "unknown"
     assert conn_a.calls == 0
+
+
+def test_collect_sources_node_defaults_to_juya_when_none() -> None:
+    conn_github = _FakeConnector(name="github", items=[_news_item("gh1")])
+    conn_bilibili = _FakeConnector(name="bilibili", items=[_news_item("bili1")])
+    conn_juya = _FakeConnector(name="juya", items=[_news_item("juya1")])
+    req = DigestRequest(topics=["RAG"])
+    state: DigestGraphState = {
+        "request": req,
+        "connector_request": parse_request_node({"request": req})["connector_request"],
+    }
+    node = make_collect_sources_node([conn_github, conn_bilibili, conn_juya])
+
+    out = asyncio.run(node(state))
+
+    assert conn_github.calls == 0
+    assert conn_bilibili.calls == 0
+    assert conn_juya.calls == 1
+    assert len(out["collected_items"]) == 1
 
 
 def test_rank_items_node_uses_top_n_and_populates_ranked_items() -> None:
@@ -715,6 +744,51 @@ def test_persist_results_node_catches_storage_errors(tmp_path) -> None:
     assert "boom" in (err.detail or "")
 
 
+def test_persist_records_resolved_default_connector_names(tmp_path) -> None:
+    import json
+    import sqlite3
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    # Bare run: connector_names is None. Mixed items/warnings would today be
+    # inferred from item.source.value / warning.connector, but the resolved
+    # default must be recorded instead.
+    req = DigestRequest(topics=["RAG"])
+    github_item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh1",
+        url="https://example.com/gh1",
+        title="GitHub item",
+        collected_at=now,
+    )
+    bilibili_warning = ConnectorWarning(
+        connector="bilibili", code="rate", message="slow"
+    )
+    digest = Digest(generated_at=now, entries=[], topics=["RAG"], timeframe=None)
+
+    store = DigestStore(tmp_path / "persist_default.db")
+    store.init_schema()
+    node = make_persist_results_node(store)
+
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": [github_item],
+        "warnings": [bilibili_warning],
+        "ranked_items": [],
+        "digest": digest,
+    }
+    out = node(state)
+    assert out["run_id"] == 1
+
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT connector_names_json FROM runs WHERE id = 1"
+        ).fetchone()
+    persisted = json.loads(row["connector_names_json"])
+    assert persisted == ["juya"]
+
+
 def test_render_digest_node_populates_markdown_and_text() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     digest = Digest(
@@ -935,7 +1009,7 @@ def test_run_digest_continues_when_one_connector_raises(tmp_path: Path) -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     broken = _FakeConnector(name="broken", error=RuntimeError("boom"))
     healthy = _FakeConnector(name="healthy", items=[_news_item("ok1")])
-    req = DigestRequest(topics=["RAG"])
+    req = DigestRequest(topics=["RAG"], connector_names=["broken", "healthy"])
 
     db = tmp_path / "t10e-nonfatal.db"
     store = DigestStore(db)
@@ -977,7 +1051,7 @@ def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> N
     from ai_news_agent.graph.workflow import run_digest, run_digest_streaming
 
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
-    req = DigestRequest(topics=["RAG"])
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
     store = DigestStore(tmp_path / "stream.db")
     store.init_schema()
     connectors = [

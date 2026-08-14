@@ -14,6 +14,7 @@ from ai_news_agent.rendering import (
     render_digest_text,
 )
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import resolve_connector_names
 from ai_news_agent.storage import DigestStore
 
 
@@ -27,15 +28,7 @@ def _connector_names_for_run(
     if connector_names:
         return list(connector_names)
 
-    source_values: set[str] = {item.source.value for item in items}
-
-    connector_ids: set[str] = set()
-    for w in warnings:
-        connector_ids.add(w.connector)
-
-    connector_ids.discard("")
-
-    return sorted(source_values | connector_ids)
+    return resolve_connector_names(req.connector_names)
 
 
 def make_persist_results_node(store: DigestStore):

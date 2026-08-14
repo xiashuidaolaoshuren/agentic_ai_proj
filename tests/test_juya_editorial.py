@@ -165,7 +165,7 @@ def test_normalize_output_style_and_language_hints() -> None:
 
 def test_build_digest_request_payload_includes_style_fields() -> None:
     payload = build_digest_request_payload(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        message="Digest https://daily.juya.uk/",
         output_style_hint="editorial",
         output_language_hint="zh-CN",
     )
@@ -176,7 +176,7 @@ def test_build_digest_request_payload_includes_style_fields() -> None:
 
 def test_resolve_openclaw_digest_request_applies_style_hints() -> None:
     req = resolve_openclaw_digest_request(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        message="Digest https://daily.juya.uk/",
         output_style_hint="editorial",
         output_language_hint="zh-CN",
     )

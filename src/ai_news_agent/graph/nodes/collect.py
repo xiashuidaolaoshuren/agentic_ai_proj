@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
 from ai_news_agent.graph.state import DigestGraphState, WorkflowError
+from ai_news_agent.sources import resolve_connector_names
 
 
 def make_collect_sources_node(connectors: Sequence[SourceConnector]):
@@ -21,22 +22,23 @@ def make_collect_sources_node(connectors: Sequence[SourceConnector]):
                 ]
             }
 
-        selected = list(connectors)
         digest_request = state.get("request")
-        if digest_request is not None and digest_request.connector_names is not None:
-            allowed_names = list(digest_request.connector_names)
-            allowed = set(allowed_names)
-            selected = [c for c in selected if c.name() in allowed]
-            if not selected:
-                return {
-                    "errors": [
-                        WorkflowError(
-                            stage="collect",
-                            message="no matching connectors",
-                            detail=", ".join(allowed_names),
-                        )
-                    ]
-                }
+        if digest_request is not None:
+            allowed_names = resolve_connector_names(digest_request.connector_names)
+        else:
+            allowed_names = resolve_connector_names(None)
+        allowed = set(allowed_names)
+        selected = [c for c in connectors if c.name() in allowed]
+        if not selected:
+            return {
+                "errors": [
+                    WorkflowError(
+                        stage="collect",
+                        message="no matching connectors",
+                        detail=", ".join(allowed_names),
+                    )
+                ]
+            }
 
         results = await asyncio.gather(
             *[c.collect(request) for c in selected], return_exceptions=True
