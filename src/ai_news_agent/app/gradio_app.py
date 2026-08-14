@@ -36,8 +36,15 @@ _UI_ERROR_MESSAGE = (
     "Please check the terminal or log file for details and try again."
 )
 
+_SOURCE_TOGGLE_CHOICES: tuple[str, ...] = ("juya", "github", "bilibili")
+
+_EMPTY_SOURCES_MESSAGE = (
+    "Please enable at least one source (Juya, GitHub, or Bilibili)."
+)
+
 _EXAMPLE_ROWS: list[list] = [
     ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
+    ["Digest https://daily.juya.uk/issues/2026-06-16/", list(DEFAULT_SOURCE_NAMES)],
     ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
     ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
     ["Digest bilibili channel 285286947", list(DEFAULT_SOURCE_NAMES)],
@@ -181,6 +188,7 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
             digest_model=model,
             github_factory=build_connector_factory(fake=fake, name="github"),
             bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
+            juya_factory=build_connector_factory(fake=fake, name="juya"),
             build_connectors_fn=build_connectors_fn,
             interface_name="gradio",
         )
@@ -204,7 +212,7 @@ def create_app(service: ChatService) -> gr.Blocks:
         enabled_sources: list[str],
     ) -> AsyncIterator[str]:
         if not enabled_sources:
-            yield "Please enable at least one source (GitHub or Bilibili)."
+            yield _EMPTY_SOURCES_MESSAGE
             return
         try:
             async for partial in service.handle_message_streaming_async(
@@ -219,17 +227,18 @@ def create_app(service: ChatService) -> gr.Blocks:
     with gr.Blocks(title="AI News Research Agent") as demo:
         gr.Markdown(
             "# AI News Research Agent\n"
-            'Ask for an AI news digest (e.g. mention "digest"). Include GitHub repo URLs, '
-            "Bilibili video URLs, or channel hints in the same message for targeted runs. "
+            "Ask for an AI news digest (e.g. mention \"digest\"). Juya is the default bulletin; "
+            "enable GitHub or Bilibili for opt-in repo/video discovery. Include GitHub repo URLs, "
+            "Bilibili video URLs, channel hints, or `daily.juya.uk` issue links for targeted runs. "
             'Follow up with "show sources", ranking hints, or "show caveats".'
         )
         source_toggles = gr.CheckboxGroup(
-            choices=list(DEFAULT_SOURCE_NAMES),
+            choices=list(_SOURCE_TOGGLE_CHOICES),
             value=list(DEFAULT_SOURCE_NAMES),
             label="Sources",
             info=(
-                "Session filters for digest runs. Override one request with phrases like "
-                "'github only' or 'bilibili only'."
+                "Session filters for digest runs. Juya is selected by default; override one "
+                "request with phrases like 'github only', 'bilibili only', or a Juya issue URL."
             ),
         )
         chat = gr.ChatInterface(

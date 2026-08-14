@@ -68,6 +68,7 @@ EXPECTED_TOOL_NAMES: tuple[str, ...] = (
     "get_ranking_explanation",
     "search_github_ai_news",
     "search_bilibili_ai_news",
+    "search_juya_ai_news",
 )
 
 CAPABILITY_TOOL_NAMES: tuple[str, ...] = (
@@ -89,10 +90,14 @@ def _build_registry_for_tests(tmp_path: Path) -> ToolRegistry:
     def _bilibili_factory() -> Any:
         raise AssertionError("bilibili factory should not run in this test")
 
+    def _juya_factory() -> Any:
+        raise AssertionError("juya factory should not run in this test")
+
     return build_tool_registry(
         store=store,
         github_factory=_github_factory,
         bilibili_factory=_bilibili_factory,
+        juya_factory=_juya_factory,
     )
 
 
@@ -105,18 +110,19 @@ def _build_capability_registry_for_tests(tmp_path: Path) -> ToolRegistry:
         store=store,
         github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         digest_request=DigestRequest(topics=["AI"]),
         connectors=[],
         model=object(),
     )
 
 
-def test_build_tool_registry_with_capability_deps_exposes_eleven_tools(
+def test_build_tool_registry_with_capability_deps_exposes_twelve_tools(
     tmp_path: Path,
 ) -> None:
     registry = _build_capability_registry_for_tests(tmp_path)
 
-    assert len(registry.tool_names()) == 11
+    assert len(registry.tool_names()) == 12
     for name in CAPABILITY_TOOL_NAMES:
         assert name in registry.tool_names()
 
@@ -128,10 +134,11 @@ def test_build_tool_registry_register_structured_tools_only(tmp_path: Path) -> N
         store=store,
         github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         register_structured_tools=True,
     )
 
-    assert len(registry.tool_names()) == 10
+    assert len(registry.tool_names()) == 11
     assert "generate_ai_news_digest" not in registry.tool_names()
     for name in (
         "list_digest_sources",
@@ -176,6 +183,7 @@ def test_generate_ai_news_digest_invokes_run_digest_once(tmp_path: Path) -> None
             store=store,
             github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             digest_request=trusted_request,
             connectors=[],
             model=model,
@@ -229,6 +237,7 @@ def test_generate_ai_news_digest_raises_on_second_invocation(tmp_path: Path) -> 
             store=store,
             github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             digest_request=trusted_request,
             connectors=[],
             model=object(),
@@ -273,6 +282,7 @@ def test_generate_ai_news_digest_has_no_args_schema(tmp_path: Path) -> None:
             store=store,
             github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             digest_request=trusted_request,
             connectors=[],
             model=object(),
@@ -330,6 +340,7 @@ def test_generate_ai_news_digest_passes_on_stage_to_run_digest_instrumented(
             store=store,
             github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+            juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
             digest_request=trusted_request,
             connectors=[],
             model=object(),
@@ -356,6 +367,7 @@ def _build_seeded_capability_registry(tmp_path: Path) -> tuple[ToolRegistry, Dig
         store=store,
         github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         digest_request=DigestRequest(topics=["RAG"]),
         connectors=[],
         model=object(),
@@ -445,7 +457,7 @@ def test_structured_tools_return_no_saved_digest_when_empty(tmp_path: Path) -> N
         assert result.run_id is None
 
 
-def test_build_tool_registry_exposes_six_stable_tool_names(tmp_path: Path) -> None:
+def test_build_tool_registry_exposes_seven_stable_tool_names(tmp_path: Path) -> None:
     registry = _build_registry_for_tests(tmp_path)
 
     assert registry.tool_names() == list(EXPECTED_TOOL_NAMES)
@@ -474,6 +486,7 @@ def test_build_tool_registry_load_latest_digest_execute_uses_injected_store(
         store=store,
         github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         bilibili_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
     )
 
     tool = registry.get_tool("load_latest_digest")
@@ -501,6 +514,7 @@ def test_build_tool_registry_followup_tools_use_rank_or_source_args_schema(
         store=store,
         github_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
         bilibili_factory=lambda: _NonBilibiliConnector(),
+        juya_factory=lambda: (_ for _ in ()).throw(AssertionError("unused")),
     )
 
     for name in ("get_digest_item", "get_source_trace", "get_ranking_explanation"):
@@ -554,6 +568,7 @@ def test_build_tool_registry_github_search_uses_search_args_and_factory_per_call
         store=store,
         github_factory=github_factory,
         bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
     )
 
     tool = registry.get_tool("search_github_ai_news")
@@ -581,6 +596,7 @@ def test_build_tool_registry_bilibili_search_uses_search_args_and_factory_per_ca
         store=store,
         github_factory=_CountingConnectorFactory(name="github"),
         bilibili_factory=bilibili_factory,
+        juya_factory=_CountingConnectorFactory(name="juya"),
     )
 
     tool = registry.get_tool("search_bilibili_ai_news")
@@ -591,6 +607,29 @@ def test_build_tool_registry_bilibili_search_uses_search_args_and_factory_per_ca
     asyncio.run(tool.ainvoke({"query": "RAG"}))
 
     assert bilibili_factory.calls == 2
+
+
+def test_build_tool_registry_juya_search_uses_search_args_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "juya-factory.db")
+    store.init_schema()
+    juya_factory = _CountingConnectorFactory(name="juya")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=juya_factory,
+    )
+
+    tool = registry.get_tool("search_juya_ai_news")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is SearchArgs
+
+    asyncio.run(tool.ainvoke({"query": "AI bulletin"}))
+    asyncio.run(tool.ainvoke({"query": "daily news"}))
+
+    assert juya_factory.calls == 2
 
 
 def test_registry_module_has_no_legacy_tool_definition_or_handwritten_schemas() -> None:
@@ -629,6 +668,7 @@ def test_build_tool_registry_import_from_tools_package(tmp_path: Path) -> None:
         store=store,
         github_factory=_CountingConnectorFactory(name="github"),
         bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
     )
 
     assert registry.tool_names() == list(EXPECTED_TOOL_NAMES)

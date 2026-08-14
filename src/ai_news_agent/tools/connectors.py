@@ -35,6 +35,20 @@ async def search_bilibili_ai_news(
     )
 
 
+async def search_juya_ai_news(
+    *,
+    connector: SourceConnector,
+    search: SearchQueryInput,
+    timeframe: str | None = None,
+) -> ToolObservation:
+    return await _search_connector(
+        connector_name="juya",
+        connector=connector,
+        search=search,
+        timeframe=timeframe,
+    )
+
+
 async def _search_connector(
     *,
     connector_name: str,

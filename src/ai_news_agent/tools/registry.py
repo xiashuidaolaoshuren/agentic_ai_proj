@@ -23,6 +23,7 @@ from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import (
     search_bilibili_ai_news as _search_bilibili_ai_news_pure,
     search_github_ai_news as _search_github_ai_news_pure,
+    search_juya_ai_news as _search_juya_ai_news_pure,
 )
 from ai_news_agent.tools.followup import (
     get_digest_item as _get_digest_item_pure,
@@ -90,6 +91,7 @@ def build_tool_registry(
     store: DigestStore,
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
+    juya_factory: ConnectorFactory,
     digest_request: DigestRequest | None = None,
     register_structured_tools: bool = False,
     connectors: Sequence[SourceConnector] | None = None,
@@ -169,6 +171,20 @@ def build_tool_registry(
             timeframe=timeframe,
         )
 
+    @tool(args_schema=SearchArgs)
+    async def search_juya_ai_news(
+        query: str,
+        max_results: int = 5,
+        timeframe: str | None = None,
+    ) -> ToolObservation:
+        """Search Juya AI bulletins through the Juya connector."""
+        connector = juya_factory()
+        return await _search_juya_ai_news_pure(
+            connector=connector,
+            search=SearchQueryInput(query=query, max_results=max_results),
+            timeframe=timeframe,
+        )
+
     tools = [
         load_latest_digest,
         get_digest_item,
@@ -176,6 +192,7 @@ def build_tool_registry(
         get_ranking_explanation,
         search_github_ai_news,
         search_bilibili_ai_news,
+        search_juya_ai_news,
     ]
 
     include_structured_tools = register_structured_tools or digest_request is not None

@@ -260,6 +260,7 @@ class DigestServiceRuntime:
                         fake=False,
                         name="bilibili",
                     ),
+                    juya_factory=build_connector_factory(fake=False, name="juya"),
                     build_connectors_fn=build_connectors_fn,
                     interface_name="openclaw",
                 )

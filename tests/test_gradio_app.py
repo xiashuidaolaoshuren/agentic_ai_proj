@@ -9,7 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai_news_agent.app import gradio_app
-from ai_news_agent.app.gradio_app import _EXAMPLE_ROWS, _build_service, create_app
+from ai_news_agent.app.gradio_app import (
+    _EMPTY_SOURCES_MESSAGE,
+    _EXAMPLE_ROWS,
+    _SOURCE_TOGGLE_CHOICES,
+    _build_service,
+    create_app,
+)
 from ai_news_agent.chat import ChatService
 from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.graph.state import DigestResult
@@ -110,6 +116,24 @@ def test_gradio_build_service_digest_stream_ephemeral_final(tmp_path) -> None:
     assert "Collecting from sources" not in chunks[-1]
 
 
+def test_gradio_source_toggle_choices_include_all_allowed_sources() -> None:
+    assert list(_SOURCE_TOGGLE_CHOICES) == ["juya", "github", "bilibili"]
+
+
+def test_gradio_default_source_toggle_value_is_juya_only() -> None:
+    assert list(DEFAULT_SOURCE_NAMES) == ["juya"]
+
+
+def test_gradio_empty_sources_message_mentions_juya() -> None:
+    assert "Juya" in _EMPTY_SOURCES_MESSAGE
+    assert "GitHub" in _EMPTY_SOURCES_MESSAGE
+    assert "Bilibili" in _EMPTY_SOURCES_MESSAGE
+
+
+def test_gradio_examples_include_daily_juya_url() -> None:
+    assert any("daily.juya.uk" in row[0] for row in _EXAMPLE_ROWS)
+
+
 def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path) -> None:
     captured: list[DigestRequest] = []
 
@@ -155,7 +179,7 @@ def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path
     demo = create_app(svc)
 
     assert demo is not None
-    assert len(_EXAMPLE_ROWS) == 5
+    assert len(_EXAMPLE_ROWS) == 6
 
     reply = asyncio.run(
         svc.handle_message_async(
@@ -221,7 +245,7 @@ def test_build_service_live_mode_wires_interface_tool_router(
     monkeypatch.setattr(
         gradio_app,
         "build_connector_factory",
-        lambda **kw: MagicMock(name="ConnectorFactory"),
+        lambda **kw: MagicMock(name=f"ConnectorFactory-{kw.get('name')}"),
         raising=False,
     )
     monkeypatch.setattr(
@@ -265,9 +289,49 @@ def test_build_service_live_mode_wires_interface_tool_router(
     assert callable(router_calls[0]["build_connectors_fn"])
     assert callable(router_calls[0]["workflow_runner"])
     assert callable(router_calls[0]["streaming_workflow_runner"])
+    assert "juya_factory" in router_calls[0]
     assert getattr(service, "_interface_router", None) is fake_router
     assert not registry_called
     assert not agent_called
+
+
+def test_build_service_live_mode_passes_juya_factory(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    factory_calls: list[dict[str, object]] = []
+    router_calls: list[dict] = []
+
+    def recording_build_connector_factory(**kwargs):
+        factory_calls.append(dict(kwargs))
+        return MagicMock(name=f"ConnectorFactory-{kwargs.get('name')}")
+
+    def spy_build_interface_tool_router(**kwargs):
+        router_calls.append(kwargs)
+        return MagicMock(name="InterfaceToolRouter")
+
+    monkeypatch.setattr(gradio_app, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        gradio_app,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_connector_factory",
+        recording_build_connector_factory,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gradio_app,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+
+    _build_service(fake=False, db_path=tmp_path / "live-juya-factory.db")
+
+    assert any(call.get("name") == "juya" for call in factory_calls)
+    assert len(router_calls) == 1
+    assert router_calls[0]["juya_factory"] is not None
 
 
 def test_build_service_live_closures_respect_connector_names(
@@ -348,7 +412,7 @@ def test_build_service_live_closures_respect_connector_names(
     monkeypatch.setattr(
         gradio_app,
         "build_connector_factory",
-        lambda **kw: MagicMock(name="ConnectorFactory"),
+        lambda **kw: MagicMock(name=f"ConnectorFactory-{kw.get('name')}"),
         raising=False,
     )
     monkeypatch.setattr(
