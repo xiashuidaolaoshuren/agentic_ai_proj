@@ -160,7 +160,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T2 — Register Juya and make the runtime default deterministic
 
-- [ ] **Do:** Add real/fake Juya factories and `"juya"` to the canonical registry; make its ordered default source set Juya-only. Ensure CLI, direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than treating omitted source selection as “all injected connectors.”
+- [X] **Do:** Add real/fake Juya factories and `"juya"` to the canonical registry; make its ordered default source set Juya-only. Ensure CLI, direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than treating omitted source selection as “all injected connectors.”
 - **TDD suitable:** yes — registry/default selection and fake end-to-end behavior are deterministic contracts.
 - **Verification:** `uv run pytest tests/test_sources.py tests/test_cli.py tests/test_workflow.py tests/test_mvp_smoke.py -q`
 - **Dependencies:** T1
@@ -168,7 +168,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T3 — Implement deterministic source intent and target selection
 
-- [ ] **Do:** Give `DigestRequest`/`ConnectorRequest` a Juya target representation and carry it through parsing. Implement the approved selection precedence consistently in chat/Gradio, CLI, and OpenClaw: bare request → Juya; explicit source list, clear GitHub trending-repo/Bilibili intent, or platform target → implied/named sources; platform cue replaces Juya unless Juya is also selected. Accept only `daily.juya.uk` as a Juya URL and reject `github.com/jujuyaya/juya-ai-daily` with actionable website guidance. Preserve source-selector conflict validation and record a primary source for mixed-digest section order.
+- [X] **Do:** Give `DigestRequest`/`ConnectorRequest` a Juya target representation and carry it through parsing. Implement the approved selection precedence consistently in chat/Gradio, CLI, and OpenClaw: bare request → Juya; explicit source list, clear GitHub trending-repo/Bilibili intent, or platform target → implied/named sources; platform cue replaces Juya unless Juya is also selected. Accept only `daily.juya.uk` as a Juya URL and reject `github.com/jujuyaya/juya-ai-daily` with actionable website guidance. Preserve source-selector conflict validation and record a primary source for mixed-digest section order.
 - **TDD suitable:** yes — parser and normalization behavior are deterministic public inputs/outputs, including errors.
 - **Verification:** `uv run pytest tests/test_intent.py tests/test_workflow.py tests/test_cli.py tests/test_openclaw_adapter.py tests/test_openclaw_targeted.py -q`
 - **Dependencies:** T2
@@ -176,7 +176,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T4 — Re-purpose GitHub collection as a transparent trending-repo signal
 
-- [ ] **Do:** Keep GitHub manual repo/org collection available as opt-in ecosystem targeting, but change topic discovery and ranking inputs to prioritize repositories by the documented stars-and-recent-activity momentum heuristic. Keep README text as evidence only, preserve warning/error handling, and expose inspectable ranking factors without claiming historical star velocity.
+- [X] **Do:** Keep GitHub manual repo/org collection available as opt-in ecosystem targeting, but change topic discovery and ranking inputs to prioritize repositories by the documented stars-and-recent-activity momentum heuristic. Keep README text as evidence only, preserve warning/error handling, and expose inspectable ranking factors without claiming historical star velocity.
 - **TDD suitable:** yes — query construction, candidate ordering/metadata, and score evidence are deterministic under mocked GitHub payloads.
 - **Verification:** `uv run pytest tests/test_connectors_github.py tests/test_ranking.py -q`
 - **Dependencies:** T1
