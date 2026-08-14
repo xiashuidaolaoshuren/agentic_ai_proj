@@ -184,7 +184,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T5 — Add kind-aware ranking and source-section digest presentation
 
-- [ ] **Do:** Apply source-kind-aware score factors for Juya issues, GitHub trending repos, and Bilibili videos while retaining shared dedupe and the newest-in-window Bilibili guarantee. Keep `top_n` as the existing overall cap (no source quotas). For an intentionally mixed digest, order selected entries and render them in source sections: primary intent first, otherwise Juya → GitHub → Bilibili, omitting empty sections. Keep one-source default Markdown/text/editorial output stable except for correct Juya labeling.
+- [X] **Do:** Apply source-kind-aware score factors for Juya issues, GitHub trending repos, and Bilibili videos while retaining shared dedupe and the newest-in-window Bilibili guarantee. Keep `top_n` as the existing overall cap (no source quotas). For an intentionally mixed digest, order selected entries and render them in source sections: primary intent first, otherwise Juya → GitHub → Bilibili, omitting empty sections. Keep one-source default Markdown/text/editorial output stable except for correct Juya labeling.
 - **TDD suitable:** yes — scoring evidence, ordering, and rendered section structure have deterministic contracts.
 - **Verification:** `uv run pytest tests/test_ranking.py tests/test_summarizer.py tests/test_rendering.py tests/test_workflow.py -q`
 - **Dependencies:** T1, T3, T4
