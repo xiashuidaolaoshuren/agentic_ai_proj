@@ -13,15 +13,13 @@ from typing import Any
 
 from ai_news_agent.chat import ChatService
 from ai_news_agent.cli import (
-    _FakeBilibiliConnector,
-    _FakeDigestModel,
-    _FakeGitHubConnector,
     main as cli_main,
 )
 from ai_news_agent.connectors.base import SourceConnector
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES, FakeDigestModel, build_connectors
 from ai_news_agent.storage import DigestStore
 
 
@@ -54,13 +52,13 @@ def _build_fake_chat_service(db_path: Path) -> ChatService:
     """Mirror offline wiring used by Gradio ``--fake`` (without importing ``gradio_app``)."""
     store = DigestStore(db_path)
     store.init_schema()
-    model: Any = _FakeDigestModel()
+    model: Any = FakeDigestModel()
 
     async def workflow_runner(req: DigestRequest) -> DigestResult:
-        connectors: list[SourceConnector] = [
-            _FakeGitHubConnector(),
-            _FakeBilibiliConnector(),
-        ]
+        connectors: list[SourceConnector] = build_connectors(
+            fake=True,
+            names=list(DEFAULT_SOURCE_NAMES),
+        )
         return await _run_digest_async(req, store=store, connectors=connectors, model=model)
 
     return ChatService(store=store, workflow_runner=workflow_runner, chat_model=model)
@@ -71,11 +69,11 @@ def test_mvp_smoke_chat_digest_then_sources(tmp_path: Path) -> None:
 
     digest_reply = asyncio.run(svc.handle_message_async("Give me today's AI digest"))
     assert "AI News Digest" in digest_reply
-    assert "Fake GitHub repo" in digest_reply
+    assert "Fake Juya bulletin" in digest_reply
 
     sources_reply = asyncio.run(svc.handle_message_async("show sources"))
     assert "Sources from the latest digest" in sources_reply
-    assert "https://example.com/fake-github" in sources_reply
+    assert "https://daily.juya.uk/fake-juya" in sources_reply
 
 
 def test_mvp_smoke_cli_fake_digest(tmp_path: Path) -> None:

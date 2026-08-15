@@ -8,7 +8,11 @@ from datetime import UTC, datetime
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
-from ai_news_agent.tools.connectors import search_bilibili_ai_news, search_github_ai_news
+from ai_news_agent.tools.connectors import (
+    search_bilibili_ai_news,
+    search_github_ai_news,
+    search_juya_ai_news,
+)
 from ai_news_agent.tools.schemas import SearchQueryInput, ToolObservationStatus
 
 
@@ -61,6 +65,28 @@ def _sample_item(*, source: SourceKind, source_id: str, title: str) -> NewsItem:
         topic_matches=["AI agents"],
         content_confidence=ConfidenceLevel.HIGH,
     )
+
+
+def test_search_juya_ai_news_ok_serializes_items() -> None:
+    item = _sample_item(source=SourceKind.JUYA, source_id="juya-1", title="Juya Bulletin")
+    connector = _FakeConnector(name="juya", items=[item], raw_count=2)
+
+    obs = asyncio.run(
+        search_juya_ai_news(
+            connector=connector,
+            search=SearchQueryInput(query="AI agents", max_results=5),
+            timeframe="today",
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert obs.data["connector"] == "juya"
+    assert obs.data["query"] == "AI agents"
+    assert obs.data["item_count"] == 1
+    assert obs.data["raw_count"] == 2
+    assert obs.data["items"][0]["source"] == "juya"
+    assert obs.data["items"][0] == item.model_dump(mode="json")
+    json.dumps(obs.model_dump(mode="json"))
 
 
 def test_search_github_ai_news_ok_serializes_items() -> None:

@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.intent import parse_connector_names_from_message
-from ai_news_agent.request import DigestRequest
+from ai_news_agent.request import DigestRequest, primary_source_from_names
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     normalize_source_names,
@@ -77,20 +77,20 @@ def normalize_output_language_hint(hint: str | None) -> str | None:
 
 def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | None:
     """Infer connector scope from explicit URL/channel selectors when unset."""
-    has_github = bool(req.github_manual_urls or req.github_target_channels)
+    implied: list[str] = []
+    if req.github_manual_urls or req.github_target_channels:
+        implied.append("github")
     has_bilibili = bool(
         req.bilibili_manual_urls
         or req.bilibili_target_channels
         or req.manual_urls
         or req.target_channels
     )
-    if has_github and has_bilibili:
-        return list(DEFAULT_SOURCE_NAMES)
-    if has_github:
-        return ["github"]
     if has_bilibili:
-        return ["bilibili"]
-    return None
+        implied.append("bilibili")
+    if req.juya_manual_urls:
+        implied.append("juya")
+    return implied if implied else None
 
 
 def validate_source_selector_consistency(req: DigestRequest) -> None:
@@ -106,16 +106,37 @@ def validate_source_selector_consistency(req: DigestRequest) -> None:
         or req.target_channels
     )
     has_github_selector = bool(req.github_manual_urls or req.github_target_channels)
+    has_juya_selector = bool(req.juya_manual_urls)
 
     if names == ["github"] and has_bilibili_selector:
         raise ValueError(
             "Source selection is 'github only' but the request includes Bilibili "
             "video/channel selectors. Remove the conflicting source toggle or selector."
         )
+    if names == ["github"] and has_juya_selector:
+        raise ValueError(
+            "Source selection is 'github only' but the request includes Juya "
+            "website selectors. Remove the conflicting source toggle or selector."
+        )
     if names == ["bilibili"] and has_github_selector:
         raise ValueError(
             "Source selection is 'bilibili only' but the request includes GitHub "
             "repo/channel selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["bilibili"] and has_juya_selector:
+        raise ValueError(
+            "Source selection is 'bilibili only' but the request includes Juya "
+            "website selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["juya"] and has_github_selector:
+        raise ValueError(
+            "Source selection is 'juya only' but the request includes GitHub "
+            "repo/channel selectors. Remove the conflicting source toggle or selector."
+        )
+    if names == ["juya"] and has_bilibili_selector:
+        raise ValueError(
+            "Source selection is 'juya only' but the request includes Bilibili "
+            "video/channel selectors. Remove the conflicting source toggle or selector."
         )
 
 
@@ -141,16 +162,27 @@ def resolve_openclaw_digest_request(
         req = resolve_digest_request(message.strip())
         nl_sources = parse_connector_names_from_message(message)
         if nl_sources is not None:
-            req = replace(req, connector_names=normalize_source_names(nl_sources))
-        elif sources_hint is not None and sources_hint.strip():
+            names = normalize_source_names(nl_sources)
             req = replace(
                 req,
-                connector_names=normalize_source_hint(sources_hint),
+                connector_names=names,
+                primary_source=primary_source_from_names(names),
+            )
+        elif sources_hint is not None and sources_hint.strip():
+            names = normalize_source_hint(sources_hint)
+            req = replace(
+                req,
+                connector_names=names,
+                primary_source=primary_source_from_names(names),
             )
         elif req.connector_names is None:
             inferred = _infer_connector_names_from_selectors(req)
             if inferred is not None:
-                req = replace(req, connector_names=inferred)
+                req = replace(
+                    req,
+                    connector_names=inferred,
+                    primary_source=primary_source_from_names(inferred),
+                )
         if style_kw:
             req = replace(req, **style_kw)
         validate_source_selector_consistency(req)
@@ -160,6 +192,9 @@ def resolve_openclaw_digest_request(
         "connector_names": normalize_source_hint(sources_hint),
         **style_kw,
     }
+    connector_names = kw["connector_names"]
+    assert isinstance(connector_names, list)
+    kw["primary_source"] = primary_source_from_names(connector_names)
     if timeframe_hint is not None and timeframe_hint.strip():
         kw["timeframe"] = normalize_timeframe_hint(timeframe_hint)
     topics = normalize_topic_hint(topics_hint)
@@ -218,6 +253,7 @@ def build_digest_request_from_hints(
     kw: dict[str, object] = {
         "timeframe": timeframe,
         "connector_names": sources,
+        "primary_source": primary_source_from_names(sources),
     }
     if topics is not None:
         kw["topics"] = topics

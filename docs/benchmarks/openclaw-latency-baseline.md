@@ -8,7 +8,7 @@ Captured before the persistent digest-service adapter. Use the same prompts for 
 - Repo: `agentic_ai_proj`
 - Gradio: `uv run python -m ai_news_agent.app.gradio_app` (live mode)
 - OpenClaw: `openclaw gateway run` + `ai-news-digest` skill via CLI exec
-- Prompt under test: `Give me today's AI digest` (default `github,bilibili`, timeframe `today`)
+- Prompt under test: `Give me today's AI digest` (default **`juya`**, timeframe `today`)
 
 ## Digest runtime (workflow only)
 
@@ -60,25 +60,26 @@ With the digest service running, verify these prompts route through `openclaw-di
 | `Digest bilibili video BV1gRJs63EYX` | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | `Digest https://www.bilibili.com/video/BV1gRJs63EYX` | `openclaw-digest --message "Digest https://www.bilibili.com/video/BV1gRJs63EYX"` |
 | `Digest https://github.com/langchain-ai/langgraph` | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
-| `Digest https://github.com/jujuyaya/juya-ai-daily` | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
+| `Digest https://daily.juya.uk/` | `openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
+| `Digest https://github.com/jujuyaya/juya-ai-daily` | **Rejected** — legacy alias; use `https://daily.juya.uk/` |
 
 Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.
 
 ### Juya daily website ingestion smoke
 
 1. Start digest service: `uv run ai-news-agent service --port 8765`
-2. Run either:
+2. Run:
    - `uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN`
-   - `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` (legacy alias)
 3. Expect digest items with daily post titles/links (e.g. `daily.juya.uk/issues/...`), compact Chinese issue index output, and richer evidence from per-issue markdown when available.
-4. If website RSS is unreachable, expect **no** Juya items plus `juya_rss_unavailable` in connector caveats (no GitHub repo-metadata fallback).
-5. If per-issue markdown is missing for an entry, expect `juya_markdown_unavailable` and RSS snippet or `content:encoded` fallback preserved.
+4. If you pass the legacy GitHub repo URL `https://github.com/jujuyaya/juya-ai-daily`, expect a **validation error** directing you to `https://daily.juya.uk/` (no ingestion).
+5. If website RSS is unreachable, expect **no** Juya items plus `juya_rss_unavailable` in connector caveats (no GitHub repo-metadata fallback).
+6. If per-issue markdown is missing for an entry, expect `juya_markdown_unavailable` and RSS snippet or `content:encoded` fallback preserved.
 
 ## Structured follow-up smoke (OpenClaw)
 
 Prerequisite: digest service running and a digest already generated in the same `digest.sqlite`.
 
-1. Generate digest: `uv run ai-news-agent openclaw-digest --fake --timeframe today --sources github`
+1. Generate digest: `uv run ai-news-agent openclaw-digest --fake --timeframe today --sources juya`
 2. Follow up: `uv run ai-news-agent openclaw-followup --message "show sources"`
 3. Expect numbered source links from the latest digest (not a new digest run).
 4. Try `openclaw-followup --message "show caveats"` and `openclaw-followup --message "which item should I study first"`.

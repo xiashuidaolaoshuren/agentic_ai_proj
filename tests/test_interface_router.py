@@ -45,11 +45,11 @@ class _FakeToolCallModel:
         return msg
 
 
-def _noop_factories() -> tuple[Any, Any]:
+def _noop_factories() -> tuple[Any, Any, Any]:
     def _factory() -> Any:
         raise AssertionError("connector factory should not run")
 
-    return _factory, _factory
+    return _factory, _factory, _factory
 
 
 def _build_router(
@@ -66,7 +66,7 @@ def _build_router(
     if store is None:
         store = DigestStore(tmp_path / "router.db")
         store.init_schema()
-    gh, bh = _noop_factories()
+    gh, bh, jh = _noop_factories()
 
     async def _default_workflow(
         _req: DigestRequest,
@@ -82,6 +82,7 @@ def _build_router(
         digest_model=digest_model,
         github_factory=gh,
         bilibili_factory=bh,
+        juya_factory=jh,
         build_connectors_fn=lambda _req: [],
         interface_name="test",
     )
@@ -216,6 +217,85 @@ def test_route_passes_on_stage_to_registry(tmp_path: Path) -> None:
 
     assert len(registry_calls) == 1
     assert registry_calls[0]["on_stage"] is on_stage
+
+
+def test_interface_router_forwards_juya_factory(tmp_path: Path) -> None:
+    from ai_news_agent.tools.interface_router import build_interface_tool_router
+
+    trusted_request = DigestRequest(topics=["AI agents"])
+    registry_calls: list[dict[str, object]] = []
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=7,
+        markdown="# Digest",
+        text="Digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+
+    def spy_build_tool_registry(**kwargs: object):
+        registry_calls.append(kwargs)
+        return build_tool_registry(**kwargs)
+
+    gh, bh, juya_factory = _noop_factories()
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "generate_ai_news_digest",
+                        "args": {},
+                        "id": "call-digest",
+                    }
+                ],
+            ),
+            AIMessage(content="unused"),
+        ]
+    )
+
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
+        raise AssertionError("workflow must not run")
+
+    router = build_interface_tool_router(
+        store=DigestStore(tmp_path / "juya-factory-router.db"),
+        workflow_runner=_workflow,
+        streaming_workflow_runner=None,
+        tool_model=model,
+        digest_model=object(),
+        github_factory=gh,
+        bilibili_factory=bh,
+        juya_factory=juya_factory,
+        build_connectors_fn=lambda _req: [],
+        interface_name="test",
+    )
+    router._store.init_schema()
+
+    with patch(
+        "ai_news_agent.tools.interface_router.build_tool_registry",
+        spy_build_tool_registry,
+    ), patch(
+        "ai_news_agent.tools.registry.run_digest_instrumented",
+        AsyncMock(return_value=digest_result),
+    ):
+        asyncio.run(
+            router.route(
+                message="Generate digest.",
+                digest_request=trusted_request,
+            )
+        )
+
+    assert len(registry_calls) == 1
+    assert registry_calls[0]["juya_factory"] is juya_factory
 
 
 def test_intent_precedence_structured_wins_over_digest_keyword(tmp_path: Path) -> None:
@@ -665,7 +745,7 @@ def test_open_ended_agent_conversational_passthrough(tmp_path: Path) -> None:
 
     from ai_news_agent.tools.interface_router import build_interface_tool_router
 
-    gh, bh = _noop_factories()
+    gh, bh, jh = _noop_factories()
 
     async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
@@ -678,6 +758,7 @@ def test_open_ended_agent_conversational_passthrough(tmp_path: Path) -> None:
         digest_model=object(),
         github_factory=gh,
         bilibili_factory=bh,
+        juya_factory=jh,
         build_connectors_fn=lambda _req: [],
         interface_name="test",
     )

@@ -337,6 +337,66 @@ def test_collect_owner_repos_channel() -> None:
     asyncio.run(main())
 
 
+JUYA_GITHUB_URL = "https://github.com/jujuyaya/juya-ai-daily"
+JUYA_WEBSITE_URL = "https://daily.juya.uk/"
+
+
+def test_collect_juya_website_url_does_not_fetch_rss() -> None:
+    requested_hosts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_hosts.append(request.url.host or "")
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            out = await GitHubConnector(token=None, client=client).collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_manual_urls=[JUYA_WEBSITE_URL],
+                    max_items=5,
+                ),
+            )
+        assert "daily.juya.uk" not in requested_hosts
+        assert out.items == []
+        assert any(w.code == "invalid_manual_url" for w in out.warnings)
+
+    asyncio.run(main())
+
+
+def test_collect_juya_legacy_github_url_does_not_fetch_rss() -> None:
+    requested_hosts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_hosts.append(request.url.host or "")
+        if request.url.path == "/repos/jujuyaya/juya-ai-daily":
+            return httpx.Response(404, json={"message": "Not Found"})
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def main() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://api.github.com",
+        ) as client:
+            out = await GitHubConnector(token=None, client=client).collect(
+                ConnectorRequest(
+                    topics=[],
+                    github_manual_urls=[JUYA_GITHUB_URL],
+                    max_items=5,
+                ),
+            )
+        assert "daily.juya.uk" not in requested_hosts
+        assert "api.github.com" in requested_hosts
+        assert out.items == []
+
+    asyncio.run(main())
+
+
 def test_parse_github_repo_ref() -> None:
     from ai_news_agent.connectors.github import parse_github_repo_ref
 

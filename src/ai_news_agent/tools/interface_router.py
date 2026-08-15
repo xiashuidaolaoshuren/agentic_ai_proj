@@ -77,6 +77,7 @@ class InterfaceToolRouter:
         digest_model: Any,
         github_factory: ConnectorFactory,
         bilibili_factory: ConnectorFactory,
+        juya_factory: ConnectorFactory,
         build_connectors_fn: BuildConnectorsFn,
         now_provider: Callable[[], datetime] | None = None,
         interface_name: str,
@@ -89,6 +90,7 @@ class InterfaceToolRouter:
         self._digest_model = digest_model
         self._github_factory = github_factory
         self._bilibili_factory = bilibili_factory
+        self._juya_factory = juya_factory
         self._build_connectors_fn = build_connectors_fn
         self._now_provider = now_provider
         self._interface_name = interface_name
@@ -335,6 +337,7 @@ class InterfaceToolRouter:
                 store=self._store,
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
+                juya_factory=self._juya_factory,
                 digest_request=digest_request,
                 connectors=connectors or [],
                 model=self._digest_model,
@@ -346,6 +349,7 @@ class InterfaceToolRouter:
                 store=self._store,
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
+                juya_factory=self._juya_factory,
                 register_structured_tools=True,
             )
         else:
@@ -353,6 +357,7 @@ class InterfaceToolRouter:
                 store=self._store,
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
+                juya_factory=self._juya_factory,
             )
         return build_tool_agent_runner(
             registry=registry,
@@ -553,6 +558,7 @@ def build_interface_tool_router(
     digest_model: Any,
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
+    juya_factory: ConnectorFactory,
     build_connectors_fn: BuildConnectorsFn,
     now_provider: Callable[[], datetime] | None = None,
     interface_name: str,
@@ -567,6 +573,7 @@ def build_interface_tool_router(
         digest_model=digest_model,
         github_factory=github_factory,
         bilibili_factory=bilibili_factory,
+        juya_factory=juya_factory,
         build_connectors_fn=build_connectors_fn,
         now_provider=now_provider,
         interface_name=interface_name,

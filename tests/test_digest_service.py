@@ -19,6 +19,7 @@ from ai_news_agent.app.digest_service import (
     build_digest_request_payload,
 )
 from ai_news_agent.request import DigestRequest
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 from ai_news_agent.tools.schemas import (
     InterfaceAgentResult,
     InterfaceAgentResultKind,
@@ -182,7 +183,7 @@ def test_build_digest_request_payload_maps_hints() -> None:
 def test_build_digest_request_payload_omits_topics_when_absent() -> None:
     payload = build_digest_request_payload()
     assert payload["timeframe"] == "today"
-    assert payload["sources"] == "github,bilibili"
+    assert payload["sources"] == ",".join(DEFAULT_SOURCE_NAMES)
     assert "topics" not in payload
 
 
@@ -281,7 +282,50 @@ def test_digest_service_runtime_live_builds_interface_tool_router(
     assert callable(router_calls[0]["build_connectors_fn"])
     assert callable(router_calls[0]["workflow_runner"])
     assert router_calls[0]["streaming_workflow_runner"] is None
+    assert "juya_factory" in router_calls[0]
     assert runtime._interface_router is fake_router
+
+
+def test_digest_service_runtime_live_passes_juya_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory_calls: list[dict[str, object]] = []
+    router_calls: list[dict[str, object]] = []
+
+    def recording_build_connector_factory(**kwargs: object) -> MagicMock:
+        factory_calls.append(dict(kwargs))
+        return MagicMock(name=f"ConnectorFactory-{kwargs.get('name')}")
+
+    def spy_build_interface_tool_router(**kwargs: object) -> MagicMock:
+        router_calls.append(kwargs)
+        return MagicMock(name="InterfaceToolRouter")
+
+    monkeypatch.setattr(digest_service, "build_chat_model", lambda: MagicMock(name="ChatModel"))
+    monkeypatch.setattr(
+        digest_service,
+        "build_tool_chat_model",
+        lambda: MagicMock(name="ToolChatModel"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_connector_factory",
+        recording_build_connector_factory,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        digest_service,
+        "build_interface_tool_router",
+        spy_build_interface_tool_router,
+        raising=False,
+    )
+
+    DigestServiceRuntime(fake=False, db_path=tmp_path / "live-juya-factory.db")
+
+    assert any(call.get("name") == "juya" for call in factory_calls)
+    assert len(router_calls) == 1
+    assert router_calls[0]["juya_factory"] is not None
 
 
 def test_digest_service_runtime_fake_mode_has_no_interface_router(tmp_path: Path) -> None:

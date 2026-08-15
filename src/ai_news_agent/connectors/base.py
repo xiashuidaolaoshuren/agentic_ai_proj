@@ -27,6 +27,8 @@ class ConnectorRequest:
     github_target_channels: list[str] = field(default_factory=list)
     #: GitHub repository page URLs (``owner/repo``).
     github_manual_urls: list[str] = field(default_factory=list)
+    #: Juya website (``daily.juya.uk``) target URLs; routed to the Juya connector.
+    juya_manual_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

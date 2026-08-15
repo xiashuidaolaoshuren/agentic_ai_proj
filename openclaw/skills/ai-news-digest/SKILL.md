@@ -1,6 +1,6 @@
 ---
 name: ai-news-digest
-description: "Generate an AI news digest from GitHub, Bilibili, or daily.juya.uk (橘鸦AI早报) via the local warm digest service. Use exec to call openclaw-digest — never use web_fetch."
+description: "Generate an AI news digest from Juya (default), GitHub, or Bilibili via the local warm digest service. Use exec to call openclaw-digest — never use web_fetch."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["uv"]}}}
 ---
@@ -61,7 +61,7 @@ Map user intent into constrained CLI options. Defaults and aliases match
 | --- | --- | --- |
 | Full user digest phrase (preferred for targeted) | `--message` | Pass the user's digest sentence verbatim as one quoted argument. |
 | Timeframe | `--timeframe` | Default `today`. Map `daily` -> `today`; `week` / `this week` / `last7` -> `last_7_days`. |
-| Sources | `--sources` | Default `github,bilibili` for broad digests. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
+| Sources | `--sources` | Default **`juya`** for bare broad digests. Use `github`, `bilibili`, or comma-separated mixes when the user asks explicitly. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
 | Topics | `--topics` | Optional comma-separated list. Omit when user does not specify topics. |
 | Output style | `--output-style` | Default bulletin. Use `editorial` or `newsletter` for a compact Chinese Juya index (one line per issue). |
 | Output language | `--output-language` | Optional BCP-47 tag. Use `zh-CN` with Juya editorial digests. |
@@ -87,11 +87,13 @@ uv run ai-news-agent openclaw-digest --message "<user digest sentence>"
 
 Add `--topics <csv>` only when the user specified topics for broad digests.
 
-**Juya editorial digest template (preferred for `daily.juya.uk` / legacy `jujuyaya/juya-ai-daily` alias):**
+**Juya editorial digest template (website-only — `https://daily.juya.uk/`):**
 
 ```bash
 uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN
 ```
+
+The legacy GitHub repo `jujuyaya/juya-ai-daily` is **rejected** with guidance to use `https://daily.juya.uk/` instead. Do not pass that URL to `openclaw-digest`.
 
 This stays on the local workflow (website RSS + per-issue markdown enrichment, ranking, summarization, persistence).
 The top-level output is a **compact issue index**. For sub-news extraction inside one issue,
@@ -108,13 +110,14 @@ uv run ai-news-agent openclaw-digest --fake --message "Digest bilibili video BV1
 
 | User prompt | Command |
 | --- | --- |
-| Give me today's AI digest. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili` |
+| Give me today's AI digest. | `uv run ai-news-agent openclaw-digest --timeframe today --sources juya` |
 | Give me today's AI digest from GitHub only. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github` |
-| Give me this week's AI digest on RAG and agents. | `uv run ai-news-agent openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
+| Give me this week's AI digest on RAG and agents. | `uv run ai-news-agent openclaw-digest --timeframe last_7_days --sources juya --topics RAG,agents` |
+| Give me a mixed digest from GitHub and Bilibili. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili` |
 | Digest bilibili video BV1gRJs63EYX | `uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
-| Digest https://github.com/jujuyaya/juya-ai-daily | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
 | Digest https://daily.juya.uk/ | `uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
+| Digest https://github.com/jujuyaya/juya-ai-daily | **Rejected** — use `https://daily.juya.uk/` instead |
 | Digest bilibili channel 285286947 | `uv run ai-news-agent openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Return the client stdout (markdown digest) to the user unchanged. Preserve source links and
@@ -142,7 +145,7 @@ Prefer the warm `openclaw-digest` path for lower latency.
 | --- | --- |
 | Service not reachable | Ask user to start `uv run ai-news-agent service` and retry. |
 | Missing `OPENAI_API_KEY` in live mode | Explain live digest requires `OPENAI_API_KEY`; suggest `--fake` smoke. |
-| Invalid source name | Report allowed sources: `github`, `bilibili`. |
+| Invalid source name | Report allowed sources: `juya`, `github`, `bilibili`. |
 | Conflicting source toggle vs URL/channel selector | Explain the mismatch and ask user to remove one side of the conflict. |
 | Empty digest or connector warnings | Return digest output and surface warnings. |
 | Non-zero exit code | Summarize stderr; do not expose full stack traces. |

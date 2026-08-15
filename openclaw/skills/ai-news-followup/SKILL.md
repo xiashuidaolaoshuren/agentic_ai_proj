@@ -32,7 +32,7 @@ through `ai-news-digest`, including:
 **Prerequisite:** a digest must already exist in the service database. Run
 `ai-news-digest` first if the user has not generated a digest in this session.
 
-For **Juya daily** digests (`daily.juya.uk` or legacy `jujuyaya/juya-ai-daily` alias), rank-targeted follow-up expands the
+For **Juya daily** digests (`https://daily.juya.uk/` only), rank-targeted follow-up expands the
 selected issue into structured sub-news using persisted website markdown evidence. Return that output
 unchanged instead of improvising sub-items from memory.
 

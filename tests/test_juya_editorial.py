@@ -16,8 +16,8 @@ from ai_news_agent.adapters.openclaw import (
 )
 from ai_news_agent.app.digest_service import build_digest_request_payload
 from ai_news_agent.connectors.base import ConnectorRequest
-from ai_news_agent.connectors.github import GitHubConnector
-from ai_news_agent.connectors.github_juya import (
+from ai_news_agent.connectors.juya import (
+    JuyaConnector,
     clean_issue_markdown,
     enrich_juya_items_with_markdown,
     markdown_url_for_issue,
@@ -126,7 +126,7 @@ def test_enrich_juya_items_warns_when_markdown_and_encoded_missing() -> None:
 
 
 def test_collect_juya_repo_enriches_from_website_markdown() -> None:
-    rss_text = _atom_fixture()
+    rss_text = (FIXTURES / "juya_rss_atom_sample.xml").read_text(encoding="utf-8")
     markdown = {"/markdown/2026-06-16.md": _markdown_fixture()}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -142,19 +142,16 @@ def test_collect_juya_repo_enriches_from_website_markdown() -> None:
 
     async def main() -> None:
         transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="https://api.github.com",
-        ) as client:
-            out = await GitHubConnector(token=None, client=client).collect(
+        async with httpx.AsyncClient(transport=transport) as client:
+            out = await JuyaConnector(client=client).collect(
                 ConnectorRequest(
                     topics=[],
-                    github_manual_urls=[JUYA_URL],
                     max_items=5,
                 ),
             )
         assert len(out.items) == 1
         assert "SpaceX" in (out.items[0].raw_snippet or "")
+        assert out.items[0].source is SourceKind.JUYA
 
     asyncio.run(main())
 
@@ -168,7 +165,7 @@ def test_normalize_output_style_and_language_hints() -> None:
 
 def test_build_digest_request_payload_includes_style_fields() -> None:
     payload = build_digest_request_payload(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        message="Digest https://daily.juya.uk/",
         output_style_hint="editorial",
         output_language_hint="zh-CN",
     )
@@ -179,7 +176,7 @@ def test_build_digest_request_payload_includes_style_fields() -> None:
 
 def test_resolve_openclaw_digest_request_applies_style_hints() -> None:
     req = resolve_openclaw_digest_request(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        message="Digest https://daily.juya.uk/",
         output_style_hint="editorial",
         output_language_hint="zh-CN",
     )

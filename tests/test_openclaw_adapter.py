@@ -10,11 +10,12 @@ from ai_news_agent.adapters.openclaw import (
     normalize_timeframe_hint,
     normalize_topic_hint,
 )
+from ai_news_agent.sources import DEFAULT_SOURCE_NAMES
 
 
 def test_normalize_source_hint_empty_defaults_to_canonical_sources() -> None:
-    assert normalize_source_hint(None) == ["github", "bilibili"]
-    assert normalize_source_hint("") == ["github", "bilibili"]
+    assert normalize_source_hint(None) == list(DEFAULT_SOURCE_NAMES)
+    assert normalize_source_hint("") == list(DEFAULT_SOURCE_NAMES)
 
 
 def test_normalize_source_hint_parses_csv_sources() -> None:
@@ -64,7 +65,7 @@ def test_build_digest_cli_argv_returns_token_list_with_defaults() -> None:
         "--timeframe",
         "today",
         "--sources",
-        "github,bilibili",
+        ",".join(DEFAULT_SOURCE_NAMES),
     ]
 
 
@@ -101,7 +102,20 @@ def test_build_digest_request_from_hints_maps_defaults() -> None:
     )
     assert req.timeframe == "last_7_days"
     assert req.connector_names == ["github"]
+    assert req.primary_source == "github"
     assert req.topics == ["RAG", "agents"]
+
+
+def test_resolve_openclaw_digest_request_hint_only_sets_primary_source() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    mixed = resolve_openclaw_digest_request(sources_hint="github,bilibili")
+    assert mixed.connector_names == ["github", "bilibili"]
+    assert mixed.primary_source == "github"
+
+    default = resolve_openclaw_digest_request()
+    assert default.connector_names == ["juya"]
+    assert default.primary_source == "juya"
 
 
 def test_adapters_package_exports_public_surface() -> None:

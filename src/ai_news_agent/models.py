@@ -16,6 +16,7 @@ def utcnow() -> datetime:
 class SourceKind(StrEnum):
     GITHUB = "github"
     BILIBILI = "bilibili"
+    JUYA = "juya"
 
 
 class FollowUpAction(StrEnum):

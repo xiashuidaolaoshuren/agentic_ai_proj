@@ -15,8 +15,8 @@ The AI News Research Agent is a local-first, on-demand chatbot designed to be a 
 
 ### Key Features
 - **On-Demand Digest**: Generate a ranked AI news digest upon request.
-- **Multi-Source Discovery**: Initial support for GitHub and Bilibili, with a modular design for future expansion (arXiv, Hugging Face, etc.).
-- **Intelligent Ranking**: Scores items based on freshness, relevance, and learning value.
+- **Multi-Source Discovery**: Distinct roles for Juya (default bulletin), GitHub (opt-in trending repos), and Bilibili (opt-in video), with modular expansion (arXiv, Hugging Face, generic RSS, etc.).
+- **Intelligent Ranking**: Kind-aware scores and segmented mixed digests; freshness, relevance, and learning value within each source kind.
 - **Contextual Summarization**: Summaries in the source's original language, including "why it matters" and background knowledge requirements.
 - **Interactive Follow-up**: A chatbot interface that allows users to ask questions about the generated digest.
 - **Inspectable Traces**: Local storage of source metadata and ranking decisions for transparency and verification.
@@ -25,7 +25,7 @@ The AI News Research Agent is a local-first, on-demand chatbot designed to be a 
 The system follows a modular architecture to ensure flexibility and maintainability:
 - **Chat Interface**: A Gradio-based local UI for user interaction.
 - **Agent Orchestrator**: Powered by **LangGraph** to manage stateful, multi-step workflows.
-- **Source Connectors**: Dedicated modules for interfacing with GitHub and Bilibili.
+- **Source Connectors**: Dedicated modules for Juya, GitHub, and Bilibili (distinct product jobs).
 - **Ranking & Summarization Layers**: Logic for filtering and generating content using LLMs.
 - **Storage Layer**: SQLite for local persistence of digests and metadata.
 - **Interface Adapters**: Designed to support future integrations like **OpenClaw**.
@@ -43,8 +43,9 @@ The system follows a modular architecture to ensure flexibility and maintainabil
 - **Milestone 2: LLM Tool Usage Layer**: Structured tool registry and bounded LangGraph tool-calling loop for follow-up chat and source exploration.
 - **Milestone 3: OpenClaw Adapter**: Exposing the agent as a tool within the OpenClaw assistant gateway.
 - **Milestone 4: Pydantic Schema + LangChain `@tool` Registry Migration**: Migrate domain models and tool schemas to Pydantic v2 and the tool registry to LangChain's `@tool` workflow.
-- **Milestone 5: Source Expansion**: Adding connectors for arXiv, Hugging Face, and RSS feeds.
-- **Milestone 6: Advanced Features**: Scheduled digests, long-term memory, and automated quality evaluation.
+- **Milestone 5: Source Role Split**: First-class Juya connector, GitHub trending-repo re-purpose, Juya-only default, kind-aware segmented ranking (see `docs/adr/0001-source-role-split.md`).
+- **Milestone 6: Source Expansion**: Adding connectors for arXiv, Hugging Face, and generic RSS feeds.
+- **Milestone 7: Advanced Features**: Scheduled digests, long-term memory, and automated quality evaluation.
 
 ## 7. Expected Outcomes
 - A functional AI agent that significantly reduces the time spent on AI research.

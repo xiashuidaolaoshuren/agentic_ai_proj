@@ -24,7 +24,7 @@ from ai_news_agent.env import configure_bilibili_network_from_env, load_local_en
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
-from ai_news_agent.request import DigestRequest
+from ai_news_agent.request import DigestRequest, primary_source_from_names
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     FakeDigestModel,
@@ -71,7 +71,9 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
 
     sources = parse_sources_csv(getattr(ns, "sources", "") or "")
     if sources:
-        kw["connector_names"] = normalize_source_names(sources)
+        names = normalize_source_names(sources)
+        kw["connector_names"] = names
+        kw["primary_source"] = primary_source_from_names(names)
 
     output_style = normalize_output_style_hint(getattr(ns, "output_style", None))
     if output_style is not None:
@@ -138,8 +140,8 @@ def _add_digest_parser(sub: Any) -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--sources",
-        default="github,bilibili",
-        help="Comma-separated connector names (github, bilibili). Default: github,bilibili",
+        default="juya",
+        help="Comma-separated connector names (juya, github, bilibili). Default: juya",
     )
     p.add_argument("--top-n", type=int, default=None, help="Override top_n (default: 5)")
     p.add_argument(
@@ -208,7 +210,7 @@ def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
     p.add_argument(
         "--sources",
         default=None,
-        help="Comma-separated sources (github, bilibili)",
+        help="Comma-separated connector names (juya, github, bilibili). Default: juya",
     )
     p.add_argument("--topics", default=None, help="Comma-separated topics")
     p.add_argument(

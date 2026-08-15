@@ -4,18 +4,19 @@ Date: 2026-05-02
 Amended: 2026-05-19 (Bilibili connector library refactor)
 Amended: 2026-05-21 (Milestone 2 LLM tool usage layer)
 Amended: 2026-06-29 (Milestone 4 inserted: Pydantic + LangChain @tool migration; former M4 -> M5, former M5 -> M6)
+Amended: 2026-08-11 (Source role split per `docs/adr/0001-source-role-split.md`; Milestone 5 sourcing refactor inserted; former M5 -> M6, former M6 -> M7)
 
 ## Summary
 
-Build a local-first, on-demand AI News Research Chatbot for personal learning. The user asks for an AI digest, and the agent collects recent AI-related signals from GitHub and conservative Bilibili-oriented sources, ranks the most useful items, summarizes them in their source language, explains why they matter, suggests follow-up learning actions, and stores source traces for verification and follow-up chat.
+Build a local-first, on-demand AI News Research Chatbot for personal learning. The user asks for an AI digest, and the agent collects recent AI-related signals from distinct source roles — default **Juya** curated bulletin, opt-in **GitHub** trending-repo ecosystem signals, and opt-in **Bilibili** video discovery — ranks and presents them in a kind-aware way, summarizes them in their source language, explains why they matter, suggests follow-up learning actions, and stores source traces for verification and follow-up chat.
 
-OpenClaw is included as a planned Milestone 3 interface adapter, not as the MVP foundation.
+OpenClaw is included as a planned Milestone 3 interface adapter, not as the MVP foundation. Domain language lives in `CONTEXT.md`; architectural source-role decisions live in `docs/adr/0001-source-role-split.md`.
 
 ## Goals
 
 - Learn core agentic AI engineering patterns through a scoped, useful project.
 - Support an on-demand chatbot workflow: ask for a digest, receive ranked summaries, and ask follow-up questions.
-- Start with GitHub and Bilibili-oriented discovery while keeping source collection reliable and inspectable.
+- Keep each source's product job distinct: Juya = curated bulletin (default), GitHub = trending-repo ecosystem signal (opt-in), Bilibili = video learning signal (opt-in).
 - Preserve source URLs, collected metadata, ranking decisions, and generated outputs for debugging.
 - Keep the architecture modular so later sources and interfaces can be added without rewriting the core agent.
 - Add explicit LLM tool usage after the local digest MVP is stable, using existing connector and storage boundaries rather than duplicating source logic.
@@ -83,12 +84,13 @@ The orchestrator is responsible for:
 
 Each connector returns a normalized `NewsItem` object and hides source-specific access details.
 
-Initial connectors:
+Current / target connectors (distinct roles; see ADR-0001):
 
-- GitHub connector
-- Bilibili-oriented connector
+- **Juya** connector — curated daily bulletin from `https://daily.juya.uk/` (first-class; not a GitHub special case)
+- **GitHub** connector — opt-in ecosystem signal; atomic item is a trending repo (stars × recency heuristic)
+- **Bilibili**-oriented connector — opt-in video metadata discovery
 
-Future connectors:
+Future connectors (Milestone 6+; do not absorb Juya into generic RSS):
 
 - arXiv
 - Hugging Face
@@ -97,15 +99,17 @@ Future connectors:
 
 ### Ranking Layer
 
-Scores and filters candidate items before summarization. Ranking should consider:
+Scores and filters candidate items before summarization. Ranking should use **kind-aware** features (bulletin issues, trending repos, and videos are not one naive “newsiness” score). Ranking should consider:
 
 - freshness
 - relevance to AI topics
 - source quality
-- popularity or engagement signal where available
+- popularity or engagement signal where available (for GitHub: stars combined with recent activity as a transparent trendy heuristic, not claimed star-delta until that data exists)
 - learning value for the user
 - metadata completeness
 - duplication with other candidates
+
+When a digest intentionally mixes SourceKinds, present **segmented sections by source** rather than a single interleaved top-N. Section order is **intent-first** (primary kind from the ask leads); otherwise fixed fallback **Juya → GitHub → Bilibili**, omitting empty sections.
 
 Ranking should prefer verifiable items with clear source links and useful metadata.
 
@@ -167,7 +171,11 @@ Initial connector tools:
 - `search_github_ai_news`: call the GitHub connector through the shared connector request boundary.
 - `search_bilibili_ai_news`: call the Bilibili connector through the shared connector request boundary.
 
-Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and RSS/blog search tools after Milestone 5 source expansion.
+After Milestone 5 source role split, add:
+
+- `search_juya_ai_news` (or equivalent): call the Juya connector through the shared connector request boundary.
+
+Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and generic RSS/blog search tools after Milestone 6 source expansion.
 
 The Milestone 2 agent should use a bounded tool-calling loop: the model decides when to call a registered tool, a tool execution node runs the call, and the model then answers from the returned observations. Tool calls must have typed input schemas, stable tool names, concise descriptions, and outputs that can be serialized to JSON or markdown for the final answer.
 
@@ -192,8 +200,8 @@ OpenClaw channel message
   -> OpenClaw Gateway
   -> registered tool: generate_ai_news_digest
   -> local or hosted Python agent API/CLI
-  -> GitHub and Bilibili connectors
-  -> ranked digest
+  -> selected connectors (default: Juya; else GitHub and/or Bilibili per cues)
+  -> kind-aware ranked / segmented digest
   -> OpenClaw reply
 ```
 
@@ -205,36 +213,59 @@ Primary adapter boundary:
 
 Fallback adapter boundary:
 
-- CLI: `python -m ai_news_agent digest --timeframe today --sources github,bilibili`
+- CLI: `python -m ai_news_agent digest --timeframe today` (default sources: Juya)
+- CLI: `python -m ai_news_agent digest --timeframe today --sources github,bilibili` (opt-in platforms)
 
-Source selection for all entrypoints (CLI, Gradio, future OpenClaw tool) should map to `DigestRequest.connector_names` via the shared registry in `ai_news_agent.sources`. `None` means all injected connectors; a non-empty list runs only those named connectors.
+### Source selection (all entrypoints)
+
+Source selection for CLI, Gradio, and OpenClaw maps to `DigestRequest.connector_names` via the shared registry in `ai_news_agent.sources`, with these product rules (ADR-0001):
+
+- **Bare digest** (no platform cue): run **Juya only**.
+- **Opt-in platforms**: add GitHub and/or Bilibili via explicit `--sources` / UI lists, clear intent phrases, or platform-specific targets (URLs, handles, “trending … repos”).
+- **Replace, don’t stack**: a clear GitHub/Bilibili cue **replaces** the Juya default unless Juya is also named or targeted.
+- **Juya targets**: website URLs only (`https://daily.juya.uk/…`). The legacy `https://github.com/jujuyaya/juya-ai-daily` URL is **not** a Juya alias — reject with guidance to the website.
+- Allowed connector names include at least `juya`, `github`, and `bilibili`.
 
 OpenClaw should not be required for MVP success.
 
 ## Data Flow
 
 1. User asks the chatbot for an AI digest.
-2. Agent interprets the request into topic, timeframe, source, language preferences, and optional source-targeting inputs (for example, specific Bilibili uploader handles/UIDs or manually supplied links).
-3. GitHub and Bilibili-oriented connectors collect candidate items.
-4. Candidates are normalized into a shared `NewsItem` format.
-5. Ranking layer filters duplicates and weak items, then selects top candidates.
-6. Summarization layer creates source-language summaries, significance notes, and learning suggestions.
+2. Agent interprets the request into topic, timeframe, source selection, language preferences, and optional source-targeting inputs (for example, Juya website URLs, Bilibili uploader handles/UIDs, manual video links, or GitHub topic/trending intent).
+3. Selected connectors collect candidate items (default: Juya; otherwise the implied/named set).
+4. Candidates are normalized into a shared `NewsItem` format with the correct `SourceKind` (`juya` / `github` / `bilibili`).
+5. Ranking layer applies kind-aware scoring, filters duplicates and weak items, and selects top candidates; mixed digests are segmented by source.
+6. Summarization layer creates source-language summaries, significance notes, and learning suggestions (including Juya editorial / issue deep-dive behavior where applicable).
 7. Storage layer saves source metadata, ranking decisions, and final digest.
 8. Follow-up chat uses the saved digest and source traces to answer questions.
 
 ## Source Strategy
 
-### GitHub
+### Juya (default bulletin)
 
-Use official GitHub APIs and search features where possible. The connector should collect metadata such as:
+Juya is a **first-class** curated daily AI bulletin, not a GitHub special case and not the Phase-6 generic RSS connector.
 
-- repository name
-- URL
-- description
-- stars and recent activity
-- language/topic tags
-- README excerpt when available and appropriate
-- creation or update time
+- Canonical target: `https://daily.juya.uk/` (RSS + per-issue markdown enrichment when available).
+- `SourceKind.JUYA` / connector name `"juya"`.
+- Bulletin rows must not be tagged as GitHub.
+- Follow-up may extract sub-news from persisted issue evidence (existing Juya deep-dive path).
+- Legacy GitHub repo URL `https://github.com/jujuyaya/juya-ai-daily` must **fail with guidance** to the website (clean break; update docs and smoke commands accordingly).
+
+### GitHub (opt-in ecosystem signal)
+
+GitHub’s product job is **open-source momentum**, not a primary news feed and not a host for Juya.
+
+- Atomic digest item: a **trending repo** under a topic, scored by a transparent heuristic (e.g. stars × recency of activity). Do not claim precise “stars gained in N days” until true star-delta exists.
+- Use official GitHub APIs and search features where possible. Collect metadata such as:
+  - repository name
+  - URL
+  - description
+  - stars and recent activity
+  - language/topic tags
+  - README excerpt when available and appropriate
+  - creation or update time
+- **Release** data may later enrich a GitHub item; releases are not the primary digest row in this refactor.
+- True star-velocity infrastructure and release-as-primary remain out of scope until after the sourcing refactor (Milestone 6+ as needed).
 
 ### Bilibili-Oriented Discovery
 
@@ -333,13 +364,14 @@ Environment variables (see `.env.example`):
 
 ### Future Sources
 
-After the core digest loop works, add connectors for:
+After the **source role split** (Milestone 5) lands, expand connectors for:
 
 - arXiv
 - Hugging Face
-- AI blogs and RSS feeds
+- AI blogs and **generic** RSS feeds (Juya stays a dedicated bulletin connector; do not collapse it into generic RSS on day one)
 - general news or web search
 - Bilibili transcript enrichment via `Video.get_subtitle` / `get_ai_conclusion` (library already integrated at connector layer)
+- Optional GitHub enrichments: true star-velocity, release metadata on trending repos
 
 ## Data Model
 
@@ -460,14 +492,28 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Keep the bounded LangGraph tool-calling loop, progress-line streaming, and `ToolObservation` return contract
 - See `docs/superpowers/specs/2026-06-29-pydantic-and-langchain-tool-migration-design.md`
 
-### Milestone 5: Broader Research Sources
+### Milestone 5: Source Role Split (before broader expansion)
+
+Prerequisite for Milestone 6. Implements ADR-0001 / `CONTEXT.md` source language:
+
+- Extract a first-class **Juya** connector (`SourceKind.JUYA`); stop routing bulletin ingestion through GitHub / `github_manual_urls`
+- Re-purpose **GitHub** toward topic trending-repo discovery (stars × recency heuristic); remove Juya website/RSS ownership from the GitHub connector
+- Change **default** digest sources to **Juya only**; GitHub and Bilibili opt-in via sources, intent, or platform targets (platform cue replaces Juya unless Juya also selected)
+- Reject legacy `github.com/jujuyaya/juya-ai-daily` as a Juya target with guidance to `https://daily.juya.uk/`
+- Kind-aware ranking features plus **segmented** mixed-digest presentation (intent-first section order; else Juya → GitHub → Bilibili)
+- Update CLI/Gradio/OpenClaw docs and smoke commands accordingly
+- Add `search_juya_ai_news` (or equivalent) through the existing connector-tool boundary when tools are updated
+
+Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-velocity, release-as-primary.
+
+### Milestone 6: Broader Research Sources
 
 - Add arXiv connector
 - Add Hugging Face connector
-- Add RSS/blog sources
-- Improve ranking across source types
+- Add generic RSS/blog sources (without collapsing Juya into them)
+- Further improve ranking across additional source types
 
-### Milestone 6: Memory, Scheduling, And Deployment
+### Milestone 7: Memory, Scheduling, And Deployment
 
 - Add scheduled daily or weekly digest generation
 - Add richer local memory or vector search if stored digests become large
@@ -479,8 +525,11 @@ Automated LLM-as-judge evaluation can be added later after the workflow stabiliz
 - Local chatbot UI: Gradio.
 - Model access: use an OpenAI-compatible client abstraction configured by environment variables, so the first implementation can work with the user's available API provider.
 - Initial topic taxonomy: AI agents, model releases, RAG, multimodal AI, AI developer tools, and notable open-source repos.
-- Initial GitHub query strategy: search recent repositories and topics using the taxonomy above, with ranking boosted by freshness, stars, recent activity, and README relevance.
-- Initial Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
-- Initial LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; start with follow-up inspection tools plus GitHub/Bilibili connector wrappers.
-- Default digest length: 5 ranked items per run, with the option to request a shorter or longer digest in chat.
+- Default source set: **Juya only** for bare digests; GitHub/Bilibili require explicit sources, clear intent, or platform-specific targets.
+- Juya strategy: website RSS + per-issue markdown enrichment from `daily.juya.uk`; no GitHub-repo alias.
+- GitHub query strategy: topic-scoped repository search scored as trending via stars × recency (transparent heuristic); README excerpt as evidence, not the story; releases optional later enrichment.
+- Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
+- Mixed-digest presentation: kind-aware scores + sectional output (intent-first; fallback Juya → GitHub → Bilibili).
+- Initial LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; follow-up inspection tools plus connector wrappers for Juya/GitHub/Bilibili as those connectors exist.
+- Default digest length: 5 ranked items per run (per section or overall as implemented for segmented digests), with the option to request a shorter or longer digest in chat.
 

@@ -7,7 +7,12 @@ from argparse import Namespace
 
 import pytest
 
-from ai_news_agent.cli import build_arg_parser, build_digest_request, main
+from ai_news_agent.cli import (
+    _pick_connector_names,
+    build_arg_parser,
+    build_digest_request,
+    main,
+)
 from ai_news_agent import topics
 
 
@@ -27,6 +32,21 @@ def test_build_digest_request_maps_flags() -> None:
     assert req.connector_names == ["github", "bilibili"]
     assert req.top_n == 3
     assert req.max_items_per_source == 7
+
+
+def test_build_digest_request_sets_primary_source_from_sources() -> None:
+    ns = Namespace(
+        timeframe="today",
+        topics=None,
+        sources="github,juya",
+        top_n=None,
+        max_items=None,
+        db_path=None,
+        fake=False,
+    )
+    req = build_digest_request(ns)
+    assert req.connector_names == ["github", "juya"]
+    assert req.primary_source == "github"
 
 
 def test_build_digest_request_default_topics_when_omitted() -> None:
@@ -163,3 +183,16 @@ def test_e2e_live_requires_openai_or_exits(monkeypatch, tmp_path, capsys) -> Non
     err = capsys.readouterr().err
     assert code == 2
     assert "OPENAI_API_KEY" in err
+
+
+def test_cli_digest_defaults_to_juya_when_sources_omitted(capsys) -> None:
+    """Omitting --sources resolves to juya-only (DEFAULT_SOURCE_NAMES)."""
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["digest", "--help"])
+    help_text = capsys.readouterr().out
+    ns = build_arg_parser().parse_args(["digest"])
+    req = build_digest_request(ns)
+    assert req.connector_names == ["juya"]
+    assert _pick_connector_names(ns) == ["juya"]
+    assert "juya" in help_text

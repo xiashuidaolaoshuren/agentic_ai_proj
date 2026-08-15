@@ -1,6 +1,6 @@
 # AI News Research Agent
 
-Local-first Python agent that generates **on-demand AI news digests** from GitHub and conservative Bilibili-oriented sources, ranks candidates, summarizes them with an LLM (or offline fakes), persists runs to SQLite, and exposes a **CLI** plus optional **Gradio** chat UI.
+Local-first Python agent that generates **on-demand AI news digests** from **Juya** (default daily bulletin), optional **GitHub** trending-repo signals, and conservative **Bilibili**-oriented sources. It ranks candidates, summarizes them with an LLM (or offline fakes), persists runs to SQLite, and exposes a **CLI** plus optional **Gradio** chat UI.
 
 Design details: [AI News Research Agent design](docs/superpowers/specs/2026-05-02-ai-news-research-agent-design.md).
 
@@ -80,13 +80,21 @@ Open the printed URL (default port **7860**). Try **“Give me today's AI digest
 
 Requires `OPENAI_API_KEY` (in `.env` or your shell). Optionally set `GITHUB_TOKEN` for reliability.
 
+Bare request (Juya-only default):
+
+```bash
+uv run ai-news-agent digest --timeframe today
+```
+
+Explicit mixed sources (GitHub + Bilibili, no Juya):
+
 ```bash
 uv run ai-news-agent digest --sources github,bilibili --topics "RAG,agents" --timeframe today
 ```
 
 Useful flags:
 
-- `--sources` — comma-separated: `github`, `bilibili`
+- `--sources` — comma-separated: `juya`, `github`, `bilibili` (default: `juya`)
 - `--topics` — comma-separated topic strings (omit for built-in defaults)
 - `--timeframe` — passed through to connectors (e.g. `today`)
 - `--top-n`, `--max-items` — ranking/collection limits
@@ -132,11 +140,11 @@ Example prompts live in a collapsible **Example prompts** panel below the chat. 
 | Legacy LLM | Grounded reply via `generate_followup_reply` | Only when `tool_agent_runner` is not set |
 | Guidance | Static hint to use structured prompts | When no model or tool agent is configured |
 
-Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source_trace`, `get_ranking_explanation`, `search_github_ai_news`, `search_bilibili_ai_news` (see [`tools/registry.py`](src/ai_news_agent/tools/registry.py)).
+Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source_trace`, `get_ranking_explanation`, `search_juya_ai_news`, `search_github_ai_news`, `search_bilibili_ai_news` (see [`tools/registry.py`](src/ai_news_agent/tools/registry.py)).
 
 **Fake mode (`--fake`):**
 
-- Digest: `FakeDigestModel` + fake GitHub/Bilibili connectors (no API keys).
+- Digest: `FakeDigestModel` + fake Juya/GitHub/Bilibili connectors (no API keys).
 - Structured follow-ups: work as in live mode (deterministic from stored traces).
 - Open-ended follow-ups: return a **fixed offline message** from the fake tool agent (no real tool-calling model, no connector search). Use structured prompts for reliable offline demos.
 
@@ -149,19 +157,22 @@ Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source
 | Digest | `Give me today's AI digest` |
 | Structured | `show sources`, `Which item should I study first?`, `Any confidence caveats?` |
 | Open-ended | `Why does the top item matter for RAG agents?` |
-| Source exploration | `Search GitHub for langgraph agents`, `Search Bilibili for RAG tutorials` |
+| Source exploration | `Search Juya for agent news`, `Search GitHub for langgraph agents`, `Search Bilibili for RAG tutorials` |
 
 In **fake mode**, open-ended and source-exploration prompts return the offline tool-agent guidance string, not live search results.
 
 ### Source toggles and selection
 
-Gradio shows **session-sticky** checkboxes for `github` and `bilibili` (both enabled by default). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.
+Gradio shows **session-sticky** checkboxes for `juya`, `github`, and `bilibili` (**Juya selected by default**). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.
+
+Bare digest requests (no source toggles or explicit `--sources`) resolve to **Juya-only** via [`DEFAULT_SOURCE_NAMES`](src/ai_news_agent/sources.py). Select multiple checkboxes or pass a comma-separated `--sources` list for a **mixed digest**; section order is primary intent first, otherwise Juya → GitHub → Bilibili (empty sections omitted).
 
 You can override the toggles for a single request with natural-language phrases:
 
+- `Give me today's AI digest` (Juya-only default)
 - `Give me today's AI digest from github only`
 - `bilibili only digest today`
-- `use github and bilibili for today's digest`
+- `use juya and github for today's digest`
 
 CLI, Gradio, and OpenClaw share the canonical source registry in [`sources.py`](src/ai_news_agent/sources.py). The OpenClaw adapter maps hints to the same `DigestRequest.connector_names` field via CLI flags.
 
@@ -171,11 +182,14 @@ In chat, you can include GitHub repo URLs, Bilibili video URLs, or channel hints
 
 Examples:
 
+- `Digest https://daily.juya.uk/` (Juya daily bulletin; use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index)
 - `Digest https://github.com/langchain-ai/langgraph`
 - `Digest https://www.bilibili.com/video/BV1xxxxx`
 - `Digest bilibili channel 285286947`
 - `Digest github user openai and https://www.bilibili.com/video/BV1demo0001`
-- `Give me today's AI digest` (default topics + timeframe when mentioned)
+- `Give me today's AI digest` (Juya-only default topics + timeframe when mentioned)
+
+**Juya targeting is website-only.** The legacy GitHub repo `jujuyaya/juya-ai-daily` is **rejected** with an actionable error pointing to `https://daily.juya.uk/` (see [`intent.py`](src/ai_news_agent/intent.py)).
 
 If Bilibili requests fail with HTTP 412:
 
@@ -251,26 +265,27 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 
 | Smoke prompt | Expected CLI shape |
 |--------------|-------------------|
-| Give me today's AI digest. | `openclaw-digest --timeframe today --sources github,bilibili` |
+| Give me today's AI digest. | `openclaw-digest --timeframe today --sources juya` |
 | Give me today's AI digest from GitHub only. | `openclaw-digest --timeframe today --sources github` |
-| Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources github,bilibili --topics RAG,agents` |
+| Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources juya --topics RAG,agents` |
+| Give me a mixed digest from GitHub and Bilibili. | `openclaw-digest --timeframe today --sources github,bilibili` |
 | Digest bilibili video BV1gRJs63EYX | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
-| Digest https://github.com/jujuyaya/juya-ai-daily | `openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN` |
 | Digest https://daily.juya.uk/ | `openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
+| Digest https://github.com/jujuyaya/juya-ai-daily | **Rejected** — use `https://daily.juya.uk/` instead |
 | Digest bilibili channel 285286947 | `openclaw-digest --message "Digest bilibili channel 285286947"` |
 
 Full commands (from repo root, service running):
 
 ```bash
+uv run ai-news-agent openclaw-digest --timeframe today --sources juya
 uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili
 uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"
-uv run ai-news-agent openclaw-digest --message "Digest https://github.com/jujuyaya/juya-ai-daily" --output-style editorial --output-language zh-CN
 uv run ai-news-agent openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Targeted Juya digests (`https://daily.juya.uk/` or the legacy `jujuyaya/juya-ai-daily` GitHub URL alias) ingest daily entries from the website RSS feed, then enrich each issue from `daily.juya.uk/markdown/{date}.md` when available (falling back to RSS `content:encoded`). Use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index. Ask for a specific issue with `openclaw-followup --message "Digest the first news"` to expand sub-news from persisted issue evidence.
+Targeted Juya digests use **`https://daily.juya.uk/` only** (not the legacy `jujuyaya/juya-ai-daily` GitHub repo). Ingestion reads the website RSS feed, then enriches each issue from `daily.juya.uk/markdown/{date}.md` when available (falling back to RSS `content:encoded`). Use `--output-style editorial --output-language zh-CN` for a compact Chinese issue index. Ask for a specific issue with `openclaw-followup --message "Digest the first news"` to expand sub-news from persisted issue evidence.
 
 Targeted prompts must route through `openclaw-digest --message` (not `web_fetch` or manual API scraping).
 
@@ -299,10 +314,17 @@ Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for 
 Offline smoke (no API key, no network) — run directly from repo root:
 
 ```bash
+uv run ai-news-agent digest --fake --timeframe today
 uv run ai-news-agent digest --fake --timeframe today --sources github,bilibili
 ```
 
-Live equivalent:
+Live equivalent (Juya-only default):
+
+```bash
+uv run ai-news-agent digest --timeframe today
+```
+
+Live mixed sources (explicit opt-in):
 
 ```bash
 uv run ai-news-agent digest --timeframe today --sources github,bilibili
@@ -340,6 +362,8 @@ Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if
 
 **Connectors (Milestone 1):**
 
+- **Juya** is the **default bare digest** source (`daily.juya.uk` RSS + per-issue markdown enrichment). Target the website URL only; the legacy GitHub repo alias is rejected.
+- **GitHub** opt-in collection ranks repositories with a **momentum** score (star count × recency). This is a transparent heuristic for trending signal, **not** historical star velocity or true growth rate.
 - **Bilibili** is **metadata-first** at digest time; follow-up enrichment can add transcripts when subtitle tracks exist. Many videos have no published CC/AI subtitles (`subtitle_unavailable`). Items are labeled lower confidence when content is thin (see [`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)).
 
 **Milestone 2 tool layer:**

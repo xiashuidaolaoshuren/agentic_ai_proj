@@ -37,25 +37,63 @@ def test_resolve_openclaw_digest_request_parses_github_repo_url() -> None:
 
 
 def test_resolve_openclaw_digest_request_parses_juya_daily_repo_url() -> None:
-    req = resolve_openclaw_digest_request(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
-    )
-    assert any("jujuyaya/juya-ai-daily" in u for u in req.github_manual_urls)
-    assert req.connector_names == ["github"]
+    with pytest.raises(ValueError, match="daily.juya.uk"):
+        resolve_openclaw_digest_request(
+            message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        )
 
 
 def test_resolve_openclaw_digest_request_parses_juya_website_url() -> None:
     req = resolve_openclaw_digest_request(
         message="Digest https://daily.juya.uk/",
     )
-    assert any("daily.juya.uk" in u for u in req.github_manual_urls)
-    assert req.connector_names == ["github"]
+    assert any("daily.juya.uk" in u for u in req.juya_manual_urls)
+    assert not req.github_manual_urls
+    assert req.connector_names == ["juya"]
 
 
-def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -> None:
-    """OpenClaw resolve + GitHub connector should surface daily website RSS entries."""
+def test_resolve_openclaw_digest_request_mixed_github_bilibili_not_default() -> None:
+    msg = (
+        "Digest https://github.com/a/b and bilibili channel 12345 "
+        "https://www.bilibili.com/video/BV1test1234"
+    )
+    req = resolve_openclaw_digest_request(message=msg)
+    assert req.connector_names == ["github", "bilibili"]
+    assert "juya" not in req.connector_names
+
+
+def test_resolve_openclaw_digest_request_sources_hint_updates_primary_source() -> None:
+    req = resolve_openclaw_digest_request(
+        message="Give me today's AI digest",
+        sources_hint="github,juya",
+    )
+    assert req.connector_names == ["github", "juya"]
+    assert req.primary_source == "github"
+
+
+def test_validate_source_selector_consistency_rejects_juya_only_with_github_url() -> None:
+    req = DigestRequest(
+        topics=[],
+        connector_names=["juya"],
+        github_manual_urls=["https://github.com/acme/widget"],
+    )
+    with pytest.raises(ValueError, match="GitHub"):
+        validate_source_selector_consistency(req)
+
+
+def test_validate_source_selector_consistency_rejects_github_only_with_juya_url() -> None:
+    req = DigestRequest(
+        topics=[],
+        connector_names=["github"],
+        juya_manual_urls=["https://daily.juya.uk/"],
+    )
+    with pytest.raises(ValueError, match="Juya"):
+        validate_source_selector_consistency(req)
+
+
+def test_juya_targeted_openclaw_path_does_not_fetch_website_rss_via_github() -> None:
+    """Legacy GitHub alias for Juya is rejected; website URL routes to Juya."""
     import asyncio
-    from pathlib import Path
 
     import httpx
 
@@ -64,29 +102,15 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
     from ai_news_agent.graph.nodes.parse import parse_request_node
     from ai_news_agent.graph.state import DigestGraphState
 
-    fixture = (
-        Path(__file__).resolve().parent / "fixtures" / "juya_rss_sample.xml"
-    ).read_text(encoding="utf-8")
-    markdown = {
-        "/markdown/2026-06-16.md": "# 2026-06-16\n\nGLM-5.2 release and ZCode 3.0 updates.",
-        "/markdown/2026-06-15.md": "# 2026-06-15\n\nPrior day AI news roundup.",
-    }
-
     req = resolve_openclaw_digest_request(
-        message="Digest https://github.com/jujuyaya/juya-ai-daily",
+        message="Digest https://daily.juya.uk/",
     )
     parsed = parse_request_node(DigestGraphState(request=req))
     connector_req: ConnectorRequest = parsed["connector_request"]  # type: ignore[index]
+    requested_hosts: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        path = request.url.path
-        if host == "daily.juya.uk":
-            if path == "/rss.xml":
-                return httpx.Response(200, text=fixture)
-            if path in markdown:
-                return httpx.Response(200, text=markdown[path])
-            return httpx.Response(404)
+        requested_hosts.append(request.url.host or "")
         return httpx.Response(404, json={"message": "not found"})
 
     async def main() -> None:
@@ -97,10 +121,8 @@ def test_juya_targeted_openclaw_path_yields_rss_entries_beyond_repo_metadata() -
         ) as client:
             out = await GitHubConnector(token=None, client=client).collect(connector_req)
 
-        assert len(out.items) >= 1
-        assert out.items[0].title == "2026-06-16"
-        assert "daily.juya.uk" in out.items[0].url
-        assert out.items[0].title != "jujuyaya/juya-ai-daily"
+        assert "daily.juya.uk" not in requested_hosts
+        assert out.items == []
 
     asyncio.run(main())
 
