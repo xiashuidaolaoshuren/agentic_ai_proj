@@ -200,7 +200,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T7 — Update usage and benchmark documentation
 
-- [ ] **Do:** Replace obsolete GitHub/Bilibili-default and Juya GitHub-alias claims in user-facing commands, source lists, examples, and baseline notes. Document Juya-only bare defaults, explicit/mixed source options, website-only Juya targeting, the expected legacy-alias error, and the difference between current GitHub momentum heuristic and true velocity.
+- [X] **Do:** Replace obsolete GitHub/Bilibili-default and Juya GitHub-alias claims in user-facing commands, source lists, examples, and baseline notes. Document Juya-only bare defaults, explicit/mixed source options, website-only Juya targeting, the expected legacy-alias error, and the difference between current GitHub momentum heuristic and true velocity.
 - **TDD suitable:** no — static documentation only; no runtime behavior.
 - **Verification:** review `git diff --check`; run every changed fake CLI command where practical; confirm no repository documentation still presents `jujuyaya/juya-ai-daily` as a valid Juya command.
 - **Dependencies:** T2, T3, T4, T5, T6
