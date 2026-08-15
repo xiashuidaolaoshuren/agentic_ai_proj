@@ -102,7 +102,20 @@ def test_build_digest_request_from_hints_maps_defaults() -> None:
     )
     assert req.timeframe == "last_7_days"
     assert req.connector_names == ["github"]
+    assert req.primary_source == "github"
     assert req.topics == ["RAG", "agents"]
+
+
+def test_resolve_openclaw_digest_request_hint_only_sets_primary_source() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    mixed = resolve_openclaw_digest_request(sources_hint="github,bilibili")
+    assert mixed.connector_names == ["github", "bilibili"]
+    assert mixed.primary_source == "github"
+
+    default = resolve_openclaw_digest_request()
+    assert default.connector_names == ["juya"]
+    assert default.primary_source == "juya"
 
 
 def test_adapters_package_exports_public_surface() -> None:

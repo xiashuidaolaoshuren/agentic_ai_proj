@@ -34,6 +34,21 @@ def test_build_digest_request_maps_flags() -> None:
     assert req.max_items_per_source == 7
 
 
+def test_build_digest_request_sets_primary_source_from_sources() -> None:
+    ns = Namespace(
+        timeframe="today",
+        topics=None,
+        sources="github,juya",
+        top_n=None,
+        max_items=None,
+        db_path=None,
+        fake=False,
+    )
+    req = build_digest_request(ns)
+    assert req.connector_names == ["github", "juya"]
+    assert req.primary_source == "github"
+
+
 def test_build_digest_request_default_topics_when_omitted() -> None:
     ns = Namespace(
         timeframe=None,

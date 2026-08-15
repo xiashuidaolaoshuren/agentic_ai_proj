@@ -24,7 +24,7 @@ from ai_news_agent.env import configure_bilibili_network_from_env, load_local_en
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
-from ai_news_agent.request import DigestRequest
+from ai_news_agent.request import DigestRequest, primary_source_from_names
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     FakeDigestModel,
@@ -71,7 +71,9 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
 
     sources = parse_sources_csv(getattr(ns, "sources", "") or "")
     if sources:
-        kw["connector_names"] = normalize_source_names(sources)
+        names = normalize_source_names(sources)
+        kw["connector_names"] = names
+        kw["primary_source"] = primary_source_from_names(names)
 
     output_style = normalize_output_style_hint(getattr(ns, "output_style", None))
     if output_style is not None:

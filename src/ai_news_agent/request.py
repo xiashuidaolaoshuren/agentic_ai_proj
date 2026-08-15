@@ -66,3 +66,10 @@ class DigestRequest:
             or self.github_manual_urls
             or self.juya_manual_urls
         )
+
+
+def primary_source_from_names(names: list[str] | None) -> str | None:
+    """Return the first connector name as primary intent, or ``None`` when unset."""
+    if not names:
+        return None
+    return names[0]

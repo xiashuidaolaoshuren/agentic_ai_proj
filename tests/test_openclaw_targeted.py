@@ -62,6 +62,15 @@ def test_resolve_openclaw_digest_request_mixed_github_bilibili_not_default() -> 
     assert "juya" not in req.connector_names
 
 
+def test_resolve_openclaw_digest_request_sources_hint_updates_primary_source() -> None:
+    req = resolve_openclaw_digest_request(
+        message="Give me today's AI digest",
+        sources_hint="github,juya",
+    )
+    assert req.connector_names == ["github", "juya"]
+    assert req.primary_source == "github"
+
+
 def test_validate_source_selector_consistency_rejects_juya_only_with_github_url() -> None:
     req = DigestRequest(
         topics=[],
