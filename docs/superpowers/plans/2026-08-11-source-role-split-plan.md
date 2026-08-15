@@ -208,7 +208,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T8 — Run milestone-level regression and acceptance checks
 
-- [ ] **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
+- [X] **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
 - **TDD suitable:** no — verification-only integration pass; production behavior was already driven test-first in T1–T6.
 - **Verification:** `uv run pytest -q`; fake CLI bare digest; fake CLI explicit `--sources github,bilibili`; fake OpenClaw/HTTP bare request; targeted `https://daily.juya.uk/`; legacy URL rejection; a mixed-source render with intent-first section order.
 - **Dependencies:** T1, T2, T3, T4, T5, T6, T7
@@ -220,3 +220,4 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 | --- | --- |
 | 2026-08-11 | Created from the accepted source-role ADR and updated Milestone 5 design spec. |
 | 2026-08-11 | Added source-kind-aware Juya follow-up compatibility and fixed mixed-digest selection to the existing overall `top_n` cap (no quotas). |
+| 2026-08-15 | T7 file map omitted OpenClaw skill docs; T8 corrected `openclaw/skills/ai-news-digest/SKILL.md` and `ai-news-followup/SKILL.md` to match Juya-first defaults and legacy-alias rejection. |
