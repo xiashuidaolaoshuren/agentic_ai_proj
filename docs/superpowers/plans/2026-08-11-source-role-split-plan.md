@@ -192,7 +192,7 @@ Use one type-1 plan with the dependencies below. Create a type-2 plan in Cursor 
 
 ### T6 — Expose Juya through connector tools and shared live interfaces
 
-- [ ] **Do:** Add a pure `search_juya_ai_news` wrapper and register it with injected Juya factories. Thread the factory/default source set through the interface router, Gradio, and OpenClaw runtime so all live and fake entrypoints use the same source roles. Update Gradio source toggles, examples, and user-facing validation for Juya; retain the existing tool-loop, streaming, HTTP, and follow-up contracts.
+- [X] **Do:** Add a pure `search_juya_ai_news` wrapper and register it with injected Juya factories. Thread the factory/default source set through the interface router, Gradio, and OpenClaw runtime so all live and fake entrypoints use the same source roles. Update Gradio source toggles, examples, and user-facing validation for Juya; retain the existing tool-loop, streaming, HTTP, and follow-up contracts.
 - **TDD suitable:** yes — tool delegation/JSON output, registry dependencies, and interface request wiring are testable contracts.
 - **Verification:** `uv run pytest tests/test_tools_connectors.py tests/test_tools_registry.py tests/test_interface_router.py tests/test_gradio_app.py tests/test_digest_service.py tests/test_digest_service_parity.py tests/test_mvp_smoke.py -q`
 - **Dependencies:** T2, T3, T5
