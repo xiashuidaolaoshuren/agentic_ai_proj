@@ -17,6 +17,8 @@ class SourceKind(StrEnum):
     GITHUB = "github"
     BILIBILI = "bilibili"
     JUYA = "juya"
+    HUGGINGFACE = "huggingface"
+    ZHIHU = "zhihu"
 
 
 class FollowUpAction(StrEnum):
@@ -51,11 +53,17 @@ class NewsItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     topic_matches: list[str] = Field(default_factory=list)
     content_confidence: ConfidenceLevel | None = None
+    source_evidence: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("tags", "topic_matches", mode="before")
     @classmethod
     def _coalesce_none_list(cls, value: Any) -> Any:
         return [] if value is None else value
+
+    @field_validator("source_evidence", mode="before")
+    @classmethod
+    def _coalesce_none_source_evidence(cls, value: Any) -> Any:
+        return {} if value is None else value
 
     @field_validator("collected_at", mode="before")
     @classmethod

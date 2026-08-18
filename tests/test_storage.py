@@ -182,6 +182,120 @@ def test_load_legacy_raw_payload_json_for_news_and_ranked_items(tmp_path: Path) 
     assert ctx.ranked_items[0].item == expected
 
 
+def test_load_legacy_payload_without_source_evidence_defaults_to_empty_dict(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "legacy_no_evidence.db")
+    store.init_schema()
+    collected = datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC)
+    legacy_payload = {
+        "source": "github",
+        "source_id": "repo-legacy",
+        "url": "https://github.com/a/b",
+        "title": "a/b",
+        "published_at": None,
+        "collected_at": collected.isoformat().replace("+00:00", "Z"),
+        "author": "alice",
+        "stars_or_views": 99,
+        "language": "Python",
+        "metadata_completeness": 0.85,
+        "raw_snippet": "desc",
+        "tags": ["t1"],
+        "topic_matches": ["RAG"],
+        "content_confidence": "high",
+    }
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    con = sqlite3.connect(tmp_path / "legacy_no_evidence.db")
+    try:
+        con.execute(
+            """
+            INSERT INTO news_items (
+              run_id, source, source_id, url, title, published_at, collected_at,
+              author, stars_or_views, language, metadata_completeness, raw_snippet,
+              tags_json, topic_matches_json, content_confidence, raw_payload_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                run_id,
+                "github",
+                "repo-legacy",
+                "https://github.com/a/b",
+                "a/b",
+                None,
+                collected.isoformat(),
+                "alice",
+                99,
+                "Python",
+                0.85,
+                "desc",
+                json.dumps(["t1"]),
+                json.dumps(["RAG"]),
+                "high",
+                json.dumps(legacy_payload),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    ctx = store.get_latest_followup_context()
+    assert len(ctx.news_items) == 1
+    assert ctx.news_items[0].source_evidence == {}
+
+
+def test_save_news_item_with_source_evidence_persists_mapping(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "evidence.db")
+    store.init_schema()
+    collected = datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC)
+    evidence = {
+        "relevance": 0.92,
+        "query_lens": ["实战 / 踩坑"],
+        "source_label": "知乎",
+        "evidence_text_length": 120,
+    }
+    item = NewsItem(
+        source=SourceKind.ZHIHU,
+        source_id="zhihu-123",
+        url="https://www.zhihu.com/question/1/answer/2",
+        title="部署经验",
+        collected_at=collected,
+        language="zh",
+        source_evidence=evidence,
+    )
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["zhihu"],
+    )
+    store.save_connector_result(
+        run_id,
+        ConnectorResult(items=[item], warnings=[], raw_count=1),
+    )
+
+    ctx = store.get_latest_followup_context()
+    assert len(ctx.news_items) == 1
+    assert ctx.news_items[0].source_evidence == evidence
+
+    con = sqlite3.connect(tmp_path / "evidence.db")
+    try:
+        row = con.execute(
+            "SELECT raw_payload_json FROM news_items WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+    finally:
+        con.close()
+
+    assert payload["source_evidence"] == evidence
+
+
 def test_full_run_round_trip(tmp_path: Path) -> None:
     store = DigestStore(tmp_path / "full.db")
     store.init_schema()
