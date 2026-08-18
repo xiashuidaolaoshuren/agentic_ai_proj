@@ -236,7 +236,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 — Implement Hugging Face trending-model connector
 
-- [ ] **Do:** Add `huggingface_hub` and a dedicated `HuggingFaceConnector` that lists models only. Support global trending and topic/task-filtered trending. Map Hub `trending_score`, 30-day downloads, likes, activity, pipeline/library tags, and discovery mode into `source_evidence` (never into `stars_or_views`). Record inspectable warnings for request/rate-limit failure, malformed responses, skipped malformed models, and missing trend evidence. First GREEN is types + stub only.
+- [x] **Do:** Add `huggingface_hub` and a dedicated `HuggingFaceConnector` that lists models only. Support global trending and topic/task-filtered trending. Map Hub `trending_score`, 30-day downloads, likes, activity, pipeline/library tags, and discovery mode into `source_evidence` (never into `stars_or_views`). Record inspectable warnings for request/rate-limit failure, malformed responses, skipped malformed models, and missing trend evidence. First GREEN is types + stub only.
 
 - **Blocked by:** T1
 - **Plan mode:** high
