@@ -54,6 +54,12 @@ def test_get_bilibili_credential_returns_none_when_unset(monkeypatch) -> None:
     assert env.get_bilibili_credential() is None
 
 
+def test_get_zhihu_access_secret_returns_none_when_unset(monkeypatch) -> None:
+    monkeypatch.delenv("ZHIHU_ACCESS_SECRET", raising=False)
+
+    assert env.get_zhihu_access_secret() is None
+
+
 def test_load_local_env_force_reload_picks_up_file_changes(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("BILIBILI_SESSDATA", raising=False)

@@ -1,0 +1,26 @@
+{
+  "Code": 0,
+  "Message": "success",
+  "Data": {
+    "Items": [
+      {
+        "ContentID": "zh-1001",
+        "Title": "RAG 实战踩坑：向量库选型与召回质量",
+        "Url": "https://www.zhihu.com/question/1001/answer/9001",
+        "ContentText": "我们在 RAG 落地时踩过召回不稳定的坑：切分过短会丢上下文，切分过长则噪声上升。部署上向量库的内存成本和 rerank 延迟需要一起评估，评测时用业务问答集而不是公开榜单。",
+        "ContentType": "回答",
+        "AuthorName": "实践者A",
+        "Relevance": 0.92
+      },
+      {
+        "ContentID": "zh-1002",
+        "Title": "RAG 部署成本简记",
+        "Url": "https://zhuanlan.zhihu.com/p/1002",
+        "ContentText": "短",
+        "ContentType": "文章",
+        "AuthorName": "实践者B",
+        "Relevance": 0.41
+      }
+    ]
+  }
+}

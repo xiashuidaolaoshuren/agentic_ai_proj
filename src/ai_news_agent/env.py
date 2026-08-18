@@ -224,6 +224,12 @@ def get_bilibili_credential() -> Credential | None:
     return Credential(**kwargs)
 
 
+def get_zhihu_access_secret() -> str | None:
+    """Return Zhihu Developer Platform Access Secret, or None if unset."""
+    value = _env("ZHIHU_ACCESS_SECRET")
+    return value or None
+
+
 def _reset_loaded_state_for_testing() -> None:
     """Allow tests to reload ``.env`` with a different cwd or path."""
     global _loaded, _last_dotenv_path, _last_dotenv_loaded
@@ -238,6 +244,7 @@ __all__ = [
     "bilibili_env_diagnostics",
     "configure_bilibili_network_from_env",
     "get_bilibili_credential",
+    "get_zhihu_access_secret",
     "load_local_env",
     "log_bilibili_env_diagnostics",
     "_reset_loaded_state_for_testing",

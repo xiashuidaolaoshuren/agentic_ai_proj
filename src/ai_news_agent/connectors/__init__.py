@@ -9,6 +9,7 @@ from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.connectors.bilibili import BilibiliConnector
 from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 from ai_news_agent.connectors.juya import JuyaConnector
+from ai_news_agent.connectors.zhihu import ZhihuConnector
 
 __all__ = [
     "BilibiliConnector",
@@ -18,4 +19,5 @@ __all__ = [
     "HuggingFaceConnector",
     "JuyaConnector",
     "SourceConnector",
+    "ZhihuConnector",
 ]
