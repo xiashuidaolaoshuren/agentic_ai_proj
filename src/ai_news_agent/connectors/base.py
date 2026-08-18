@@ -29,6 +29,12 @@ class ConnectorRequest:
     github_manual_urls: list[str] = field(default_factory=list)
     #: Juya website (``daily.juya.uk``) target URLs; routed to the Juya connector.
     juya_manual_urls: list[str] = field(default_factory=list)
+    #: Hugging Face discovery mode: ``global`` (default when None) or ``filtered``.
+    huggingface_discovery_mode: str | None = None
+    #: Topic/search term for Hugging Face filtered trending.
+    huggingface_search: str | None = None
+    #: Pipeline-task filter for Hugging Face filtered trending.
+    huggingface_pipeline_tag: str | None = None
 
 
 @dataclass

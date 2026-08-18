@@ -7,6 +7,7 @@ from ai_news_agent.connectors.base import (
 )
 from ai_news_agent.connectors.github import GitHubConnector
 from ai_news_agent.connectors.bilibili import BilibiliConnector
+from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 from ai_news_agent.connectors.juya import JuyaConnector
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "ConnectorRequest",
     "ConnectorResult",
     "GitHubConnector",
+    "HuggingFaceConnector",
     "JuyaConnector",
     "SourceConnector",
 ]

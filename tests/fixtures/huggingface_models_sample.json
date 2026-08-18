@@ -1,0 +1,35 @@
+[
+  {
+    "id": "meta-llama/Llama-3.1-8B",
+    "author": "meta-llama",
+    "downloads": 150000,
+    "downloads_all_time": 2500000,
+    "likes": 420,
+    "last_modified": "2026-05-10T08:00:00Z",
+    "pipeline_tag": "text-generation",
+    "library_name": "transformers",
+    "gated": false,
+    "tags": ["llama", "text-generation"],
+    "trending_score": 88,
+    "card_data": {
+      "language": ["en"],
+      "license": "llama3.1",
+      "tags": ["llama"],
+      "model_type": "llama"
+    }
+  },
+  {
+    "id": "mistralai/Mistral-7B-v0.1",
+    "author": "mistralai",
+    "downloads": 90000,
+    "downloads_all_time": 1800000,
+    "likes": 310,
+    "last_modified": "2026-05-08T12:30:00Z",
+    "pipeline_tag": "text-generation",
+    "library_name": "transformers",
+    "gated": false,
+    "tags": ["mistral"],
+    "trending_score": 72,
+    "card_data": null
+  }
+]
