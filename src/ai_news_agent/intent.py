@@ -46,21 +46,66 @@ _TIMEFRAME_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _TOPICS_PREFIX = re.compile(r"\btopics?\s*:\s*(.+)$", re.I | re.MULTILINE)
 
+_HF_CUE = re.compile(r"\b(?:hugging\s*face|huggingface)\b", re.IGNORECASE)
+_HF_TOPIC_FILTER = re.compile(
+    r"\btrending\s+(\w+)\s+models?\s+on\s+hugging\s*face\b",
+    re.IGNORECASE,
+)
+_HF_PIPELINE_FILTER = re.compile(
+    r"\bfor\s+(text-generation|text2text-generation|text-classification|"
+    r"token-classification|feature-extraction|image-classification)\b",
+    re.IGNORECASE,
+)
+
+
+def _huggingface_fields_from_message(
+    text: str,
+    topics: list[str] | None,
+) -> dict[str, str]:
+    if not _HF_CUE.search(text):
+        return {}
+
+    pipeline_filter = _HF_PIPELINE_FILTER.search(text)
+    if pipeline_filter:
+        return {
+            "huggingface_discovery_mode": "filtered",
+            "huggingface_pipeline_tag": pipeline_filter.group(1),
+        }
+
+    topic_filter = _HF_TOPIC_FILTER.search(text)
+    if topic_filter:
+        topic = topic_filter.group(1)
+        if topic.lower() not in {"models", "model"}:
+            return {
+                "huggingface_discovery_mode": "filtered",
+                "huggingface_search": topic,
+            }
+
+    if topics:
+        return {
+            "huggingface_discovery_mode": "filtered",
+            "huggingface_search": topics[0],
+        }
+
+    return {}
+
 
 def parse_connector_names_from_message(text: str) -> list[str] | None:
     """Return explicit source-only phrases from a message, or ``None`` if absent.
 
     Recognized phrases (deterministic regex, no LLM):
-    - ``use X and Y`` where X, Y are in {juya, github, bilibili} → [X, Y] in order
-    - ``(from )?X only`` where X is in {juya, github, bilibili} → [X, ...]
+    - ``use X and Y`` where X, Y are in {juya, github, bilibili, huggingface, zhihu}
+    - ``(from )?X only`` where X is in {juya, github, bilibili, huggingface, zhihu}
     - trending-repo cues (``trending repos``, ``github trending``) → ["github"]
+    - Hugging Face trending cues → ["huggingface"]
+    - Zhihu practitioner cues → ["zhihu"]
     """
     low = text.strip().lower()
     if not low:
         return None
 
     use_match = re.search(
-        r"\buse\s+(juya|github|bilibili)\s+and\s+(juya|github|bilibili)\b",
+        r"\buse\s+(juya|github|bilibili|huggingface|zhihu)\s+and\s+(juya|github|bilibili|huggingface|zhihu)\b",
         low,
     )
     if use_match:
@@ -75,7 +120,7 @@ def parse_connector_names_from_message(text: str) -> list[str] | None:
 
     found: list[str] = []
     for match in re.finditer(
-        r"\b(?:from\s+)?(juya|github|bilibili)\s+only\b",
+        r"\b(?:from\s+)?(juya|github|bilibili|huggingface|zhihu)\s+only\b",
         low,
     ):
         name = match.group(1).lower()
@@ -88,6 +133,23 @@ def parse_connector_names_from_message(text: str) -> list[str] | None:
         r"\bgithub\s+trending\b", low
     ):
         return ["github"]
+
+    if (
+        re.search(r"\btrending\s+.+\s+models?\s+on\s+hugging\s*face\b", low)
+        or re.search(r"\btrending\s+models?\s+on\s+hugging\s*face\b", low)
+        or re.search(r"\b(?:hugging\s*face|huggingface)\s+trending\b", low)
+        or re.search(r"\btrending\s+(?:hugging\s*face|huggingface)\s+models?\b", low)
+    ):
+        return ["huggingface"]
+
+    if re.search(
+        r"\bzhihu\s+(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\b",
+        low,
+    ) or re.search(
+        r"\b(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\s+on\s+zhihu\b",
+        low,
+    ):
+        return ["zhihu"]
 
     return None
 
@@ -175,7 +237,9 @@ def parse_digest_intent(message: str) -> DigestRequest:
             timeframe = label
             break
 
-    if not explicit and topics is None and timeframe is None:
+    hf_fields = _huggingface_fields_from_message(text, topics)
+
+    if not explicit and topics is None and timeframe is None and not hf_fields:
         return DigestRequest()
 
     return DigestRequest(
@@ -186,6 +250,7 @@ def parse_digest_intent(message: str) -> DigestRequest:
         bilibili_manual_urls=bilibili_urls,
         bilibili_target_channels=bilibili_channels,
         juya_manual_urls=juya_urls,
+        **hf_fields,
     )
 
 

@@ -141,7 +141,7 @@ def _add_digest_parser(sub: Any) -> argparse.ArgumentParser:
     p.add_argument(
         "--sources",
         default="juya",
-        help="Comma-separated connector names (juya, github, bilibili). Default: juya",
+        help="Comma-separated connector names (juya, huggingface, github, zhihu, bilibili). Default: juya",
     )
     p.add_argument("--top-n", type=int, default=None, help="Override top_n (default: 5)")
     p.add_argument(
@@ -210,7 +210,7 @@ def _add_openclaw_digest_parser(sub: Any) -> argparse.ArgumentParser:
     p.add_argument(
         "--sources",
         default=None,
-        help="Comma-separated connector names (juya, github, bilibili). Default: juya",
+        help="Comma-separated connector names (juya, huggingface, github, zhihu, bilibili). Default: juya",
     )
     p.add_argument("--topics", default=None, help="Comma-separated topics")
     p.add_argument(

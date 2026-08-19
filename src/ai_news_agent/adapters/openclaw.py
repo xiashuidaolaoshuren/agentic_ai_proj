@@ -138,6 +138,22 @@ def validate_source_selector_consistency(req: DigestRequest) -> None:
             "Source selection is 'juya only' but the request includes Bilibili "
             "video/channel selectors. Remove the conflicting source toggle or selector."
         )
+    if names == ["huggingface"] and (
+        has_github_selector or has_bilibili_selector or has_juya_selector
+    ):
+        raise ValueError(
+            "Source selection is 'huggingface only' but the request includes "
+            "GitHub/Bilibili/Juya selectors. Remove the conflicting source toggle "
+            "or selector."
+        )
+    if names == ["zhihu"] and (
+        has_github_selector or has_bilibili_selector or has_juya_selector
+    ):
+        raise ValueError(
+            "Source selection is 'zhihu only' but the request includes "
+            "GitHub/Bilibili/Juya selectors. Remove the conflicting source toggle "
+            "or selector."
+        )
 
 
 def resolve_openclaw_digest_request(

@@ -118,6 +118,30 @@ def test_resolve_openclaw_digest_request_hint_only_sets_primary_source() -> None
     assert default.primary_source == "juya"
 
 
+def test_resolve_openclaw_digest_request_huggingface_message() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="huggingface only")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+
+
+def test_resolve_openclaw_digest_request_huggingface_zhihu_hints() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(sources_hint="huggingface,zhihu")
+    assert req.connector_names == ["huggingface", "zhihu"]
+    assert req.primary_source == "huggingface"
+
+
+def test_resolve_openclaw_digest_request_zhihu_practitioner_message() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="zhihu practitioner insights")
+    assert req.connector_names == ["zhihu"]
+    assert req.primary_source == "zhihu"
+
+
 def test_adapters_package_exports_public_surface() -> None:
     from ai_news_agent import adapters
 

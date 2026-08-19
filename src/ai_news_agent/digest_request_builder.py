@@ -42,6 +42,16 @@ def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | Non
     return implied if implied else None
 
 
+def _parsed_has_digest_fields(parsed: DigestRequest) -> bool:
+    return (
+        parsed.has_explicit_selectors()
+        or parsed.timeframe is not None
+        or parsed.huggingface_discovery_mode is not None
+        or parsed.huggingface_search is not None
+        or parsed.huggingface_pipeline_tag is not None
+    )
+
+
 def resolve_digest_request(
     message: str,
     *,
@@ -59,7 +69,7 @@ def resolve_digest_request(
     ranking/rendering (T5).
     """
     parsed = parse_digest_intent(message)
-    if parsed.has_explicit_selectors() or parsed.timeframe is not None:
+    if _parsed_has_digest_fields(parsed):
         base = parsed
     else:
         base = DigestRequest()

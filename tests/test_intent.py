@@ -73,6 +73,42 @@ def test_resolve_digest_request_mixed_github_bilibili_selectors_not_default() ->
     assert req.primary_source == "github"
 
 
+def test_resolve_digest_request_huggingface_only_replaces_juya_default() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("huggingface only")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+    assert "juya" not in (req.connector_names or [])
+
+
+def test_resolve_digest_request_juya_and_huggingface() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("use juya and huggingface")
+    assert req.connector_names == ["juya", "huggingface"]
+    assert req.primary_source == "juya"
+
+
+def test_resolve_digest_request_zhihu_only() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("zhihu only")
+    assert req.connector_names == ["zhihu"]
+    assert req.primary_source == "zhihu"
+    assert "juya" not in (req.connector_names or [])
+
+
+def test_resolve_digest_request_huggingface_filtered_trending() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("trending RAG models on hugging face")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+
+
 def test_parse_github_repo_url_does_not_infer_owner_channel() -> None:
     req = parse_digest_intent(
         "Digest https://github.com/langchain-ai/langgraph",
@@ -124,10 +160,39 @@ def test_parse_topics_prefix() -> None:
         ("use juya and github", ["juya", "github"]),
         ("trending repos", ["github"]),
         ("github trending", ["github"]),
+        ("huggingface only", ["huggingface"]),
+        ("zhihu only", ["zhihu"]),
+        ("use huggingface and zhihu", ["huggingface", "zhihu"]),
+        ("use juya and huggingface", ["juya", "huggingface"]),
+        ("trending models on hugging face", ["huggingface"]),
+        ("huggingface trending models", ["huggingface"]),
+        ("trending huggingface models", ["huggingface"]),
+        ("zhihu practitioner insights", ["zhihu"]),
+        ("practitioner lessons on zhihu", ["zhihu"]),
+        ("zhihu trade-offs", ["zhihu"]),
     ],
 )
 def test_parse_connector_names_from_message(message: str, expected: list[str] | None) -> None:
     assert parse_connector_names_from_message(message) == expected
+
+
+def test_parse_digest_intent_huggingface_filtered_by_topic() -> None:
+    req = parse_digest_intent("trending RAG models on hugging face")
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+
+
+def test_parse_digest_intent_huggingface_filtered_by_pipeline_tag() -> None:
+    req = parse_digest_intent("huggingface models for text-generation")
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_pipeline_tag == "text-generation"
+
+
+def test_parse_digest_intent_huggingface_global_trending_leaves_discovery_mode_none() -> None:
+    req = parse_digest_intent("huggingface trending models")
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None
+    assert req.huggingface_pipeline_tag is None
 
 
 def test_digest_request_juya_manual_urls_and_primary_source() -> None:
