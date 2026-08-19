@@ -247,7 +247,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 — Implement Zhihu practitioner-insight connector
 
-- [ ] **Do:** Add a dedicated `ZhihuConnector` that calls only the official search API. Expand topics with the three deterministic practitioner lenses, cap at three search calls, and dedupe by stable id or canonical URL. Rankable evidence is API relevance, lens/topic match, and returned-text completeness. Thin results are low-confidence discovery links. Timeframe requests emit an unsupported-timeframe warning rather than claiming freshness. Auth/quota/malformed/skipped-row warnings are non-fatal. Prove linked pages are not fetched. First GREEN is types + stub only.
+- [X] **Do:** Add a dedicated `ZhihuConnector` that calls only the official search API. Expand topics with the three deterministic practitioner lenses, cap at three search calls, and dedupe by stable id or canonical URL. Rankable evidence is API relevance, lens/topic match, and returned-text completeness. Thin results are low-confidence discovery links. Timeframe requests emit an unsupported-timeframe warning rather than claiming freshness. Auth/quota/malformed/skipped-row warnings are non-fatal. Prove linked pages are not fetched. First GREEN is types + stub only.
 
 - **Blocked by:** T1
 - **Plan mode:** high
