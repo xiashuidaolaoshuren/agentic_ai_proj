@@ -258,7 +258,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 — Register sources and map request fields
 
-- [ ] **Do:** Add real/fake Hugging Face and Zhihu factories to the canonical registry; keep `DEFAULT_SOURCE_NAMES` as Juya-only. Add DigestRequest/ConnectorRequest fields for Hugging Face discovery mode (names finalized in Plan mode) and map them in `parse_request_node`. Direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than “all injected connectors.”
+- [X] **Do:** Add real/fake Hugging Face and Zhihu factories to the canonical registry; keep `DEFAULT_SOURCE_NAMES` as Juya-only. Add DigestRequest/ConnectorRequest fields for Hugging Face discovery mode (names finalized in Plan mode) and map them in `parse_request_node`. Direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than “all injected connectors.”
 
 - **Blocked by:** T2, T3
 - **Plan mode:** high
