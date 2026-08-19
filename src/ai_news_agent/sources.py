@@ -9,10 +9,14 @@ from typing import Any
 from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
 from ai_news_agent.connectors.bilibili import BilibiliConnector
 from ai_news_agent.connectors.github import GitHubConnector
+from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 from ai_news_agent.connectors.juya import JuyaConnector
+from ai_news_agent.connectors.zhihu import ZhihuConnector
 from ai_news_agent.models import NewsItem, SourceKind
 
-ALLOWED_SOURCES: frozenset[str] = frozenset({"juya", "github", "bilibili"})
+ALLOWED_SOURCES: frozenset[str] = frozenset(
+    {"juya", "github", "bilibili", "huggingface", "zhihu"}
+)
 DEFAULT_SOURCE_NAMES: tuple[str, ...] = ("juya",)
 
 
@@ -74,6 +78,42 @@ class FakeJuyaConnector:
         return ConnectorResult(items=[item], warnings=[], raw_count=1)
 
 
+class FakeHuggingFaceConnector:
+    """Deterministic offline stand-in for Hugging Face."""
+
+    def name(self) -> str:
+        return "huggingface"
+
+    async def collect(self, request) -> ConnectorResult:  # noqa: ANN001
+        now = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
+        item = NewsItem(
+            source=SourceKind.HUGGINGFACE,
+            source_id="fake-huggingface-1",
+            url="https://huggingface.co/fake-model",
+            title="Fake Hugging Face model",
+            collected_at=now,
+        )
+        return ConnectorResult(items=[item], warnings=[], raw_count=1)
+
+
+class FakeZhihuConnector:
+    """Deterministic offline stand-in for Zhihu."""
+
+    def name(self) -> str:
+        return "zhihu"
+
+    async def collect(self, request) -> ConnectorResult:  # noqa: ANN001
+        now = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
+        item = NewsItem(
+            source=SourceKind.ZHIHU,
+            source_id="fake-zhihu-1",
+            url="https://www.zhihu.com/question/fake-zhihu",
+            title="Fake Zhihu insight",
+            collected_at=now,
+        )
+        return ConnectorResult(items=[item], warnings=[], raw_count=1)
+
+
 def parse_sources_csv(value: str | None) -> list[str]:
     if value is None or value.strip() == "":
         return []
@@ -109,12 +149,16 @@ def build_connectors(*, fake: bool, names: Sequence[str]) -> list[SourceConnecto
             "juya": FakeJuyaConnector(),
             "github": FakeGitHubConnector(),
             "bilibili": FakeBilibiliConnector(),
+            "huggingface": FakeHuggingFaceConnector(),
+            "zhihu": FakeZhihuConnector(),
         }
     else:
         factories = {
             "juya": JuyaConnector(),
             "github": GitHubConnector(),
             "bilibili": BilibiliConnector(),
+            "huggingface": HuggingFaceConnector(),
+            "zhihu": ZhihuConnector(),
         }
     return [factories[name] for name in selected]
 
@@ -141,7 +185,9 @@ __all__ = [
     "FakeBilibiliConnector",
     "FakeDigestModel",
     "FakeGitHubConnector",
+    "FakeHuggingFaceConnector",
     "FakeJuyaConnector",
+    "FakeZhihuConnector",
     "build_connector_factory",
     "build_connectors",
     "normalize_source_names",

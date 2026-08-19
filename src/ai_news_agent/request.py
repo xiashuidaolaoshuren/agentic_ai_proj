@@ -41,6 +41,9 @@ class DigestRequest:
     #: Resolved primary source name (first of ``connector_names``); recorded for
     #: downstream ranking/rendering (T5). Defaults to ``None`` until resolved.
     primary_source: str | None = None
+    huggingface_discovery_mode: str | None = None
+    huggingface_search: str | None = None
+    huggingface_pipeline_tag: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_items_per_source < 1:

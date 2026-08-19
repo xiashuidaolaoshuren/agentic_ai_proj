@@ -110,6 +110,24 @@ def test_digest_request_defaults_and_validation() -> None:
     assert empty.topics == []
 
 
+def test_digest_request_huggingface_fields_round_trip() -> None:
+    req = DigestRequest(
+        huggingface_discovery_mode="filtered",
+        huggingface_search="RAG",
+        huggingface_pipeline_tag="text-generation",
+    )
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+    assert req.huggingface_pipeline_tag == "text-generation"
+
+
+def test_digest_request_huggingface_fields_default_none() -> None:
+    req = DigestRequest()
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None
+    assert req.huggingface_pipeline_tag is None
+
+
 def test_initial_state_shape() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     req = DigestRequest(topics=["RAG"])
@@ -283,6 +301,20 @@ def test_parse_request_node_maps_juya_manual_urls() -> None:
     assert cr.juya_manual_urls == req.juya_manual_urls
 
 
+def test_parse_request_node_maps_huggingface_fields() -> None:
+    req = DigestRequest(
+        topics=["RAG"],
+        huggingface_discovery_mode="filtered",
+        huggingface_search="RAG",
+        huggingface_pipeline_tag="text-generation",
+    )
+    out = parse_request_node({"request": req})
+    cr = out["connector_request"]
+    assert cr.huggingface_discovery_mode == "filtered"
+    assert cr.huggingface_search == "RAG"
+    assert cr.huggingface_pipeline_tag == "text-generation"
+
+
 def test_parse_request_node_missing_request_emits_error() -> None:
     out = parse_request_node({})
     assert "connector_request" not in out
@@ -333,6 +365,31 @@ def test_collect_sources_node_filters_by_connector_names() -> None:
     assert len(out["collected_items"]) == 2
     assert conn_a.calls == 0
     assert conn_b.calls == 1
+
+
+def test_collect_sources_node_filters_huggingface_and_zhihu_only() -> None:
+    conn_juya = _FakeConnector(name="juya", items=[_news_item("juya1")])
+    conn_github = _FakeConnector(name="github", items=[_news_item("gh1")])
+    conn_bilibili = _FakeConnector(name="bilibili", items=[_news_item("bili1")])
+    conn_huggingface = _FakeConnector(name="huggingface", items=[_news_item("hf1")])
+    conn_zhihu = _FakeConnector(name="zhihu", items=[_news_item("zh1")])
+    req = DigestRequest(topics=["RAG"], connector_names=["huggingface", "zhihu"])
+    state: DigestGraphState = {
+        "request": req,
+        "connector_request": parse_request_node({"request": req})["connector_request"],
+    }
+    node = make_collect_sources_node(
+        [conn_juya, conn_github, conn_bilibili, conn_huggingface, conn_zhihu]
+    )
+
+    out = asyncio.run(node(state))
+
+    assert len(out["collected_items"]) == 2
+    assert conn_juya.calls == 0
+    assert conn_github.calls == 0
+    assert conn_bilibili.calls == 0
+    assert conn_huggingface.calls == 1
+    assert conn_zhihu.calls == 1
 
 
 def test_collect_sources_node_catches_connector_exceptions() -> None:
