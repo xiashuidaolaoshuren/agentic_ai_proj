@@ -247,7 +247,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 — Implement Zhihu practitioner-insight connector
 
-- [X] **Do:** Add a dedicated `ZhihuConnector` that calls only the official search API. Expand topics with the three deterministic practitioner lenses, cap at three search calls, and dedupe by stable id or canonical URL. Rankable evidence is API relevance, lens/topic match, and returned-text completeness. Thin results are low-confidence discovery links. Timeframe requests emit an unsupported-timeframe warning rather than claiming freshness. Auth/quota/malformed/skipped-row warnings are non-fatal. Prove linked pages are not fetched. First GREEN is types + stub only.
+- [x] **Do:** Add a dedicated `ZhihuConnector` that calls only the official search API. Expand topics with the three deterministic practitioner lenses, cap at three search calls, and dedupe by stable id or canonical URL. Rankable evidence is API relevance, lens/topic match, and returned-text completeness. Thin results are low-confidence discovery links. Timeframe requests emit an unsupported-timeframe warning rather than claiming freshness. Auth/quota/malformed/skipped-row warnings are non-fatal. Prove linked pages are not fetched. First GREEN is types + stub only.
 
 - **Blocked by:** T1
 - **Plan mode:** high
@@ -258,7 +258,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 — Register sources and map request fields
 
-- [X] **Do:** Add real/fake Hugging Face and Zhihu factories to the canonical registry; keep `DEFAULT_SOURCE_NAMES` as Juya-only. Add DigestRequest/ConnectorRequest fields for Hugging Face discovery mode (names finalized in Plan mode) and map them in `parse_request_node`. Direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than “all injected connectors.”
+- [x] **Do:** Add real/fake Hugging Face and Zhihu factories to the canonical registry; keep `DEFAULT_SOURCE_NAMES` as Juya-only. Add DigestRequest/ConnectorRequest fields for Hugging Face discovery mode (names finalized in Plan mode) and map them in `parse_request_node`. Direct workflow construction, persistence metadata, and connector lifecycle use the resolved set rather than “all injected connectors.”
 
 - **Blocked by:** T2, T3
 - **Plan mode:** high
@@ -269,7 +269,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 — Implement deterministic Hugging Face and Zhihu intent
 
-- [ ] **Do:** Extend NL source parsing and OpenClaw/CLI/Gradio request resolution so `huggingface` and `zhihu` are valid opt-in names. Hugging Face cues distinguish global trending from topic/task-filtered trending. Zhihu cues mean practitioner lessons, trade-offs, and pitfalls. Platform/source cues replace the Juya default unless Juya is also named. Preserve existing Juya/GitHub/Bilibili phrases, legacy Juya-alias rejection, and `arxiv` as unknown.
+- [x] **Do:** Extend NL source parsing and OpenClaw/CLI/Gradio request resolution so `huggingface` and `zhihu` are valid opt-in names. Hugging Face cues distinguish global trending from topic/task-filtered trending. Zhihu cues mean practitioner lessons, trade-offs, and pitfalls. Platform/source cues replace the Juya default unless Juya is also named. Preserve existing Juya/GitHub/Bilibili phrases, legacy Juya-alias rejection, and `arxiv` as unknown.
 
 - **Blocked by:** T4
 - **Plan mode:** high
