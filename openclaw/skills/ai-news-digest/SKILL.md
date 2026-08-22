@@ -1,6 +1,6 @@
 ---
 name: ai-news-digest
-description: "Generate an AI news digest from Juya (default), GitHub, or Bilibili via the local warm digest service. Use exec to call openclaw-digest — never use web_fetch."
+description: "Generate an AI news digest from Juya (default), Hugging Face, GitHub, Zhihu, or Bilibili via the local warm digest service. Use exec to call openclaw-digest — never use web_fetch."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["uv"]}}}
 ---
@@ -11,7 +11,7 @@ Generate a markdown AI news digest by calling the **local warm digest service** 
 `ai-news-agent openclaw-digest`. OpenClaw is the channel gateway; this project handles
 retrieval, ranking, summarization, and persistence.
 
-> **IMPORTANT:** Never use `web_fetch`, RSS lookups, or manual scraping for digest or follow-up requests. Always use `exec` to call `openclaw-digest` or `openclaw-followup`. This applies to `daily.juya.uk`, GitHub, and Bilibili requests equally.
+> **IMPORTANT:** Never use `web_fetch`, RSS lookups, or manual scraping for digest or follow-up requests. Always use `exec` to call `openclaw-digest` or `openclaw-followup`. This applies to `daily.juya.uk`, Hugging Face, GitHub, Zhihu, and Bilibili requests equally.
 
 ## When To Use
 
@@ -22,6 +22,8 @@ Activate this skill when the user asks for a digest in natural language, includi
 - "Give me today's AI digest."
 - "Give me today's AI digest from GitHub only."
 - "Give me this week's AI digest on RAG and agents."
+- "Give me Hugging Face trending RAG models."
+- "Give me Zhihu practitioner insights on RAG."
 
 **Targeted digests (single URL, BV id, or channel)**
 
@@ -61,12 +63,12 @@ Map user intent into constrained CLI options. Defaults and aliases match
 | --- | --- | --- |
 | Full user digest phrase (preferred for targeted) | `--message` | Pass the user's digest sentence verbatim as one quoted argument. |
 | Timeframe | `--timeframe` | Default `today`. Map `daily` -> `today`; `week` / `this week` / `last7` -> `last_7_days`. |
-| Sources | `--sources` | Default **`juya`** for bare broad digests. Use `github`, `bilibili`, or comma-separated mixes when the user asks explicitly. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
+| Sources | `--sources` | Default **`juya`** for bare broad digests. Allowed names: `juya`, `huggingface`, `github`, `zhihu`, `bilibili`. Use comma-separated mixes when the user asks explicitly. Hugging Face cues (`huggingface only`, `trending models on hugging face`) map to `huggingface` (global Hub trending unless a topic/task filter is named). Zhihu cues (`zhihu practitioner insights`, lessons, trade-offs, pitfalls) map to `zhihu`. For targeted Bilibili-only requests, omit or set `bilibili`. For GitHub repo URLs, omit or set `github`. |
 | Topics | `--topics` | Optional comma-separated list. Omit when user does not specify topics. |
 | Output style | `--output-style` | Default bulletin. Use `editorial` or `newsletter` for a compact Chinese Juya index (one line per issue). |
 | Output language | `--output-language` | Optional BCP-47 tag. Use `zh-CN` with Juya editorial digests. |
 
-Do not invent new flags or source names.
+Do not invent new flags or source names. Do not treat Hugging Face as datasets/Spaces search or Zhihu as generic Chinese web search / hotlist / page crawl.
 
 ## Execution
 
@@ -113,6 +115,8 @@ uv run ai-news-agent openclaw-digest --fake --message "Digest bilibili video BV1
 | Give me today's AI digest. | `uv run ai-news-agent openclaw-digest --timeframe today --sources juya` |
 | Give me today's AI digest from GitHub only. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github` |
 | Give me this week's AI digest on RAG and agents. | `uv run ai-news-agent openclaw-digest --timeframe last_7_days --sources juya --topics RAG,agents` |
+| Give me Hugging Face trending RAG models. | `uv run ai-news-agent openclaw-digest --message "trending RAG models on hugging face"` |
+| Give me Zhihu practitioner insights on RAG. | `uv run ai-news-agent openclaw-digest --message "zhihu practitioner insights on RAG"` |
 | Give me a mixed digest from GitHub and Bilibili. | `uv run ai-news-agent openclaw-digest --timeframe today --sources github,bilibili` |
 | Digest bilibili video BV1gRJs63EYX | `uv run ai-news-agent openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `uv run ai-news-agent openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
@@ -145,7 +149,7 @@ Prefer the warm `openclaw-digest` path for lower latency.
 | --- | --- |
 | Service not reachable | Ask user to start `uv run ai-news-agent service` and retry. |
 | Missing `OPENAI_API_KEY` in live mode | Explain live digest requires `OPENAI_API_KEY`; suggest `--fake` smoke. |
-| Invalid source name | Report allowed sources: `juya`, `github`, `bilibili`. |
+| Invalid source name | Report allowed sources: `juya`, `huggingface`, `github`, `zhihu`, `bilibili`. |
 | Conflicting source toggle vs URL/channel selector | Explain the mismatch and ask user to remove one side of the conflict. |
 | Empty digest or connector warnings | Return digest output and surface warnings. |
 | Non-zero exit code | Summarize stderr; do not expose full stack traces. |

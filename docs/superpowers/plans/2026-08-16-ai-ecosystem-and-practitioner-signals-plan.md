@@ -302,7 +302,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 — Update usage, skill, and environment documentation
 
-- [ ] **Do:** Replace “Hugging Face / RSS out of scope” claims with the Milestone 6 source roles. Document Juya-only bare defaults, allowed names (`juya`, `huggingface`, `github`, `zhihu`, `bilibili`), Hugging Face dual discovery, Zhihu practitioner job and official-API-only evidence, credential env vars, and fake CLI examples. Align OpenClaw skill docs and benchmark notes without changing historical baseline meaning.
+- [x] **Do:** Replace “Hugging Face / RSS out of scope” claims with the Milestone 6 source roles. Document Juya-only bare defaults, allowed names (`juya`, `huggingface`, `github`, `zhihu`, `bilibili`), Hugging Face dual discovery, Zhihu practitioner job and official-API-only evidence, credential env vars, and fake CLI examples. Align OpenClaw skill docs and benchmark notes without changing historical baseline meaning.
 
 - **Blocked by:** T4, T5, T6, T7
 - **Plan mode:** skip
@@ -314,7 +314,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T9 — Run milestone-level regression and acceptance checks
 
-- [ ] **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
+- [x] **Do:** Run the full automated suite and focused fake/manual acceptance paths after all behavior and documentation changes. Update this plan’s changelog if verification exposes a missing file, a changed external contract, or a required follow-up subtask.
 
 - **Blocked by:** T1, T2, T3, T4, T5, T6, T7, T8
 - **Plan mode:** medium
@@ -334,5 +334,6 @@ When implementing, follow the `test-driven-development` skill for each subtask t
 | Date       | Change                                                                                    |
 | ---------- | ----------------------------------------------------------------------------------------- |
 | 2026-08-16 | Created from the accepted Milestone 6 ADR and ecosystem/practitioner-signals design spec. |
+| 2026-08-22 | T8 docs and T9 acceptance: README/skills/env/benchmark notes document opt-in Hugging Face and Zhihu; `uv run pytest -q` 585 passed, 2 skipped; fake CLI/HTTP remain Juya-only by default. |
 
 

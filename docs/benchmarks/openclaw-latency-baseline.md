@@ -10,6 +10,10 @@ Captured before the persistent digest-service adapter. Use the same prompts for 
 - OpenClaw: `openclaw gateway run` + `ai-news-digest` skill via CLI exec
 - Prompt under test: `Give me today's AI digest` (default **`juya`**, timeframe `today`)
 
+Hugging Face (`huggingface`) and Zhihu (`zhihu`) are later opt-in sources. They are **not** part of
+this historical baseline. Repeat the comparison procedure with the same Juya-only prompt; do not treat
+`--sources huggingface` or `--sources zhihu` as the default when comparing to the table below.
+
 ## Digest runtime (workflow only)
 
 | Path | Run | Entries | Warnings | Elapsed |
@@ -62,6 +66,8 @@ With the digest service running, verify these prompts route through `openclaw-di
 | `Digest https://github.com/langchain-ai/langgraph` | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
 | `Digest https://daily.juya.uk/` | `openclaw-digest --message "Digest https://daily.juya.uk/" --output-style editorial --output-language zh-CN` |
 | `Digest https://github.com/jujuyaya/juya-ai-daily` | **Rejected** — legacy alias; use `https://daily.juya.uk/` |
+| `Give me Hugging Face trending RAG models.` | `openclaw-digest --message "trending RAG models on hugging face"` |
+| `Give me Zhihu practitioner insights on RAG.` | `openclaw-digest --message "zhihu practitioner insights on RAG"` |
 
 Success criteria: markdown digest output from our workflow, connector caveats preserved, no gateway `web_fetch` attempts in logs.
 
