@@ -98,6 +98,55 @@ def test_search_args_matches_registry_contract() -> None:
     with pytest.raises(ValidationError):
         SearchArgs(query="RAG", max_results=0)
 
+    assert "query" in SearchArgs.model_fields
+    assert "timeframe" in SearchArgs.model_fields
+
+
+def test_huggingface_search_args_defaults_discovery_mode_global() -> None:
+    from ai_news_agent.tools.schemas import HuggingFaceSearchArgs
+
+    args = HuggingFaceSearchArgs()
+    assert args.discovery_mode == "global"
+    assert args.search is None
+    assert args.pipeline_tag is None
+    assert args.max_results == 5
+
+
+def test_huggingface_search_args_rejects_unknown_mode() -> None:
+    from ai_news_agent.tools.schemas import HuggingFaceSearchArgs
+
+    with pytest.raises(ValidationError):
+        HuggingFaceSearchArgs(discovery_mode="trending")
+
+
+def test_huggingface_search_args_rejects_max_results_zero() -> None:
+    from ai_news_agent.tools.schemas import HuggingFaceSearchArgs
+
+    with pytest.raises(ValidationError):
+        HuggingFaceSearchArgs(max_results=0)
+
+
+def test_zhihu_search_args_accepts_topics() -> None:
+    from ai_news_agent.tools.schemas import ZhihuSearchArgs
+
+    args = ZhihuSearchArgs(topics=["RAG"])
+    assert args.topics == ["RAG"]
+    assert args.max_results == 5
+
+
+def test_zhihu_search_args_rejects_empty_topics() -> None:
+    from ai_news_agent.tools.schemas import ZhihuSearchArgs
+
+    with pytest.raises(ValidationError):
+        ZhihuSearchArgs(topics=[])
+
+
+def test_zhihu_search_args_rejects_blank_topics() -> None:
+    from ai_news_agent.tools.schemas import ZhihuSearchArgs
+
+    with pytest.raises(ValidationError):
+        ZhihuSearchArgs(topics=["   "])
+
 
 def test_interface_agent_result_kind_values() -> None:
     from ai_news_agent.tools.schemas import InterfaceAgentResultKind

@@ -291,7 +291,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 — Expose connectors through tools and shared live interfaces
 
-- [ ] **Do:** Add pure `search_huggingface_trending_models` and `search_zhihu_practitioner_insights` wrappers and register them with injected factories. Hugging Face tool args include discovery mode plus optional topic/task and limit; Zhihu tool args include topics and limit, with lens expansion remaining connector-owned. Thread factories through the interface router, Gradio, and OpenClaw runtime. Update Gradio toggles/examples/validation. Retain existing tool names, bounded loop, streaming, HTTP schemas, follow-up paths, and at-most-one persist.
+- [x] **Do:** Add pure `search_huggingface_trending_models` and `search_zhihu_practitioner_insights` wrappers and register them with injected factories. Hugging Face tool args include discovery mode plus optional topic/task and limit; Zhihu tool args include topics and limit, with lens expansion remaining connector-owned. Thread factories through the interface router, Gradio, and OpenClaw runtime. Update Gradio toggles/examples/validation. Retain existing tool names, bounded loop, streaming, HTTP schemas, follow-up paths, and at-most-one persist.
 
 - **Blocked by:** T4, T5, T6
 - **Plan mode:** high

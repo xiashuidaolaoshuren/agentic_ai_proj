@@ -261,6 +261,11 @@ class DigestServiceRuntime:
                         name="bilibili",
                     ),
                     juya_factory=build_connector_factory(fake=False, name="juya"),
+                    huggingface_factory=build_connector_factory(
+                        fake=False,
+                        name="huggingface",
+                    ),
+                    zhihu_factory=build_connector_factory(fake=False, name="zhihu"),
                     build_connectors_fn=build_connectors_fn,
                     interface_name="openclaw",
                 )

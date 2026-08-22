@@ -30,7 +30,9 @@ __all__ = [
     "load_latest_digest",
     "search_bilibili_ai_news",
     "search_github_ai_news",
+    "search_huggingface_trending_models",
     "search_juya_ai_news",
+    "search_zhihu_practitioner_insights",
 ]
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
@@ -49,7 +51,15 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "load_latest_digest": ("ai_news_agent.tools.followup", "load_latest_digest"),
     "search_bilibili_ai_news": ("ai_news_agent.tools.connectors", "search_bilibili_ai_news"),
     "search_github_ai_news": ("ai_news_agent.tools.connectors", "search_github_ai_news"),
+    "search_huggingface_trending_models": (
+        "ai_news_agent.tools.connectors",
+        "search_huggingface_trending_models",
+    ),
     "search_juya_ai_news": ("ai_news_agent.tools.connectors", "search_juya_ai_news"),
+    "search_zhihu_practitioner_insights": (
+        "ai_news_agent.tools.connectors",
+        "search_zhihu_practitioner_insights",
+    ),
 }
 
 

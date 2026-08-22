@@ -17,12 +17,14 @@ from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.registry import ToolRegistry, build_tool_registry
 from ai_news_agent.tools.schemas import (
     DigestItemRankArgs,
+    HuggingFaceSearchArgs,
     InterfaceAgentResult,
     InterfaceAgentResultKind,
     RankOrSourceArgs,
     SearchArgs,
     ToolObservation,
     ToolObservationStatus,
+    ZhihuSearchArgs,
 )
 from test_tools_followup import _seed_full_followup_store
 
@@ -630,6 +632,94 @@ def test_build_tool_registry_juya_search_uses_search_args_and_factory_per_call(
     asyncio.run(tool.ainvoke({"query": "daily news"}))
 
     assert juya_factory.calls == 2
+
+
+def test_build_tool_registry_huggingface_and_zhihu_factories_register_tools(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "hf-zhihu-registry.db")
+    store.init_schema()
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=_CountingConnectorFactory(name="huggingface"),
+        zhihu_factory=_CountingConnectorFactory(name="zhihu"),
+    )
+
+    names = registry.tool_names()
+    for expected in EXPECTED_TOOL_NAMES:
+        assert expected in names
+    assert "search_huggingface_trending_models" in names
+    assert "search_zhihu_practitioner_insights" in names
+
+
+def test_build_tool_registry_huggingface_search_uses_args_schema_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "huggingface-factory.db")
+    store.init_schema()
+    huggingface_factory = _CountingConnectorFactory(name="huggingface")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=_CountingConnectorFactory(name="zhihu"),
+    )
+
+    tool = registry.get_tool("search_huggingface_trending_models")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is HuggingFaceSearchArgs
+    assert tool.args_schema is not SearchArgs
+
+    asyncio.run(tool.ainvoke({"discovery_mode": "filtered", "search": "RAG"}))
+    asyncio.run(tool.ainvoke({"discovery_mode": "global"}))
+
+    assert huggingface_factory.calls == 2
+
+
+def test_build_tool_registry_zhihu_search_uses_args_schema_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "zhihu-factory.db")
+    store.init_schema()
+    zhihu_factory = _CountingConnectorFactory(name="zhihu")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=_CountingConnectorFactory(name="huggingface"),
+        zhihu_factory=zhihu_factory,
+    )
+
+    tool = registry.get_tool("search_zhihu_practitioner_insights")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is ZhihuSearchArgs
+    assert tool.args_schema is not SearchArgs
+
+    asyncio.run(tool.ainvoke({"topics": ["RAG"]}))
+    asyncio.run(tool.ainvoke({"topics": ["agents"]}))
+
+    assert zhihu_factory.calls == 2
+
+
+def test_tools_package_surface_exports_huggingface_and_zhihu_search() -> None:
+    import ai_news_agent.tools as tools_package
+
+    assert "search_huggingface_trending_models" in tools_package.__all__
+    assert "search_zhihu_practitioner_insights" in tools_package.__all__
+
+    from ai_news_agent.tools import (
+        search_huggingface_trending_models,
+        search_zhihu_practitioner_insights,
+    )
+
+    assert callable(search_huggingface_trending_models)
+    assert callable(search_zhihu_practitioner_insights)
 
 
 def test_registry_module_has_no_legacy_tool_definition_or_handwritten_schemas() -> None:

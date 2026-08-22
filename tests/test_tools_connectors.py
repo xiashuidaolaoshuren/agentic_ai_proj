@@ -11,9 +11,11 @@ from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, So
 from ai_news_agent.tools.connectors import (
     search_bilibili_ai_news,
     search_github_ai_news,
+    search_huggingface_trending_models,
     search_juya_ai_news,
+    search_zhihu_practitioner_insights,
 )
-from ai_news_agent.tools.schemas import SearchQueryInput, ToolObservationStatus
+from ai_news_agent.tools.schemas import HuggingFaceSearchArgs, SearchQueryInput, ToolObservationStatus, ZhihuSearchArgs
 
 
 class _FakeConnector:
@@ -231,3 +233,123 @@ def test_search_bilibili_ai_news_connector_raises_becomes_error_caveat() -> None
     assert obs.status is ToolObservationStatus.ERROR
     assert obs.data["connector"] == "bilibili"
     assert any("network down" in caveat for caveat in obs.caveats)
+
+
+def test_search_huggingface_trending_models_maps_filtered_discovery_fields() -> None:
+    connector = _FakeConnector(name="huggingface")
+
+    asyncio.run(
+        search_huggingface_trending_models(
+            connector=connector,
+            args=HuggingFaceSearchArgs(
+                discovery_mode="filtered",
+                search="RAG",
+                pipeline_tag="text-generation",
+                max_results=3,
+            ),
+        )
+    )
+
+    assert connector.calls == 1
+    assert connector.last_request is not None
+    assert connector.last_request.huggingface_discovery_mode == "filtered"
+    assert connector.last_request.huggingface_search == "RAG"
+    assert connector.last_request.huggingface_pipeline_tag == "text-generation"
+    assert connector.last_request.max_items == 3
+
+
+def test_search_huggingface_trending_models_ok_is_json_safe() -> None:
+    item = _sample_item(
+        source=SourceKind.HUGGINGFACE,
+        source_id="org/model",
+        title="Trending Model",
+    )
+    connector = _FakeConnector(name="huggingface", items=[item], raw_count=4)
+
+    obs = asyncio.run(
+        search_huggingface_trending_models(
+            connector=connector,
+            args=HuggingFaceSearchArgs(
+                discovery_mode="filtered",
+                search="agents",
+                pipeline_tag="text-generation",
+                max_results=5,
+            ),
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert obs.data["connector"] == "huggingface"
+    assert obs.data["item_count"] == 1
+    assert obs.data["raw_count"] == 4
+    assert obs.data["items"][0] == item.model_dump(mode="json")
+    json.dumps(obs.model_dump(mode="json"))
+
+
+def test_search_huggingface_trending_models_connector_raises_becomes_error() -> None:
+    connector = _FakeConnector(name="huggingface", error=RuntimeError("hf down"))
+
+    obs = asyncio.run(
+        search_huggingface_trending_models(
+            connector=connector,
+            args=HuggingFaceSearchArgs(discovery_mode="filtered", search="RAG"),
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.ERROR
+    assert obs.data["connector"] == "huggingface"
+    assert any("hf down" in caveat for caveat in obs.caveats)
+
+
+def test_search_zhihu_practitioner_insights_sets_raw_topics_and_max_items() -> None:
+    connector = _FakeConnector(name="zhihu")
+
+    asyncio.run(
+        search_zhihu_practitioner_insights(
+            connector=connector,
+            args=ZhihuSearchArgs(topics=["RAG"], max_results=4),
+        )
+    )
+
+    assert connector.calls == 1
+    assert connector.last_request is not None
+    assert connector.last_request.topics == ["RAG"]
+    assert connector.last_request.max_items == 4
+    assert connector.last_request.timeframe is None
+    assert connector.last_request.huggingface_discovery_mode is None
+    assert connector.last_request.huggingface_search is None
+    assert connector.last_request.huggingface_pipeline_tag is None
+
+
+def test_search_zhihu_practitioner_insights_ok_is_json_safe() -> None:
+    item = _sample_item(source=SourceKind.ZHIHU, source_id="zh-1", title="RAG in production")
+    connector = _FakeConnector(name="zhihu", items=[item], raw_count=2)
+
+    obs = asyncio.run(
+        search_zhihu_practitioner_insights(
+            connector=connector,
+            args=ZhihuSearchArgs(topics=["RAG"], max_results=5),
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.OK
+    assert obs.data["connector"] == "zhihu"
+    assert obs.data["item_count"] == 1
+    assert obs.data["raw_count"] == 2
+    assert obs.data["items"][0] == item.model_dump(mode="json")
+    json.dumps(obs.model_dump(mode="json"))
+
+
+def test_search_zhihu_practitioner_insights_connector_raises_becomes_error() -> None:
+    connector = _FakeConnector(name="zhihu", error=RuntimeError("zhihu down"))
+
+    obs = asyncio.run(
+        search_zhihu_practitioner_insights(
+            connector=connector,
+            args=ZhihuSearchArgs(topics=["RAG"]),
+        )
+    )
+
+    assert obs.status is ToolObservationStatus.ERROR
+    assert obs.data["connector"] == "zhihu"
+    assert any("zhihu down" in caveat for caveat in obs.caveats)

@@ -23,7 +23,9 @@ from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import (
     search_bilibili_ai_news as _search_bilibili_ai_news_pure,
     search_github_ai_news as _search_github_ai_news_pure,
+    search_huggingface_trending_models as _search_huggingface_trending_models_pure,
     search_juya_ai_news as _search_juya_ai_news_pure,
+    search_zhihu_practitioner_insights as _search_zhihu_practitioner_insights_pure,
 )
 from ai_news_agent.tools.followup import (
     get_digest_item as _get_digest_item_pure,
@@ -33,12 +35,14 @@ from ai_news_agent.tools.followup import (
 )
 from ai_news_agent.tools.schemas import (
     DigestItemRankArgs,
+    HuggingFaceSearchArgs,
     InterfaceAgentResult,
     InterfaceAgentResultKind,
     RankOrSourceArgs,
     SearchArgs,
     SearchQueryInput,
     ToolObservation,
+    ZhihuSearchArgs,
 )
 
 ConnectorFactory = Callable[[], SourceConnector]
@@ -92,6 +96,8 @@ def build_tool_registry(
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
     juya_factory: ConnectorFactory,
+    huggingface_factory: ConnectorFactory | None = None,
+    zhihu_factory: ConnectorFactory | None = None,
     digest_request: DigestRequest | None = None,
     register_structured_tools: bool = False,
     connectors: Sequence[SourceConnector] | None = None,
@@ -194,6 +200,43 @@ def build_tool_registry(
         search_bilibili_ai_news,
         search_juya_ai_news,
     ]
+
+    if huggingface_factory is not None:
+        @tool(args_schema=HuggingFaceSearchArgs)
+        async def search_huggingface_trending_models(
+            discovery_mode: str = "global",
+            search: str | None = None,
+            pipeline_tag: str | None = None,
+            max_results: int = 5,
+        ) -> ToolObservation:
+            """Search Hugging Face for trending models through the Hugging Face connector."""
+            connector = huggingface_factory()
+            return await _search_huggingface_trending_models_pure(
+                connector=connector,
+                args=HuggingFaceSearchArgs(
+                    discovery_mode=discovery_mode,
+                    search=search,
+                    pipeline_tag=pipeline_tag,
+                    max_results=max_results,
+                ),
+            )
+
+        tools.append(search_huggingface_trending_models)
+
+    if zhihu_factory is not None:
+        @tool(args_schema=ZhihuSearchArgs)
+        async def search_zhihu_practitioner_insights(
+            topics: list[str],
+            max_results: int = 5,
+        ) -> ToolObservation:
+            """Search Zhihu for practitioner insights through the Zhihu connector."""
+            connector = zhihu_factory()
+            return await _search_zhihu_practitioner_insights_pure(
+                connector=connector,
+                args=ZhihuSearchArgs(topics=topics, max_results=max_results),
+            )
+
+        tools.append(search_zhihu_practitioner_insights)
 
     include_structured_tools = register_structured_tools or digest_request is not None
 

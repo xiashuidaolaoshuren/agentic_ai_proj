@@ -78,6 +78,8 @@ class InterfaceToolRouter:
         github_factory: ConnectorFactory,
         bilibili_factory: ConnectorFactory,
         juya_factory: ConnectorFactory,
+        huggingface_factory: ConnectorFactory | None = None,
+        zhihu_factory: ConnectorFactory | None = None,
         build_connectors_fn: BuildConnectorsFn,
         now_provider: Callable[[], datetime] | None = None,
         interface_name: str,
@@ -91,6 +93,8 @@ class InterfaceToolRouter:
         self._github_factory = github_factory
         self._bilibili_factory = bilibili_factory
         self._juya_factory = juya_factory
+        self._huggingface_factory = huggingface_factory
+        self._zhihu_factory = zhihu_factory
         self._build_connectors_fn = build_connectors_fn
         self._now_provider = now_provider
         self._interface_name = interface_name
@@ -338,6 +342,8 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
                 digest_request=digest_request,
                 connectors=connectors or [],
                 model=self._digest_model,
@@ -350,6 +356,8 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
                 register_structured_tools=True,
             )
         else:
@@ -358,6 +366,8 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
             )
         return build_tool_agent_runner(
             registry=registry,
@@ -559,6 +569,8 @@ def build_interface_tool_router(
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
     juya_factory: ConnectorFactory,
+    huggingface_factory: ConnectorFactory | None = None,
+    zhihu_factory: ConnectorFactory | None = None,
     build_connectors_fn: BuildConnectorsFn,
     now_provider: Callable[[], datetime] | None = None,
     interface_name: str,
@@ -574,6 +586,8 @@ def build_interface_tool_router(
         github_factory=github_factory,
         bilibili_factory=bilibili_factory,
         juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=zhihu_factory,
         build_connectors_fn=build_connectors_fn,
         now_provider=now_provider,
         interface_name=interface_name,

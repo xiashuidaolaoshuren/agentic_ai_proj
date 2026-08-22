@@ -117,7 +117,13 @@ def test_gradio_build_service_digest_stream_ephemeral_final(tmp_path) -> None:
 
 
 def test_gradio_source_toggle_choices_include_all_allowed_sources() -> None:
-    assert list(_SOURCE_TOGGLE_CHOICES) == ["juya", "github", "bilibili"]
+    assert list(_SOURCE_TOGGLE_CHOICES) == [
+        "juya",
+        "huggingface",
+        "github",
+        "zhihu",
+        "bilibili",
+    ]
 
 
 def test_gradio_default_source_toggle_value_is_juya_only() -> None:
@@ -128,10 +134,26 @@ def test_gradio_empty_sources_message_mentions_juya() -> None:
     assert "Juya" in _EMPTY_SOURCES_MESSAGE
     assert "GitHub" in _EMPTY_SOURCES_MESSAGE
     assert "Bilibili" in _EMPTY_SOURCES_MESSAGE
+    assert "Hugging Face" in _EMPTY_SOURCES_MESSAGE
+    assert "Zhihu" in _EMPTY_SOURCES_MESSAGE
 
 
 def test_gradio_examples_include_daily_juya_url() -> None:
     assert any("daily.juya.uk" in row[0] for row in _EXAMPLE_ROWS)
+
+
+def test_gradio_examples_include_huggingface_trending_prompt() -> None:
+    assert any(
+        "hugging face" in row[0].lower() and "trending" in row[0].lower()
+        for row in _EXAMPLE_ROWS
+    )
+
+
+def test_gradio_examples_include_zhihu_practitioner_prompt() -> None:
+    assert any(
+        "zhihu" in row[0].lower() and "practitioner" in row[0].lower()
+        for row in _EXAMPLE_ROWS
+    )
 
 
 def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path) -> None:
@@ -179,7 +201,7 @@ def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path
     demo = create_app(svc)
 
     assert demo is not None
-    assert len(_EXAMPLE_ROWS) == 6
+    assert len(_EXAMPLE_ROWS) == 8
 
     reply = asyncio.run(
         svc.handle_message_async(
@@ -290,6 +312,8 @@ def test_build_service_live_mode_wires_interface_tool_router(
     assert callable(router_calls[0]["workflow_runner"])
     assert callable(router_calls[0]["streaming_workflow_runner"])
     assert "juya_factory" in router_calls[0]
+    assert "huggingface_factory" in router_calls[0]
+    assert "zhihu_factory" in router_calls[0]
     assert getattr(service, "_interface_router", None) is fake_router
     assert not registry_called
     assert not agent_called
@@ -330,8 +354,12 @@ def test_build_service_live_mode_passes_juya_factory(tmp_path, monkeypatch: pyte
     _build_service(fake=False, db_path=tmp_path / "live-juya-factory.db")
 
     assert any(call.get("name") == "juya" for call in factory_calls)
+    assert any(call.get("name") == "huggingface" for call in factory_calls)
+    assert any(call.get("name") == "zhihu" for call in factory_calls)
     assert len(router_calls) == 1
     assert router_calls[0]["juya_factory"] is not None
+    assert router_calls[0]["huggingface_factory"] is not None
+    assert router_calls[0]["zhihu_factory"] is not None
 
 
 def test_build_service_live_closures_respect_connector_names(

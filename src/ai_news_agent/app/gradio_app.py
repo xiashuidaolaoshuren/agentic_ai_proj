@@ -36,10 +36,16 @@ _UI_ERROR_MESSAGE = (
     "Please check the terminal or log file for details and try again."
 )
 
-_SOURCE_TOGGLE_CHOICES: tuple[str, ...] = ("juya", "github", "bilibili")
+_SOURCE_TOGGLE_CHOICES: tuple[str, ...] = (
+    "juya",
+    "huggingface",
+    "github",
+    "zhihu",
+    "bilibili",
+)
 
 _EMPTY_SOURCES_MESSAGE = (
-    "Please enable at least one source (Juya, GitHub, or Bilibili)."
+    "Please enable at least one source (Juya, Hugging Face, GitHub, Zhihu, or Bilibili)."
 )
 
 _EXAMPLE_ROWS: list[list] = [
@@ -48,6 +54,8 @@ _EXAMPLE_ROWS: list[list] = [
     ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
     ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
     ["Digest bilibili channel 285286947", list(DEFAULT_SOURCE_NAMES)],
+    ["Show Hugging Face trending models", list(DEFAULT_SOURCE_NAMES)],
+    ["Find Zhihu practitioner insights on RAG", list(DEFAULT_SOURCE_NAMES)],
     ["show sources", list(DEFAULT_SOURCE_NAMES)],
 ]
 
@@ -189,6 +197,8 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
             github_factory=build_connector_factory(fake=fake, name="github"),
             bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
             juya_factory=build_connector_factory(fake=fake, name="juya"),
+            huggingface_factory=build_connector_factory(fake=fake, name="huggingface"),
+            zhihu_factory=build_connector_factory(fake=fake, name="zhihu"),
             build_connectors_fn=build_connectors_fn,
             interface_name="gradio",
         )
@@ -228,8 +238,9 @@ def create_app(service: ChatService) -> gr.Blocks:
         gr.Markdown(
             "# AI News Research Agent\n"
             "Ask for an AI news digest (e.g. mention \"digest\"). Juya is the default bulletin; "
-            "enable GitHub or Bilibili for opt-in repo/video discovery. Include GitHub repo URLs, "
-            "Bilibili video URLs, channel hints, or `daily.juya.uk` issue links for targeted runs. "
+            "enable Hugging Face, GitHub, Zhihu, or Bilibili for opt-in model, repo, practitioner, "
+            "or video discovery. Include GitHub repo URLs, Bilibili video URLs, channel hints, "
+            "or `daily.juya.uk` issue links for targeted runs. "
             'Follow up with "show sources", ranking hints, or "show caveats".'
         )
         source_toggles = gr.CheckboxGroup(
@@ -238,7 +249,8 @@ def create_app(service: ChatService) -> gr.Blocks:
             label="Sources",
             info=(
                 "Session filters for digest runs. Juya is selected by default; override one "
-                "request with phrases like 'github only', 'bilibili only', or a Juya issue URL."
+                "request with phrases like 'huggingface only', 'github only', 'zhihu only', "
+                "'bilibili only', or a Juya issue URL."
             ),
         )
         chat = gr.ChatInterface(
