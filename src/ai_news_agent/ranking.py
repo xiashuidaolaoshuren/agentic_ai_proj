@@ -22,6 +22,8 @@ _W_CONFIDENCE = 0.4
 _GITHUB_BASE = 1.0
 _BILIBILI_BASE = 0.88
 _JUYA_BASE = 1.05
+_HUGGINGFACE_BASE = 0.95
+_ZHIHU_BASE = 0.90
 _MAX_ENGAGEMENT_REF = 50_000.0
 
 
@@ -144,7 +146,9 @@ def find_newest_in_window_bilibili_candidate(
 
 _FALLBACK_KIND_ORDER: tuple[SourceKind, ...] = (
     SourceKind.JUYA,
+    SourceKind.HUGGINGFACE,
     SourceKind.GITHUB,
+    SourceKind.ZHIHU,
     SourceKind.BILIBILI,
 )
 
@@ -335,7 +339,25 @@ def _score_item(item: NewsItem, reference: datetime) -> tuple[dict[str, float], 
     bd["relevance"] = round(rel * _W_RELEVANCE, 6)
     bd["metadata"] = round(meta * _W_METADATA, 6)
     bd["source_quality"] = round(src * _W_SOURCE, 6)
-    if item.source is SourceKind.GITHUB:
+    if item.source is SourceKind.HUGGINGFACE:
+        ev = item.source_evidence or {}
+        trend = float(ev.get("trending_score") or 0)
+        bd["trending"] = round(_norm_log(trend) * _W_ENGAGEMENT, 6)
+        bd["downloads_30d"] = round(
+            _norm_log(float(ev.get("downloads_30d") or 0)) * 0.25, 6
+        )
+        bd["likes"] = round(_norm_log(float(ev.get("likes") or 0)) * 0.15, 6)
+    elif item.source is SourceKind.ZHIHU:
+        ev = item.source_evidence or {}
+        api_rel = max(0.0, min(1.0, float(ev.get("relevance") or 0)))
+        bd["api_relevance"] = round(api_rel * _W_ENGAGEMENT, 6)
+        lens = 1.0 if ev.get("query_lens") else 0.4
+        bd["lens_match"] = round(lens * _W_ENGAGEMENT, 6)
+        text_len = int(ev.get("evidence_text_length") or 0)
+        completeness = min(1.0, text_len / 400.0)
+        bd["text_completeness"] = round(completeness * _W_ENGAGEMENT, 6)
+        bd.pop("freshness", None)
+    elif item.source is SourceKind.GITHUB:
         bd["momentum"] = round(eng * fresh_r * _W_ENGAGEMENT, 6)
     elif item.source is SourceKind.JUYA:
         bulletin = 1.0 if item.raw_snippet and str(item.raw_snippet).strip() else 0.4
@@ -355,7 +377,16 @@ def _source_base(source: SourceKind) -> float:
         return _GITHUB_BASE
     if source is SourceKind.JUYA:
         return _JUYA_BASE
+    if source is SourceKind.HUGGINGFACE:
+        return _HUGGINGFACE_BASE
+    if source is SourceKind.ZHIHU:
+        return _ZHIHU_BASE
     return _BILIBILI_BASE
+
+
+def _norm_log(value: float) -> float:
+    cap = int(_MAX_ENGAGEMENT_REF)
+    return math.log1p(min(max(0, int(value)), cap)) / math.log1p(cap)
 
 
 def _confidence_raw(item: NewsItem) -> float:

@@ -9,7 +9,9 @@ from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, SourceKi
 
 _SECTION_LABELS: dict[SourceKind, str] = {
     SourceKind.JUYA: "Juya",
+    SourceKind.HUGGINGFACE: "Hugging Face",
     SourceKind.GITHUB: "GitHub",
+    SourceKind.ZHIHU: "Zhihu",
     SourceKind.BILIBILI: "Bilibili",
 }
 

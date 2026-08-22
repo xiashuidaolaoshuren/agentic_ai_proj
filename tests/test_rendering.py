@@ -68,6 +68,34 @@ def _juya_entry(*, title: str = "Juya bulletin") -> DigestEntry:
     )
 
 
+def _huggingface_entry(*, title: str = "Trending model") -> DigestEntry:
+    return DigestEntry(
+        source_kind=SourceKind.HUGGINGFACE,
+        source_id="hf-1",
+        title=title,
+        source_name="Hugging Face",
+        source_url="https://huggingface.co/models/hf-1",
+        summary="HF summary.",
+        why_it_matters="Why HF.",
+        background_knowledge="BG HF.",
+        follow_up_action=FollowUpAction.TRY,
+    )
+
+
+def _zhihu_entry(*, title: str = "Practitioner insight") -> DigestEntry:
+    return DigestEntry(
+        source_kind=SourceKind.ZHIHU,
+        source_id="zh-1",
+        title=title,
+        source_name="Zhihu",
+        source_url="https://www.zhihu.com/question/1",
+        summary="Zhihu summary.",
+        why_it_matters="Why Zhihu.",
+        background_knowledge="BG Zhihu.",
+        follow_up_action=FollowUpAction.READ,
+    )
+
+
 def test_render_digest_markdown_mixed_sources_use_section_headers() -> None:
     from ai_news_agent.rendering import render_digest_markdown
 
@@ -97,6 +125,35 @@ def test_render_digest_markdown_single_source_has_no_section_wrapper() -> None:
     out = render_digest_markdown(digest)
     assert "## GitHub" not in out
     assert "## Neural nets \\_primer\\_" in out
+
+
+def test_render_digest_markdown_mixed_huggingface_and_zhihu_section_labels() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_huggingface_entry(), _zhihu_entry()],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(digest)
+    assert "\n## Hugging Face\n" in out
+    assert "\n## Zhihu\n" in out
+    assert out.index("\n## Hugging Face\n") < out.index("\n## Zhihu\n")
+
+
+def test_render_digest_markdown_single_huggingface_has_no_section_wrapper() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_huggingface_entry()],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(digest)
+    assert "## Hugging Face" not in out
+    assert "## Trending model" in out
 
 
 def test_render_digest_editorial_juya_header_when_source_kind_juya() -> None:
