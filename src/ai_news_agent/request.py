@@ -76,3 +76,40 @@ def primary_source_from_names(names: list[str] | None) -> str | None:
     if not names:
         return None
     return names[0]
+
+
+def huggingface_fields_from_structured_sources(
+    *,
+    connector_names: list[str] | None,
+    topics: list[str] | None,
+    topics_explicit: bool,
+    huggingface_discovery_mode: str | None = None,
+    huggingface_search: str | None = None,
+    huggingface_pipeline_tag: str | None = None,
+) -> dict[str, str]:
+    """Map explicit structured topics onto Hugging Face filtered discovery.
+
+    Returns extra ``DigestRequest`` kwargs. Does nothing when Hugging Face is
+    not selected, topics were omitted, topics are empty, or any Hugging Face
+    discovery field is already set.
+    """
+    if not topics_explicit:
+        return {}
+    if (
+        huggingface_discovery_mode is not None
+        or huggingface_search is not None
+        or huggingface_pipeline_tag is not None
+    ):
+        return {}
+    if not connector_names or "huggingface" not in connector_names:
+        return {}
+    first = next(
+        (str(topic).strip() for topic in (topics or []) if str(topic).strip()),
+        None,
+    )
+    if first is None:
+        return {}
+    return {
+        "huggingface_discovery_mode": "filtered",
+        "huggingface_search": first,
+    }

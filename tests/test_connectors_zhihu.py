@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+import pytest
 
 from ai_news_agent.connectors import ZhihuConnector
 from ai_news_agent.connectors.base import ConnectorRequest
@@ -441,3 +442,76 @@ def test_collect_request_failure_aclose_leaves_injected_client_open() -> None:
         assert any(w.code == "request_failed" for w in out.warnings)
 
     asyncio.run(main())
+
+
+def _queued_lens_transport(
+    *,
+    recorded: list[httpx.Request],
+    steps: list[dict[str, Any]],
+) -> httpx.MockTransport:
+    remaining = list(steps)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        if request.url.path != "/api/v1/content/zhihu_search":
+            return httpx.Response(404, json={"message": "unexpected path"})
+        step = remaining.pop(0) if remaining else {"payload": _envelope([])}
+        error = step.get("error")
+        if error is not None:
+            raise error
+        text = step.get("text")
+        status = int(step.get("status", 200))
+        if text is not None:
+            return httpx.Response(status, text=text)
+        return httpx.Response(status, json=step.get("payload", _envelope([])))
+
+    return httpx.MockTransport(handler)
+
+
+def _lens_item(source_id: str, title: str) -> dict[str, Any]:
+    sample = _load_fixture("zhihu_search_sample.json")["Data"]["Items"][0]
+    return {**sample, "ContentID": source_id, "Title": title}
+
+
+@pytest.mark.parametrize(
+    ("failure_step", "expected_code"),
+    [
+        ({"error": httpx.ConnectError("connection refused")}, "request_failed"),
+        ({"status": 500, "payload": {"Message": "oops"}}, "request_failed"),
+        ({"status": 401, "payload": {"Message": "unauthorized"}}, "auth_rejected"),
+        ({"status": 429, "payload": {"Message": "too many requests"}}, "quota_exhausted"),
+        ({"status": 200, "text": "{not-json"}, "invalid_search_response"),
+        (
+            {"status": 200, "payload": {"Code": 1, "Message": "internal error", "Data": {}}},
+            "invalid_search_response",
+        ),
+    ],
+)
+def test_collect_preserves_partial_items_when_later_lens_fails(
+    failure_step: dict[str, Any],
+    expected_code: str,
+) -> None:
+    first = _lens_item("lens1-ok", "First lens title")
+    third = _lens_item("lens3-ok", "Third lens title")
+    recorded: list[httpx.Request] = []
+    steps = [
+        {"payload": _envelope([first])},
+        failure_step,
+        {"payload": _envelope([third])},
+    ]
+
+    async def main() -> None:
+        transport = _queued_lens_transport(recorded=recorded, steps=steps)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="https://developer.zhihu.com",
+        ) as client:
+            conn = ZhihuConnector(token="test-secret", client=client)
+            return await conn.collect(ConnectorRequest(topics=["RAG"], max_items=5))
+
+    out = asyncio.run(main())
+    assert [item.source_id for item in out.items] == ["lens1-ok", "lens3-ok"]
+    assert out.raw_count == 2
+    assert any(w.code == expected_code for w in out.warnings)
+    assert len(recorded) == 3
+    assert len(recorded) <= 3

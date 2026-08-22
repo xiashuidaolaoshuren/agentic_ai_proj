@@ -24,7 +24,7 @@ from ai_news_agent.env import configure_bilibili_network_from_env, load_local_en
 from ai_news_agent.graph.workflow import run_digest
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
-from ai_news_agent.request import DigestRequest, primary_source_from_names
+from ai_news_agent.request import DigestRequest, huggingface_fields_from_structured_sources, primary_source_from_names
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     FakeDigestModel,
@@ -70,6 +70,7 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
         kw["max_items_per_source"] = ns.max_items
 
     sources = parse_sources_csv(getattr(ns, "sources", "") or "")
+    names: list[str] | None = None
     if sources:
         names = normalize_source_names(sources)
         kw["connector_names"] = names
@@ -81,6 +82,14 @@ def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
     output_language = normalize_output_language_hint(getattr(ns, "output_language", None))
     if output_language is not None:
         kw["output_language"] = output_language
+
+    kw.update(
+        huggingface_fields_from_structured_sources(
+            connector_names=names,
+            topics=topics,
+            topics_explicit=topics is not None,
+        )
+    )
 
     return DigestRequest(**kw)
 

@@ -101,12 +101,12 @@ class ZhihuConnector:
                         str(exc)[:300],
                     )
                 )
-                return ConnectorResult(items=[], warnings=warnings, raw_count=raw_count)
+                continue
 
             status_warning = _warning_for_http_status(resp)
             if status_warning is not None:
                 warnings.append(status_warning)
-                return ConnectorResult(items=[], warnings=warnings, raw_count=raw_count)
+                continue
 
             try:
                 data = resp.json()
@@ -118,12 +118,12 @@ class ZhihuConnector:
                         str(exc)[:300],
                     )
                 )
-                return ConnectorResult(items=[], warnings=warnings, raw_count=raw_count)
+                continue
 
             envelope_warning, rows = _parse_search_envelope(data)
             if envelope_warning is not None:
                 warnings.append(envelope_warning)
-                return ConnectorResult(items=[], warnings=warnings, raw_count=raw_count)
+                continue
 
             for row in rows:
                 if not isinstance(row, dict):

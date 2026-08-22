@@ -213,3 +213,34 @@ def test_build_digest_request_accepts_huggingface_source() -> None:
     req = build_digest_request(ns)
     assert req.connector_names == ["huggingface"]
     assert req.primary_source == "huggingface"
+
+
+def test_build_digest_request_maps_topics_to_huggingface_filtered() -> None:
+    ns = Namespace(
+        timeframe=None,
+        topics="RAG,agents",
+        sources="huggingface",
+        top_n=None,
+        max_items=None,
+        db_path=None,
+        fake=False,
+    )
+    req = build_digest_request(ns)
+    assert req.topics == ["RAG", "agents"]
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+
+
+def test_build_digest_request_huggingface_global_when_topics_omitted() -> None:
+    ns = Namespace(
+        timeframe=None,
+        topics=None,
+        sources="huggingface",
+        top_n=None,
+        max_items=None,
+        db_path=None,
+        fake=False,
+    )
+    req = build_digest_request(ns)
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None

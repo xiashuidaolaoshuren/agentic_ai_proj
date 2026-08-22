@@ -188,6 +188,30 @@ def test_parse_digest_intent_huggingface_filtered_by_pipeline_tag() -> None:
     assert req.huggingface_pipeline_tag == "text-generation"
 
 
+def test_resolve_digest_request_huggingface_pipeline_tag_infers_connector() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request("huggingface models for text-generation")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+    assert req.huggingface_pipeline_tag == "text-generation"
+    assert req.huggingface_discovery_mode == "filtered"
+    assert "juya" not in (req.connector_names or [])
+
+
+def test_resolve_digest_request_huggingface_pipeline_fields_override_session() -> None:
+    from ai_news_agent.digest_request_builder import resolve_digest_request
+
+    req = resolve_digest_request(
+        "huggingface models for text-generation",
+        session_connector_names=["github"],
+    )
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+    assert req.huggingface_pipeline_tag == "text-generation"
+    assert "github" not in (req.connector_names or [])
+
+
 def test_parse_digest_intent_huggingface_global_trending_leaves_discovery_mode_none() -> None:
     req = parse_digest_intent("huggingface trending models")
     assert req.huggingface_discovery_mode is None
