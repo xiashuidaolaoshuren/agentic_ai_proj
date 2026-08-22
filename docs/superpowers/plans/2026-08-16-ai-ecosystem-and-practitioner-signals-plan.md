@@ -280,7 +280,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 — Add kind-aware ranking and source-section presentation
 
-- [ ] **Do:** Score Hugging Face primarily by Hub `trending_score` with transparent relevance/downloads/likes/recency tie-breakers. Score Zhihu by API relevance, practitioner-lens match, topic match, and returned-text completeness, without implying popularity or freshness. Keep `top_n` as the overall cap (no quotas) and preserve the Bilibili newest-in-window guarantee. Fallback section order becomes Juya → Hugging Face → GitHub → Zhihu → Bilibili; intent-first still leads; empty sections are omitted. Summaries and renderers use source-specific display names and caveats (Hugging Face: popularity ≠ quality; Zhihu: thin results are discovery-only).
+- [x] **Do:** Score Hugging Face primarily by Hub `trending_score` with transparent relevance/downloads/likes/recency tie-breakers. Score Zhihu by API relevance, practitioner-lens match, topic match, and returned-text completeness, without implying popularity or freshness. Keep `top_n` as the overall cap (no quotas) and preserve the Bilibili newest-in-window guarantee. Fallback section order becomes Juya → Hugging Face → GitHub → Zhihu → Bilibili; intent-first still leads; empty sections are omitted. Summaries and renderers use source-specific display names and caveats (Hugging Face: popularity ≠ quality; Zhihu: thin results are discovery-only).
 
 - **Blocked by:** T1, T2, T3, T5
 - **Plan mode:** high
