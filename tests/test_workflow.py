@@ -128,6 +128,42 @@ def test_digest_request_huggingface_fields_default_none() -> None:
     assert req.huggingface_pipeline_tag is None
 
 
+def test_digest_request_items_per_source_round_trip_and_validation() -> None:
+    req = DigestRequest(items_per_source=3)
+    assert req.items_per_source == 3
+    assert DigestRequest().items_per_source is None
+
+    with pytest.raises(ValueError, match="items_per_source"):
+        DigestRequest(items_per_source=0)
+
+
+def test_rank_items_node_forwards_items_per_source(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _spy_rank_items(items, **kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        from ai_news_agent.ranking import rank_items
+
+        return rank_items(items, **kwargs)
+
+    monkeypatch.setattr("ai_news_agent.graph.nodes.rank.rank_items", _spy_rank_items)
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], top_n=5, items_per_source=3)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh-1",
+        url="https://github.com/o/r1",
+        title="Repo",
+        collected_at=now,
+        metadata_completeness=0.8,
+    )
+    node = make_rank_items_node(now_provider=lambda: now)
+    node({"request": req, "started_at": now, "collected_items": [item]})
+
+    assert captured.get("items_per_source") == 3
+
+
 def test_initial_state_shape() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     req = DigestRequest(topics=["RAG"])

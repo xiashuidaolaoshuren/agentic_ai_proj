@@ -858,3 +858,125 @@ def test_rank_items_zhihu_longer_evidence_increases_text_completeness() -> None:
     r_rich = rank_items([rich], top_n=1, now=now)[0]
 
     assert r_rich.score_breakdown["text_completeness"] > r_thin.score_breakdown["text_completeness"]
+
+
+def _mixed_juya_huggingface_pool(now: datetime) -> list[NewsItem]:
+    from datetime import timedelta
+
+    juya_items = [
+        NewsItem(
+            source=SourceKind.JUYA,
+            source_id=f"juya-{i}",
+            url=f"https://daily.juya.uk/{i}",
+            title=f"Juya {i}",
+            published_at=now - timedelta(hours=i),
+            collected_at=now,
+            metadata_completeness=0.9,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            raw_snippet="bulletin text here",
+        )
+        for i in range(4)
+    ]
+    hf_items = [
+        NewsItem(
+            source=SourceKind.HUGGINGFACE,
+            source_id=f"hf-{i}",
+            url=f"https://huggingface.co/m{i}",
+            title=f"HF model {i}",
+            collected_at=now,
+            metadata_completeness=0.5,
+            topic_matches=[],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            source_evidence={"trending_score": max(1, 10 - i)},
+        )
+        for i in range(4)
+    ]
+    return juya_items + hf_items
+
+
+def test_rank_items_items_per_source_selects_n_per_kind_mixed_juya_huggingface() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    ranked = rank_items(
+        _mixed_juya_huggingface_pool(now),
+        top_n=2,
+        items_per_source=2,
+        now=now,
+    )
+    selected = [r for r in ranked if r.selected]
+    by_kind: dict[SourceKind, list[RankedItem]] = {}
+    for row in selected:
+        by_kind.setdefault(row.item.source, []).append(row)
+
+    assert len(by_kind.get(SourceKind.JUYA, [])) == 2
+    assert len(by_kind.get(SourceKind.HUGGINGFACE, [])) == 2
+    assert len(selected) == 4
+
+
+def test_rank_items_items_per_source_none_keeps_overall_top_n() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    ranked = rank_items(
+        _mixed_juya_huggingface_pool(now),
+        top_n=2,
+        items_per_source=None,
+        now=now,
+    )
+
+    assert sum(1 for r in ranked if r.selected) == 2
+
+
+def test_rank_items_items_per_source_bilibili_guarantee_stays_within_quota() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.ranking import rank_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVjune2new",
+        url="https://www.bilibili.com/video/BVjune2new",
+        title="June 2 newest",
+        published_at=now - timedelta(hours=2),
+        collected_at=now,
+        metadata_completeness=0.25,
+        topic_matches=[],
+        content_confidence=ConfidenceLevel.LOW,
+        stars_or_views=1,
+        raw_snippet=None,
+    )
+    github_items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id=f"gh{i}",
+            url=f"https://github.com/o/gh{i}",
+            title=f"repo{i}",
+            published_at=now - timedelta(days=i + 1),
+            collected_at=now,
+            metadata_completeness=0.95,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            stars_or_views=5000 + i,
+            raw_snippet="readme body",
+        )
+        for i in range(4)
+    ]
+
+    ranked = rank_items(
+        github_items + [bilibili_newest],
+        top_n=5,
+        items_per_source=2,
+        now=now,
+        timeframe="last_7_days",
+    )
+    selected = [r for r in ranked if r.selected]
+    github_selected = [r for r in selected if r.item.source is SourceKind.GITHUB]
+    bilibili_selected = [r for r in selected if r.item.source is SourceKind.BILIBILI]
+
+    assert len(github_selected) == 2
+    assert len(bilibili_selected) == 1
+    assert bilibili_selected[0].item.source_id == "BVjune2new"
+    assert len(selected) == 3

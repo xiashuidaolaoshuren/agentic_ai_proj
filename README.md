@@ -182,7 +182,7 @@ In **fake mode**, open-ended and source-exploration prompts return the offline t
 
 ### Source toggles and selection
 
-Gradio shows **session-sticky** checkboxes for `juya`, `huggingface`, `github`, `zhihu`, and `bilibili` (**Juya selected by default**). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.
+Gradio shows **session-sticky** checkboxes for `juya`, `huggingface`, `github`, `zhihu`, and `bilibili` (**Juya selected by default**). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`. Use **Items per source** (default 5, range 1–20) to cap how many ranked items appear from each enabled source in mixed digests.
 
 Bare digest requests (no source toggles or explicit `--sources`) resolve to **Juya-only** via [`DEFAULT_SOURCE_NAMES`](src/ai_news_agent/sources.py). Select multiple checkboxes or pass a comma-separated `--sources` list for a **mixed digest**; section order is primary intent first, otherwise Juya → Hugging Face → GitHub → Zhihu → Bilibili (empty sections omitted).
 

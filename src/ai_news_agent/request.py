@@ -24,6 +24,8 @@ class DigestRequest:
     max_items_per_source: int = 20
     top_n: int = 5
     language_hint: str | None = None
+    #: When set, ranking selects up to this many items per source kind (Gradio).
+    items_per_source: int | None = None
     #: Legacy Bilibili selectors (prefer bilibili_* fields).
     target_channels: list[str] = field(default_factory=_empty_str_list)
     manual_urls: list[str] = field(default_factory=_empty_str_list)
@@ -50,6 +52,8 @@ class DigestRequest:
             raise ValueError("max_items_per_source must be >= 1")
         if self.top_n < 0:
             raise ValueError("top_n must be non-negative")
+        if self.items_per_source is not None and self.items_per_source < 1:
+            raise ValueError("items_per_source must be >= 1")
 
         if self.topics is None:
             norm_topics = list(DEFAULT_TOPICS)

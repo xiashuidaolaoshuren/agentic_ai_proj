@@ -492,3 +492,85 @@ def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
     service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
 
     assert getattr(service, "_tool_agent_runner", None) is not None
+
+
+def test_create_app_exposes_items_per_source_number_control(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    original_number = gradio_app.gr.Number
+    original_chat_interface = gradio_app.gr.ChatInterface
+
+    def spy_number(**kwargs):
+        captured["number"] = dict(kwargs)
+        return original_number(**kwargs)
+
+    def spy_chat_interface(**kwargs):
+        captured["chat_interface"] = dict(kwargs)
+        return original_chat_interface(**kwargs)
+
+    monkeypatch.setattr(gradio_app.gr, "Number", spy_number)
+    monkeypatch.setattr(gradio_app.gr, "ChatInterface", spy_chat_interface)
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("unused")
+
+    store = DigestStore(tmp_path / "gradio-items-per-source.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+    create_app(svc)
+
+    number_kwargs = captured["number"]
+    assert number_kwargs["value"] == 5
+    assert number_kwargs["minimum"] == 1
+    assert number_kwargs["maximum"] == 20
+
+    additional_inputs = captured["chat_interface"]["additional_inputs"]
+    assert len(additional_inputs) == 2
+
+
+def test_respond_stream_passes_session_items_per_source(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream_kwargs: list[dict[str, object]] = []
+    captured_fn: dict[str, object] = {}
+    original_chat_interface = gradio_app.gr.ChatInterface
+
+    def spy_chat_interface(**kwargs):
+        captured_fn["fn"] = kwargs["fn"]
+        return original_chat_interface(**kwargs)
+
+    monkeypatch.setattr(gradio_app.gr, "ChatInterface", spy_chat_interface)
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("unused")
+
+    store = DigestStore(tmp_path / "gradio-respond-stream-n.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    async def recording_stream(message: str, **kwargs):  # noqa: ANN003
+        stream_kwargs.append({"message": message, **kwargs})
+        yield "ok\n"
+
+    svc.handle_message_streaming_async = recording_stream  # type: ignore[method-assign]
+
+    create_app(svc)
+    respond_stream = captured_fn["fn"]
+
+    async def collect() -> list[str]:
+        chunks: list[str] = []
+        async for chunk in respond_stream(
+            "Give me today's AI digest",
+            [],
+            ["juya", "huggingface"],
+            5,
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(collect())
+    assert chunks == ["ok\n"]
+    assert len(stream_kwargs) == 1
+    assert stream_kwargs[0]["session_items_per_source"] == 5
+    assert stream_kwargs[0]["session_connector_names"] == ["juya", "huggingface"]

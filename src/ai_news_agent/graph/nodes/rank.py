@@ -28,6 +28,7 @@ def make_rank_items_node(*, now_provider: Callable[[], datetime] | None = None):
         kwargs: dict[str, object] = {
             "top_n": req.top_n,
             "timeframe": req.timeframe,
+            "items_per_source": req.items_per_source,
         }
         if now_provider is not None:
             kwargs["now"] = now_provider()

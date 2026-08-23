@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Any
 
-from ai_news_agent.chat import _message_requests_digest
+from ai_news_agent.chat import _apply_session_items_per_source, _message_requests_digest
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.followup_structured import (
     NO_SAVED_DIGEST,
@@ -106,6 +106,7 @@ class InterfaceToolRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         allow_digest: bool = True,
@@ -114,6 +115,7 @@ class InterfaceToolRouter:
             message,
             digest_request=digest_request,
             session_connector_names=session_connector_names,
+            session_items_per_source=session_items_per_source,
         )
         logger.info(
             "interface route intent=%s interface=%s correlation_id=%s",
@@ -206,6 +208,7 @@ class InterfaceToolRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         allow_digest: bool = True,
@@ -214,6 +217,7 @@ class InterfaceToolRouter:
             message,
             digest_request=digest_request,
             session_connector_names=session_connector_names,
+            session_items_per_source=session_items_per_source,
         )
 
         if intent is _RouteIntent.NO_SAVED_DIGEST:
@@ -302,6 +306,7 @@ class InterfaceToolRouter:
         *,
         digest_request: DigestRequest | None,
         session_connector_names: list[str] | None,
+        session_items_per_source: int | None = None,
     ) -> tuple[_RouteIntent, DigestRequest | None]:
         if digest_request is not None:
             return _RouteIntent.DIGEST, digest_request
@@ -316,6 +321,7 @@ class InterfaceToolRouter:
                     message,
                     session_connector_names=session_connector_names,
                 )
+                req = _apply_session_items_per_source(req, session_items_per_source)
                 return _RouteIntent.DIGEST, req
             return _RouteIntent.OPEN_ENDED_FOLLOWUP, None
 
@@ -324,6 +330,7 @@ class InterfaceToolRouter:
                 message,
                 session_connector_names=session_connector_names,
             )
+            req = _apply_session_items_per_source(req, session_items_per_source)
             return _RouteIntent.DIGEST, req
         return _RouteIntent.NO_SAVED_DIGEST, None
 

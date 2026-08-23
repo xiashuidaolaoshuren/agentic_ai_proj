@@ -48,6 +48,12 @@ _EMPTY_SOURCES_MESSAGE = (
     "Please enable at least one source (Juya, Hugging Face, GitHub, Zhihu, or Bilibili)."
 )
 
+_DEFAULT_ITEMS_PER_SOURCE = 5
+_MAX_ITEMS_PER_SOURCE = 20
+_INVALID_ITEMS_PER_SOURCE_MESSAGE = (
+    f"Items per source must be a whole number from 1 to {_MAX_ITEMS_PER_SOURCE}."
+)
+
 _EXAMPLE_ROWS: list[list] = [
     ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
     ["Digest https://daily.juya.uk/issues/2026-06-16/", list(DEFAULT_SOURCE_NAMES)],
@@ -87,6 +93,19 @@ async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
         closer = getattr(c, "aclose", None)
         if closer is not None:
             await closer()
+
+
+def _coerce_items_per_source(raw: object) -> int | None:
+    """Return validated session N, or ``None`` when the UI value is invalid."""
+    if raw is None or raw == "":
+        return _DEFAULT_ITEMS_PER_SOURCE
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 1 or value > _MAX_ITEMS_PER_SOURCE:
+        return None
+    return value
 
 
 async def _run_digest_async(
@@ -220,14 +239,20 @@ def create_app(service: ChatService) -> gr.Blocks:
         message: str,
         _history: list,
         enabled_sources: list[str],
+        items_per_source: object,
     ) -> AsyncIterator[str]:
         if not enabled_sources:
             yield _EMPTY_SOURCES_MESSAGE
+            return
+        session_n = _coerce_items_per_source(items_per_source)
+        if session_n is None:
+            yield _INVALID_ITEMS_PER_SOURCE_MESSAGE
             return
         try:
             async for partial in service.handle_message_streaming_async(
                 message,
                 session_connector_names=enabled_sources,
+                session_items_per_source=session_n,
             ):
                 yield partial
         except Exception:
@@ -253,9 +278,20 @@ def create_app(service: ChatService) -> gr.Blocks:
                 "'bilibili only', or a Juya issue URL."
             ),
         )
+        items_per_source_input = gr.Number(
+            value=_DEFAULT_ITEMS_PER_SOURCE,
+            minimum=1,
+            maximum=_MAX_ITEMS_PER_SOURCE,
+            precision=0,
+            label="Items per source",
+            info=(
+                "Up to this many ranked items from each checked source; empty sources are "
+                "omitted. Default 5."
+            ),
+        )
         chat = gr.ChatInterface(
             fn=respond_stream,
-            additional_inputs=[source_toggles],
+            additional_inputs=[source_toggles, items_per_source_input],
             examples=None,
         )
         with gr.Accordion("Example prompts", open=False):

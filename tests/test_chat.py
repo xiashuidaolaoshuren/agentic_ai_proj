@@ -48,6 +48,7 @@ class _FakeInterfaceRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
     ) -> InterfaceAgentResult:
         self.calls.append(
@@ -55,6 +56,7 @@ class _FakeInterfaceRouter:
                 "message": message,
                 "digest_request": digest_request,
                 "session_connector_names": session_connector_names,
+                "session_items_per_source": session_items_per_source,
                 "correlation_id": correlation_id,
             }
         )
@@ -66,6 +68,7 @@ class _FakeInterfaceRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
     ):
         self.calls.append(
@@ -73,6 +76,7 @@ class _FakeInterfaceRouter:
                 "message": message,
                 "digest_request": digest_request,
                 "session_connector_names": session_connector_names,
+                "session_items_per_source": session_items_per_source,
                 "correlation_id": correlation_id,
                 "streaming": True,
             }
@@ -789,6 +793,43 @@ def test_chat_session_source_toggles_apply_connector_names(tmp_path) -> None:
     )
 
     assert captured[0].connector_names == ["github"]
+
+
+def test_chat_session_items_per_source_applies_to_digest_request(tmp_path) -> None:
+    captured: list[DigestRequest] = []
+
+    async def fake_runner(req: DigestRequest) -> DigestResult:
+        captured.append(req)
+        now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+        return DigestResult(
+            request=req,
+            digest=None,
+            run_id=None,
+            markdown="",
+            text="ok\n",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    store = DigestStore(tmp_path / "items-per-source.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    asyncio.run(
+        svc.handle_message_async(
+            "Give me today's AI digest",
+            session_connector_names=["juya", "huggingface"],
+            session_items_per_source=5,
+        )
+    )
+
+    req = captured[0]
+    assert req.connector_names == ["juya", "huggingface"]
+    assert req.items_per_source == 5
+    assert req.max_items_per_source >= 5
 
 
 def test_chat_nl_source_phrase_overrides_session_toggles(tmp_path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from typing import Any, TypeVar
 
 from ai_news_agent.digest_request_builder import resolve_digest_request
@@ -63,6 +64,7 @@ class ChatService:
         *,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
     ) -> str:
         """Sync wrapper for UI/CLI callers."""
         return asyncio.run(
@@ -70,6 +72,7 @@ class ChatService:
                 message,
                 digest_request=digest_request,
                 session_connector_names=session_connector_names,
+                session_items_per_source=session_items_per_source,
             )
         )
 
@@ -79,6 +82,7 @@ class ChatService:
         *,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
     ) -> str:
         preview = _message_preview(message)
         logger.info("chat message received preview=%r", preview)
@@ -88,6 +92,7 @@ class ChatService:
                 message=message,
                 digest_request=digest_request,
                 session_connector_names=session_connector_names,
+                session_items_per_source=session_items_per_source,
             )
             return _interface_result_to_text(result, store=self._store)
 
@@ -96,6 +101,7 @@ class ChatService:
                 message,
                 digest_request=digest_request,
                 session_connector_names=session_connector_names,
+                session_items_per_source=session_items_per_source,
             )
             t0 = time.perf_counter()
             result = await self._workflow_runner(req)
@@ -138,6 +144,7 @@ class ChatService:
         *,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         chunk_size: int = 80,
         chunk_delay_s: float = 0.02,
     ) -> AsyncIterator[str]:
@@ -152,6 +159,7 @@ class ChatService:
                     message=message,
                     digest_request=digest_request,
                     session_connector_names=session_connector_names,
+                    session_items_per_source=session_items_per_source,
                 ):
                     yield progress, done, payload
 
@@ -171,6 +179,7 @@ class ChatService:
                 message,
                 digest_request=digest_request,
                 session_connector_names=session_connector_names,
+                session_items_per_source=session_items_per_source,
             )
             if self._streaming_workflow_runner is not None:
                 t0 = time.perf_counter()
@@ -341,27 +350,45 @@ def _user_facing_digest_text(result: DigestResult) -> str:
     return f"{notice}\n\n{result.text}"
 
 
+def _apply_session_items_per_source(
+    req: DigestRequest,
+    session_items_per_source: int | None,
+) -> DigestRequest:
+    if session_items_per_source is None:
+        return req
+    return replace(
+        req,
+        items_per_source=session_items_per_source,
+        max_items_per_source=max(req.max_items_per_source, session_items_per_source),
+    )
+
+
 def _resolve_digest_request(
     message: str,
     *,
     digest_request: DigestRequest | None,
     session_connector_names: list[str] | None,
+    session_items_per_source: int | None = None,
 ) -> DigestRequest:
     if digest_request is not None:
         req = digest_request
         logger.info(
-            "digest path=explicit_request topics=%d connector_names=%s",
+            "digest path=explicit_request topics=%d connector_names=%s items_per_source=%s",
             len(req.topics),
             req.connector_names,
+            req.items_per_source,
         )
         return req
 
     req = resolve_digest_request(message, session_connector_names=session_connector_names)
+    req = _apply_session_items_per_source(req, session_items_per_source)
     logger.info(
-        "digest path=resolved_request explicit=%s timeframe=%r connector_names=%s",
+        "digest path=resolved_request explicit=%s timeframe=%r connector_names=%s "
+        "items_per_source=%s",
         req.has_explicit_selectors(),
         req.timeframe,
         req.connector_names,
+        req.items_per_source,
     )
     return req
 

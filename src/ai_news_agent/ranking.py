@@ -33,8 +33,12 @@ def rank_items(
     top_n: int,
     now: datetime | None = None,
     timeframe: str | None = None,
+    items_per_source: int | None = None,
 ) -> list[RankedItem]:
     """Score, deduplicate, and mark top-N candidates.
+
+    When ``items_per_source`` is set, select up to that many items per
+    :class:`~ai_news_agent.models.SourceKind` instead of one overall ``top_n`` cap.
 
     ``now`` is injected for deterministic tests; defaults to :func:`utcnow`.
     """
@@ -64,22 +68,105 @@ def rank_items(
 
     ranked.sort(key=sort_key)
 
-    for i, ri in enumerate(ranked):
-        if i < top_n:
-            ri.selected = True
-            ri.selection_reason = f"rank #{i + 1} of {len(ranked)} by score_total"
-        else:
-            ri.selected = False
-            ri.selection_reason = ""
+    if items_per_source is not None:
+        _apply_per_source_selection(
+            ranked,
+            items_per_source=items_per_source,
+            timeframe=timeframe,
+            reference=reference,
+        )
+    else:
+        for i, ri in enumerate(ranked):
+            if i < top_n:
+                ri.selected = True
+                ri.selection_reason = f"rank #{i + 1} of {len(ranked)} by score_total"
+            else:
+                ri.selected = False
+                ri.selection_reason = ""
 
-    _apply_newest_bilibili_guarantee(
-        ranked,
-        top_n=top_n,
-        timeframe=timeframe,
-        reference=reference,
-    )
+        _apply_newest_bilibili_guarantee(
+            ranked,
+            top_n=top_n,
+            timeframe=timeframe,
+            reference=reference,
+        )
 
     return ranked
+
+
+def _apply_per_source_selection(
+    ranked: list[RankedItem],
+    *,
+    items_per_source: int,
+    timeframe: str | None,
+    reference: datetime,
+) -> None:
+    if items_per_source <= 0:
+        return
+
+    by_kind: dict[SourceKind, list[RankedItem]] = {}
+    for row in ranked:
+        by_kind.setdefault(row.item.source, []).append(row)
+
+    for kind, rows in by_kind.items():
+        for index, row in enumerate(rows):
+            if index < items_per_source:
+                row.selected = True
+                row.selection_reason = (
+                    f"rank #{index + 1} of {len(rows)} in {kind.value} by score_total"
+                )
+            else:
+                row.selected = False
+                row.selection_reason = ""
+
+    if timeframe:
+        _apply_newest_bilibili_guarantee_per_source(
+            ranked,
+            items_per_source=items_per_source,
+            timeframe=timeframe,
+            reference=reference,
+        )
+
+
+def _apply_newest_bilibili_guarantee_per_source(
+    ranked: list[RankedItem],
+    *,
+    items_per_source: int,
+    timeframe: str | None,
+    reference: datetime,
+) -> None:
+    if items_per_source <= 0 or not timeframe:
+        return
+    candidate = find_newest_in_window_bilibili_candidate(
+        ranked,
+        timeframe=timeframe,
+        now=reference,
+    )
+    if candidate is None or candidate.selected:
+        return
+
+    bilibili_selected = [
+        row
+        for row in ranked
+        if row.selected and row.item.source is SourceKind.BILIBILI
+    ]
+    if not bilibili_selected:
+        candidate.selected = True
+        candidate.selection_reason = "guaranteed newest in-window bilibili item"
+        return
+
+    replace_target = min(
+        bilibili_selected,
+        key=lambda row: (
+            row.score_total,
+            _reference_time(row.item, reference).timestamp(),
+            row.item.source_id,
+        ),
+    )
+    replace_target.selected = False
+    replace_target.selection_reason = ""
+    candidate.selected = True
+    candidate.selection_reason = "guaranteed newest in-window bilibili item"
 
 
 def _apply_newest_bilibili_guarantee(

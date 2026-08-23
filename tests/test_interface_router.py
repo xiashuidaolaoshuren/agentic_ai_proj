@@ -472,6 +472,50 @@ def test_digest_agent_fallback_runs_deterministic_workflow(tmp_path: Path) -> No
     assert workflow_calls[0] is trusted_request
 
 
+def test_interface_router_applies_session_items_per_source_on_digest_fallback(
+    tmp_path: Path,
+) -> None:
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI"],
+    )
+    digest_result = DigestResult(
+        request=DigestRequest(topics=["AI"]),
+        digest=digest,
+        run_id=9,
+        markdown="# Digest",
+        text="Fallback digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+    model = _FakeToolCallModel([AIMessage(content="Direct answer without tools.")])
+    workflow_calls: list[DigestRequest] = []
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        workflow_calls.append(req)
+        return digest_result
+
+    router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
+
+    asyncio.run(
+        router.route(
+            message="Give me today's AI digest",
+            session_connector_names=["juya", "huggingface"],
+            session_items_per_source=5,
+        )
+    )
+
+    assert len(workflow_calls) == 1
+    req = workflow_calls[0]
+    assert req.connector_names == ["juya", "huggingface"]
+    assert req.items_per_source == 5
+    assert req.max_items_per_source >= 5
+
+
 def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -44,6 +44,7 @@ class _FakeInterfaceRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
         allow_digest: bool = True,
@@ -82,6 +83,7 @@ class _OnStageInvokingRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
@@ -112,6 +114,7 @@ class _WorkflowInvokingRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
@@ -146,6 +149,7 @@ class _ConcurrentOverwriteRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
