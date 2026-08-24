@@ -35,8 +35,20 @@ The atomic GitHub digest item — a repository under a topic that scores as nota
 _Avoid_: Release-as-primary-item, README snippet as the story, treating every matching repo as equally newsworthy, claiming precise “stars gained in N days” without that data
 
 **Trending model**:
-The atomic Hugging Face digest item — a model repository with notable current Hub momentum, ranked primarily by the Hub’s native trending score. It may be global or constrained to a user-named topic or task.
-_Avoid_: Dataset or Space, “best model,” benchmark winner, equating popularity with technical quality
+The atomic Hugging Face digest item — one **model family** with notable current Hub momentum, represented by the family’s highest-trending Hub repository. It may be global or constrained to a user-named topic or task.
+_Avoid_: Dataset or Space, “best model,” benchmark winner, equating popularity with technical quality, treating every packaging variant (GGUF, MLX, quant, Instruct) as its own slot when it shares version, size, and product SKU
+
+**Model family**:
+The Hugging Face presentation unit: Hub repositories that share architecture version, parameter size, and product SKU (e.g. `27B` vs other sizes; `pro` vs `flash`), regardless of publisher or packaging format.
+_Avoid_: Grouping different sizes or product SKUs together, splitting the same size/version across multiple visible rows because of GGUF/MLX/quant/Instruct/Chat/Uncensored suffixes
+
+**Family representative**:
+The Hub repository shown for a model family — the member with the highest Hub trending score. Other format or packaging variants may appear on an **Also:** line but do not occupy their own slot.
+_Avoid_: Picking a representative by downloads alone when trending score is available, hiding that sibling variants exist when they were collected
+
+**Display rank**:
+The 1-based position shown before each digest entry or search row. In digests it is the continuous index across the full entry list (mixed sections do not restart at 1). In search lists it is the order of rows actually shown after any Hugging Face family collapse.
+_Avoid_: Raw Hub list index as the user-facing number, per-section rank that disagrees with follow-up `rank`, rank numbers that skip after grouping
 
 **Release**:
 A later optional enrichment on a GitHub item (what shipped), not the primary digest row.

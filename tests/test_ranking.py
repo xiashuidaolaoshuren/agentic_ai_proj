@@ -895,6 +895,27 @@ def _mixed_juya_huggingface_pool(now: datetime) -> list[NewsItem]:
     return juya_items + hf_items
 
 
+def test_rank_items_items_per_source_selects_huggingface_families_not_variants() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    items = [
+        _hf_item(source_id="Qwen/Qwen3.8-27B", trending_score=100.0),
+        _hf_item(source_id="Other/Qwen3.8-27B-GGUF", trending_score=99.0),
+        _hf_item(source_id="Other/Qwen3.8-27B-MLX", trending_score=98.0),
+        _hf_item(source_id="org/model-b", trending_score=90.0),
+        _hf_item(source_id="org/model-c", trending_score=80.0),
+    ]
+    ranked = rank_items(items, top_n=5, items_per_source=2, now=now)
+    selected_hf = [r for r in ranked if r.selected and r.item.source is SourceKind.HUGGINGFACE]
+
+    assert len(selected_hf) == 2
+    selected_ids = {row.item.source_id for row in selected_hf}
+    assert "Qwen/Qwen3.8-27B" in selected_ids
+    assert "Other/Qwen3.8-27B-GGUF" not in selected_ids
+    assert "Other/Qwen3.8-27B-MLX" not in selected_ids
+
+
 def test_rank_items_items_per_source_selects_n_per_kind_mixed_juya_huggingface() -> None:
     from ai_news_agent.ranking import rank_items
 

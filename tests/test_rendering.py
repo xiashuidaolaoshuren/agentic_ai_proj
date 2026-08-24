@@ -96,6 +96,66 @@ def _zhihu_entry(*, title: str = "Practitioner insight") -> DigestEntry:
     )
 
 
+def test_render_digest_markdown_mixed_sources_use_global_display_ranks() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_juya_entry(), _github_entry(), _huggingface_entry(title="HF model")],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(digest)
+    assert "### 1. Juya bulletin" in out
+    assert "### 2. Trending agent toolkit" in out
+    assert "### 3. HF model" in out
+    assert "### 1. HF model" not in out
+
+
+def test_render_digest_text_mixed_sources_use_global_display_ranks() -> None:
+    from ai_news_agent.rendering import render_digest_text
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_juya_entry(), _github_entry(), _huggingface_entry(title="HF model")],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_text(digest)
+    assert "1. Juya bulletin" in out
+    assert "2. Trending agent toolkit" in out
+    assert "3. HF model" in out
+
+
+def test_render_search_items_text_prefixes_display_ranks() -> None:
+    from datetime import UTC, datetime
+
+    from ai_news_agent.models import ConfidenceLevel, NewsItem
+    from ai_news_agent.rendering import render_search_items_text
+
+    items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id="repo-1",
+            url="https://github.com/o/repo-1",
+            title="First repo",
+            collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+            content_confidence=ConfidenceLevel.HIGH,
+        ),
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id="repo-2",
+            url="https://github.com/o/repo-2",
+            title="Second repo",
+            collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+            content_confidence=ConfidenceLevel.HIGH,
+        ),
+    ]
+    out = render_search_items_text(items)
+    assert out.startswith("1. First repo")
+    assert "2. Second repo" in out
+
+
 def test_render_digest_markdown_mixed_sources_use_section_headers() -> None:
     from ai_news_agent.rendering import render_digest_markdown
 
@@ -109,8 +169,8 @@ def test_render_digest_markdown_mixed_sources_use_section_headers() -> None:
     assert "\n## GitHub\n" in out
     assert "\n## Bilibili\n" in out
     assert out.index("\n## GitHub\n") < out.index("\n## Bilibili\n")
-    assert "### Trending agent toolkit" in out
-    assert "### New model overview" in out
+    assert "### 1. Trending agent toolkit" in out
+    assert "### 2. New model overview" in out
 
 
 def test_render_digest_markdown_single_source_has_no_section_wrapper() -> None:
@@ -124,7 +184,7 @@ def test_render_digest_markdown_single_source_has_no_section_wrapper() -> None:
     )
     out = render_digest_markdown(digest)
     assert "## GitHub" not in out
-    assert "## Neural nets \\_primer\\_" in out
+    assert "## 1. Neural nets \\_primer\\_" in out
 
 
 def test_render_digest_markdown_mixed_huggingface_and_zhihu_section_labels() -> None:
@@ -153,7 +213,7 @@ def test_render_digest_markdown_single_huggingface_has_no_section_wrapper() -> N
     )
     out = render_digest_markdown(digest)
     assert "## Hugging Face" not in out
-    assert "## Trending model" in out
+    assert "## 1. Trending model" in out
 
 
 def test_render_digest_editorial_juya_header_when_source_kind_juya() -> None:
@@ -183,7 +243,7 @@ def test_render_digest_markdown_includes_header_metadata_and_entry_sections() ->
     assert f"**Generated:** {digest.generated_at.isoformat()}" in out
     assert "**Timeframe:** last_7_days" in out
     assert "**Topics:** LLM, Agents" in out
-    assert "## Neural nets \\_primer\\_" in out
+    assert "## 1. Neural nets \\_primer\\_" in out
     assert "**Source:** GitHub (`github`)" in out
     assert "**Link:** <https://github.com/repo/ai-tool>" in out
     assert "A \\*short\\* summary." in out

@@ -101,10 +101,29 @@ def _render_header_markdown(digest: Digest) -> str:
     return "\n".join(lines)
 
 
-def _render_entry_markdown(entry: DigestEntry, *, heading_level: int = 2) -> str:
+def _entry_display_ranks(entries: list[DigestEntry]) -> dict[tuple[SourceKind, str], int]:
+    return {
+        (entry.source_kind, entry.source_id): index
+        for index, entry in enumerate(entries, start=1)
+    }
+
+
+def _format_display_rank_prefix(display_rank: int | None) -> str:
+    if display_rank is None:
+        return ""
+    return f"{display_rank}. "
+
+
+def _render_entry_markdown(
+    entry: DigestEntry,
+    *,
+    heading_level: int = 2,
+    display_rank: int | None = None,
+) -> str:
     hashes = "#" * heading_level
+    title = f"{_format_display_rank_prefix(display_rank)}{_escape_markdown_inline(entry.title)}"
     parts = [
-        f"{hashes} {_escape_markdown_inline(entry.title)}",
+        f"{hashes} {title}",
         "",
         f"- **Source:** {entry.source_name} (`{entry.source_kind.value}`)",
         f"- **Link:** <{entry.source_url}>",
@@ -119,10 +138,20 @@ def _render_entry_markdown(entry: DigestEntry, *, heading_level: int = 2) -> str
 
 
 def _render_mixed_entries_markdown(entries: list[DigestEntry]) -> str:
+    ranks = _entry_display_ranks(entries)
     blocks: list[str] = []
     for label, group in _group_entries_by_section(entries):
         blocks.extend([f"## {label}", ""])
-        blocks.append("\n\n".join(_render_entry_markdown(entry, heading_level=3) for entry in group))
+        blocks.append(
+            "\n\n".join(
+                _render_entry_markdown(
+                    entry,
+                    heading_level=3,
+                    display_rank=ranks[(entry.source_kind, entry.source_id)],
+                )
+                for entry in group
+            )
+        )
     return "\n\n".join(blocks)
 
 
@@ -141,7 +170,12 @@ def render_digest_markdown(
     elif _is_mixed_digest(digest.entries):
         blocks.append(_render_mixed_entries_markdown(digest.entries))
     else:
-        blocks.append("\n\n".join(_render_entry_markdown(e) for e in digest.entries))
+        blocks.append(
+            "\n\n".join(
+                _render_entry_markdown(entry, display_rank=index)
+                for index, entry in enumerate(digest.entries, start=1)
+            )
+        )
     return "\n".join(blocks).rstrip() + "\n"
 
 
@@ -155,9 +189,9 @@ def _render_header_text(digest: Digest) -> str:
     return "\n".join(lines)
 
 
-def _render_entry_text(entry: DigestEntry) -> str:
+def _render_entry_text(entry: DigestEntry, *, display_rank: int | None = None) -> str:
     lines = [
-        entry.title,
+        f"{_format_display_rank_prefix(display_rank)}{entry.title}",
         "",
         f"Source: {entry.source_name} ({entry.source_kind.value})",
         f"Link: {entry.source_url}",
@@ -179,10 +213,10 @@ _HF_POPULARITY_CAVEAT = (
 def render_search_items_text(items: list[NewsItem]) -> str:
     """Render connector search hits as a deterministic plain-text list."""
     blocks: list[str] = []
-    for item in items:
+    for rank, item in enumerate(items, start=1):
         source_name = _SECTION_LABELS.get(item.source, item.source.value)
         lines = [
-            item.title,
+            f"{rank}. {item.title}",
             "",
             f"Source: {source_name} ({item.source.value})",
             f"Link: {item.url}",
@@ -203,6 +237,16 @@ def render_search_items_text(items: list[NewsItem]) -> str:
                 hub_parts.append(f"likes={likes}")
             if hub_parts:
                 lines.append(f"Hub: {', '.join(hub_parts)}")
+            variants = evidence.get("family_variants")
+            if isinstance(variants, list) and variants:
+                also_titles = [
+                    str(variant.get("title", variant.get("source_id", ""))).strip()
+                    for variant in variants
+                    if isinstance(variant, dict)
+                ]
+                also_titles = [title for title in also_titles if title]
+                if also_titles:
+                    lines.append(f"Also: {', '.join(also_titles)}")
         blocks.append("\n".join(lines))
 
     text = "\n\n---\n\n".join(blocks)
@@ -212,11 +256,20 @@ def render_search_items_text(items: list[NewsItem]) -> str:
 
 
 def _render_mixed_entries_text(entries: list[DigestEntry]) -> str:
+    ranks = _entry_display_ranks(entries)
     blocks: list[str] = []
     for label, group in _group_entries_by_section(entries):
         blocks.append(label)
         blocks.append("")
-        blocks.append("\n\n---\n\n".join(_render_entry_text(entry) for entry in group))
+        blocks.append(
+            "\n\n---\n\n".join(
+                _render_entry_text(
+                    entry,
+                    display_rank=ranks[(entry.source_kind, entry.source_id)],
+                )
+                for entry in group
+            )
+        )
     return "\n\n---\n\n".join(blocks)
 
 
@@ -235,7 +288,12 @@ def render_digest_text(
     elif _is_mixed_digest(digest.entries):
         parts.append(_render_mixed_entries_text(digest.entries))
     else:
-        parts.append("\n\n---\n\n".join(_render_entry_text(e) for e in digest.entries))
+        parts.append(
+            "\n\n---\n\n".join(
+                _render_entry_text(entry, display_rank=index)
+                for index, entry in enumerate(digest.entries, start=1)
+            )
+        )
     return "\n".join(parts).rstrip() + "\n"
 
 

@@ -286,6 +286,7 @@ def test_search_huggingface_trending_models_includes_formatted_text_with_source_
     )
 
     formatted = obs.data["formatted_text"]
+    assert formatted.startswith("1. Trending Model")
     assert "Source:" in formatted
     assert "Link:" in formatted
     assert "Hugging Face" in formatted

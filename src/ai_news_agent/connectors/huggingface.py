@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
+from ai_news_agent.huggingface_families import group_huggingface_families, huggingface_collect_limit
 from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, SourceKind
 
 if TYPE_CHECKING:
@@ -38,11 +39,13 @@ class HuggingFaceConnector:
 
     async def collect(self, request: ConnectorRequest) -> ConnectorResult:
         mode = request.huggingface_discovery_mode or "global"
+        display_limit = request.max_items
+        collect_limit = huggingface_collect_limit(display_limit)
         if mode == "filtered":
             discovery_mode = "filtered"
             list_kwargs: dict[str, Any] = {
                 "sort": "trending_score",
-                "limit": request.max_items,
+                "limit": collect_limit,
             }
             if request.huggingface_search:
                 list_kwargs["search"] = request.huggingface_search
@@ -52,7 +55,7 @@ class HuggingFaceConnector:
             discovery_mode = "global"
             list_kwargs = {
                 "sort": "trending_score",
-                "limit": request.max_items,
+                "limit": collect_limit,
             }
 
         api = self._get_api()
@@ -94,7 +97,8 @@ class HuggingFaceConnector:
                 )
             items.append(_model_to_news_item(model, discovery_mode, collected_at, request.topics))
 
-        return ConnectorResult(items=items, warnings=warnings, raw_count=len(models))
+        grouped_items = group_huggingface_families(items, limit=display_limit)
+        return ConnectorResult(items=grouped_items, warnings=warnings, raw_count=len(models))
 
 
 def _missing_required_model_fields(model: Any) -> bool:
@@ -138,6 +142,7 @@ def _model_to_news_item(
     topic_matches = _topic_matches(request_topics, model)
     completeness = _metadata_completeness(model, has_snippet=bool(raw_snippet))
     content_confidence = ConfidenceLevel.MEDIUM if raw_snippet else ConfidenceLevel.LOW
+    base_model = _card_base_model(model)
 
     return NewsItem(
         source=SourceKind.HUGGINGFACE,
@@ -163,8 +168,20 @@ def _model_to_news_item(
             "library_name": model.library_name,
             "gated": model.gated,
             "discovery_mode": discovery_mode,
+            **({"base_model": base_model} if base_model else {}),
         },
     )
+
+
+def _card_base_model(model: Any) -> str | None:
+    card_data = model.card_data
+    if card_data is None:
+        return None
+    value = getattr(card_data, "base_model", None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _card_summary(model: Any) -> str | None:

@@ -101,7 +101,7 @@ def test_collect_global_trending_maps_models_to_news_items() -> None:
         assert out.raw_count == 2
         assert len(out.items) == 2
         assert all(i.source is SourceKind.HUGGINGFACE for i in out.items)
-        assert api.list_models_calls == [{"sort": "trending_score", "limit": 10}]
+        assert api.list_models_calls == [{"sort": "trending_score", "limit": 40}]
         assert api.list_datasets_called is False
         assert api.list_spaces_called is False
 
@@ -148,7 +148,7 @@ def test_collect_filtered_search_passes_search_and_records_discovery_mode() -> N
         assert len(out.items) == 1
         assert out.items[0].source_evidence["discovery_mode"] == "filtered"
         assert api.list_models_calls == [
-            {"sort": "trending_score", "limit": 5, "search": "RAG"}
+            {"sort": "trending_score", "limit": 20, "search": "RAG"}
         ]
 
     asyncio.run(main())
@@ -174,7 +174,7 @@ def test_collect_filtered_pipeline_tag_passes_pipeline_tag() -> None:
         assert api.list_models_calls == [
             {
                 "sort": "trending_score",
-                "limit": 5,
+                "limit": 20,
                 "pipeline_tag": "text-generation",
             }
         ]

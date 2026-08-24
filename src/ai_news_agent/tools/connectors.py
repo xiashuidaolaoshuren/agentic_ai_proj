@@ -109,18 +109,24 @@ async def _collect_observation(
             caveats=[str(exc)],
         )
 
+    items = list(result.items)
+    if connector_name == "huggingface":
+        from ai_news_agent.huggingface_families import group_huggingface_families
+
+        items = group_huggingface_families(items, limit=request.max_items)
+
     warnings = list(result.warnings)
-    item_count = len(result.items)
+    item_count = len(items)
     data: dict[str, object] = {
         "connector": connector_name,
         "item_count": item_count,
         "raw_count": result.raw_count,
-        "items": [item.model_dump(mode="json") for item in result.items],
+        "items": [item.model_dump(mode="json") for item in items],
         "warnings": [warning.model_dump(mode="json") for warning in warnings],
         **extra,
     }
-    if result.items:
-        data["formatted_text"] = render_search_items_text(result.items)
+    if items:
+        data["formatted_text"] = render_search_items_text(items)
     return ToolObservation(
         status=ToolObservationStatus.OK,
         summary=(

@@ -6,6 +6,7 @@ Scoring is weighted; inspect evidence via :attr:`RankedItem.score_breakdown`.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
@@ -69,6 +70,7 @@ def rank_items(
     ranked.sort(key=sort_key)
 
     if items_per_source is not None:
+        ranked = _collapse_hf_ranked_rows(ranked, reference=reference, sort_key=sort_key)
         _apply_per_source_selection(
             ranked,
             items_per_source=items_per_source,
@@ -126,6 +128,43 @@ def _apply_per_source_selection(
             timeframe=timeframe,
             reference=reference,
         )
+
+
+def _collapse_hf_ranked_rows(
+    ranked: list[RankedItem],
+    *,
+    reference: datetime,
+    sort_key: Callable[[RankedItem], tuple[float, float, str]],
+) -> list[RankedItem]:
+    from ai_news_agent.huggingface_families import family_key, group_huggingface_families
+
+    hf_rows = [row for row in ranked if row.item.source is SourceKind.HUGGINGFACE]
+    if not hf_rows:
+        return ranked
+
+    other_rows = [row for row in ranked if row.item.source is not SourceKind.HUGGINGFACE]
+    grouped_items = group_huggingface_families(
+        [row.item for row in hf_rows],
+        limit=len(hf_rows),
+    )
+    grouped_by_key = {family_key(item): item for item in grouped_items}
+
+    collapsed: list[RankedItem] = []
+    seen_keys: set[str] = set()
+    for row in hf_rows:
+        key = family_key(row.item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        family_rows = [candidate for candidate in hf_rows if family_key(candidate.item) == key]
+        best_row = max(family_rows, key=lambda candidate: candidate.score_total)
+        collapsed.append(
+            best_row.model_copy(update={"item": grouped_by_key[key]})
+        )
+
+    merged = other_rows + collapsed
+    merged.sort(key=sort_key)
+    return merged
 
 
 def _apply_newest_bilibili_guarantee_per_source(
