@@ -55,14 +55,14 @@ _INVALID_ITEMS_PER_SOURCE_MESSAGE = (
 )
 
 _EXAMPLE_ROWS: list[list] = [
-    ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest https://daily.juya.uk/issues/2026-06-16/", list(DEFAULT_SOURCE_NAMES)],
-    ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest bilibili channel 285286947", list(DEFAULT_SOURCE_NAMES)],
-    ["Show Hugging Face trending models", list(DEFAULT_SOURCE_NAMES)],
-    ["Find Zhihu practitioner insights on RAG", list(DEFAULT_SOURCE_NAMES)],
-    ["show sources", list(DEFAULT_SOURCE_NAMES)],
+    ["Give me today's AI digest", ["juya"]],
+    ["Digest https://daily.juya.uk/", ["juya"]],
+    ["Give me today's AI digest from github only", ["github"]],
+    ["Digest https://github.com/langchain-ai/langgraph", ["github"]],
+    ["Digest bilibili channel 285286947", ["bilibili"]],
+    ["Show Hugging Face trending models", ["huggingface"]],
+    ["Find Zhihu practitioner insights on RAG", ["zhihu"]],
+    ["show sources", ["juya"]],
 ]
 
 logger = get_logger("gradio")

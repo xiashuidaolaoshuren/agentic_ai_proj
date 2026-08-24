@@ -452,6 +452,47 @@ def test_tool_agent_run_streaming_digest_done_is_short_summary_not_full_body() -
     assert done_line == "Done generate_ai_news_digest: Digest ready."
 
 
+def test_search_tool_formatted_text_short_circuits_conversational_result() -> None:
+    formatted_body = (
+        "Trending Model\n\n"
+        "Source: Hugging Face (huggingface)\n"
+        "Link: https://example.com/org/model"
+    )
+
+    @tool
+    async def search_huggingface_trending_models() -> ToolObservation:
+        """Search Hugging Face for trending models."""
+        return ToolObservation(
+            status=ToolObservationStatus.OK,
+            summary="Found 1 huggingface result.",
+            data={"formatted_text": formatted_body, "item_count": 1},
+        )
+
+    registry = ToolRegistry([search_huggingface_trending_models])
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_huggingface_trending_models",
+                        "args": {},
+                        "id": "call-hf-search",
+                    }
+                ],
+            ),
+            AIMessage(content="Here is my paraphrase of the models."),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    result = asyncio.run(runner.run("Show Hugging Face trending models"))
+
+    assert result.kind is InterfaceAgentResultKind.CONVERSATIONAL
+    assert result.text == formatted_body
+    assert "paraphrase" not in result.text
+
+
 def test_tool_agent_run_streaming_emits_failure_progress_line() -> None:
     async def _boom() -> ToolObservation:
         raise RuntimeError("boom")

@@ -154,6 +154,7 @@ class InterfaceToolRouter:
                 digest_request=req,
                 on_stage=on_stage,
                 connectors=connectors,
+                max_results_cap=session_items_per_source,
             )
             try:
                 agent_result = await runner.run(message)
@@ -252,6 +253,7 @@ class InterfaceToolRouter:
                 digest_request=req,
                 on_stage=on_stage,
                 connectors=connectors,
+                max_results_cap=session_items_per_source,
             )
             final_state: InterfaceAgentResult | None = None
             fallback_reason: str | None = None
@@ -341,6 +343,7 @@ class InterfaceToolRouter:
         digest_request: DigestRequest | None,
         on_stage: Callable[[str], None] | None = None,
         connectors: Sequence[Any] | None = None,
+        max_results_cap: int | None = None,
     ) -> ToolAgentRunner:
         if intent is _RouteIntent.DIGEST:
             assert digest_request is not None
@@ -356,6 +359,7 @@ class InterfaceToolRouter:
                 model=self._digest_model,
                 now_provider=self._now_provider,
                 on_stage=on_stage,
+                max_results_cap=max_results_cap,
             )
         elif intent is _RouteIntent.STRUCTURED_FOLLOWUP:
             registry = build_tool_registry(
@@ -366,6 +370,7 @@ class InterfaceToolRouter:
                 huggingface_factory=self._huggingface_factory,
                 zhihu_factory=self._zhihu_factory,
                 register_structured_tools=True,
+                max_results_cap=max_results_cap,
             )
         else:
             registry = build_tool_registry(
@@ -375,6 +380,7 @@ class InterfaceToolRouter:
                 juya_factory=self._juya_factory,
                 huggingface_factory=self._huggingface_factory,
                 zhihu_factory=self._zhihu_factory,
+                max_results_cap=max_results_cap,
             )
         return build_tool_agent_runner(
             registry=registry,

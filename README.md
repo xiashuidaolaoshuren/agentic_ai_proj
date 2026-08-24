@@ -144,7 +144,7 @@ The UI delegates to [`ChatService`](src/ai_news_agent/chat.py):
   3. **Legacy fallback** → `chat_model.generate_followup_reply` only if no tool agent is configured (not used by default live Gradio).
   4. **Guidance** message if neither tool agent nor chat model is available.
 
-Example prompts live in a collapsible **Example prompts** panel below the chat. Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
+Example prompts live in a collapsible **Example prompts** panel below the chat. Clicking an example sets **Sources** to match that prompt (Items per source is unchanged). Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
 
 ### Milestone 2 — Follow-up tools (Gradio / ChatService)
 

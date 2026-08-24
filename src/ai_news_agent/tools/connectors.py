@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ai_news_agent.connectors.base import ConnectorRequest, SourceConnector
 from ai_news_agent.models import ConnectorWarning
+from ai_news_agent.rendering import render_search_items_text
 from ai_news_agent.tools.schemas import (
     HuggingFaceSearchArgs,
     SearchQueryInput,
@@ -110,19 +111,22 @@ async def _collect_observation(
 
     warnings = list(result.warnings)
     item_count = len(result.items)
+    data: dict[str, object] = {
+        "connector": connector_name,
+        "item_count": item_count,
+        "raw_count": result.raw_count,
+        "items": [item.model_dump(mode="json") for item in result.items],
+        "warnings": [warning.model_dump(mode="json") for warning in warnings],
+        **extra,
+    }
+    if result.items:
+        data["formatted_text"] = render_search_items_text(result.items)
     return ToolObservation(
         status=ToolObservationStatus.OK,
         summary=(
             f"Found {item_count} {connector_name} result{'s' if item_count != 1 else ''}."
         ),
-        data={
-            "connector": connector_name,
-            "item_count": item_count,
-            "raw_count": result.raw_count,
-            "items": [item.model_dump(mode="json") for item in result.items],
-            "warnings": [warning.model_dump(mode="json") for warning in warnings],
-            **extra,
-        },
+        data=data,
         caveats=_warning_caveats(warnings),
     )
 
@@ -152,20 +156,23 @@ async def _search_connector(
 
     warnings = list(result.warnings)
     item_count = len(result.items)
+    data: dict[str, object] = {
+        "connector": connector_name,
+        "query": query,
+        "item_count": item_count,
+        "raw_count": result.raw_count,
+        "items": [item.model_dump(mode="json") for item in result.items],
+        "warnings": [warning.model_dump(mode="json") for warning in warnings],
+    }
+    if result.items:
+        data["formatted_text"] = render_search_items_text(result.items)
     return ToolObservation(
         status=ToolObservationStatus.OK,
         summary=(
             f"Found {item_count} {connector_name} result{'s' if item_count != 1 else ''} "
             f"for {query!r}."
         ),
-        data={
-            "connector": connector_name,
-            "query": query,
-            "item_count": item_count,
-            "raw_count": result.raw_count,
-            "items": [item.model_dump(mode="json") for item in result.items],
-            "warnings": [warning.model_dump(mode="json") for warning in warnings],
-        },
+        data=data,
         caveats=_warning_caveats(warnings),
     )
 

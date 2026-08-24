@@ -516,6 +516,95 @@ def test_interface_router_applies_session_items_per_source_on_digest_fallback(
     assert req.max_items_per_source >= 5
 
 
+def test_interface_router_passes_max_results_cap_for_open_ended_search(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.tools.interface_router import build_interface_tool_router
+
+    registry_calls: list[dict[str, object]] = []
+
+    def spy_build_tool_registry(**kwargs: object) -> ToolRegistry:
+        registry_calls.append(dict(kwargs))
+        return build_tool_registry(**kwargs)
+
+    gh, bh, juya_factory = _noop_factories()
+    huggingface_factory_calls: list[int | None] = []
+
+    class _CapturingHFConnector:
+        def name(self) -> str:
+            return "huggingface"
+
+        async def collect(self, request: Any) -> Any:
+            from ai_news_agent.connectors.base import ConnectorResult
+            from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
+            from datetime import UTC, datetime
+
+            huggingface_factory_calls.append(request.max_items)
+            items = [
+                NewsItem(
+                    source=SourceKind.HUGGINGFACE,
+                    source_id=f"org/model-{index}",
+                    url=f"https://huggingface.co/org/model-{index}",
+                    title=f"Model {index}",
+                    collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+                    content_confidence=ConfidenceLevel.HIGH,
+                )
+                for index in range(request.max_items)
+            ]
+            return ConnectorResult(items=items, warnings=[], raw_count=len(items))
+
+    def huggingface_factory() -> _CapturingHFConnector:
+        return _CapturingHFConnector()
+
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_huggingface_trending_models",
+                        "args": {"discovery_mode": "global", "max_results": 10},
+                        "id": "call-hf-search",
+                    }
+                ],
+            ),
+        ]
+    )
+
+    store, _run_id = _seed_full_followup_store(tmp_path)
+
+    router = build_interface_tool_router(
+        store=store,
+        workflow_runner=AsyncMock(),
+        streaming_workflow_runner=None,
+        tool_model=model,
+        digest_model=object(),
+        github_factory=gh,
+        bilibili_factory=bh,
+        juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=_noop_factories()[0],
+        build_connectors_fn=lambda _req: [],
+        interface_name="test",
+    )
+    router._store.init_schema()
+
+    with patch(
+        "ai_news_agent.tools.interface_router.build_tool_registry",
+        spy_build_tool_registry,
+    ):
+        result = asyncio.run(
+            router.route(
+                message="Show Hugging Face trending models",
+                session_items_per_source=5,
+            )
+        )
+
+    assert any(call.get("max_results_cap") == 5 for call in registry_calls)
+    assert huggingface_factory_calls
+    assert all(call == 5 for call in huggingface_factory_calls)
+
+
 def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -565,6 +565,110 @@ class _CountingConnector:
         return ConnectorResult(items=[], warnings=[], raw_count=0)
 
 
+class _CapturingConnector:
+    def __init__(self, *, name: str) -> None:
+        from ai_news_agent.connectors.base import ConnectorResult
+        from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
+
+        self._name = name
+        self.last_max_items: int | None = None
+        self._NewsItem = NewsItem
+        self._SourceKind = SourceKind
+        self._ConfidenceLevel = ConfidenceLevel
+        self._ConnectorResult = ConnectorResult
+
+    def name(self) -> str:
+        return self._name
+
+    async def collect(self, request: Any) -> Any:
+        from datetime import UTC, datetime
+
+        self.last_max_items = request.max_items
+        source_kind = self._SourceKind(self._name)
+        items = [
+            self._NewsItem(
+                source=source_kind,
+                source_id=f"{self._name}-{index}",
+                url=f"https://example.com/{self._name}/{index}",
+                title=f"{self._name.title()} item {index}",
+                collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+                content_confidence=self._ConfidenceLevel.HIGH,
+            )
+            for index in range(request.max_items)
+        ]
+        return self._ConnectorResult(
+            items=items,
+            warnings=[],
+            raw_count=len(items),
+        )
+
+
+class _CapturingConnectorFactory:
+    def __init__(self, *, name: str) -> None:
+        self.name = name
+        self.last_connector: _CapturingConnector | None = None
+
+    def __call__(self) -> _CapturingConnector:
+        connector = _CapturingConnector(name=self.name)
+        self.last_connector = connector
+        return connector
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "invoke_args"),
+    [
+        ("search_github_ai_news", {"query": "AI agents", "max_results": 10}),
+        ("search_bilibili_ai_news", {"query": "multimodal AI", "max_results": 10}),
+        ("search_juya_ai_news", {"query": "AI bulletin", "max_results": 10}),
+        (
+            "search_huggingface_trending_models",
+            {"discovery_mode": "global", "max_results": 10},
+        ),
+        (
+            "search_zhihu_practitioner_insights",
+            {"topics": ["RAG"], "max_results": 10},
+        ),
+    ],
+)
+def test_build_tool_registry_clamps_search_max_results_to_cap(
+    tmp_path: Path,
+    tool_name: str,
+    invoke_args: dict[str, object],
+) -> None:
+    store = DigestStore(tmp_path / f"clamp-{tool_name}.db")
+    store.init_schema()
+    github_factory = _CapturingConnectorFactory(name="github")
+    bilibili_factory = _CapturingConnectorFactory(name="bilibili")
+    juya_factory = _CapturingConnectorFactory(name="juya")
+    huggingface_factory = _CapturingConnectorFactory(name="huggingface")
+    zhihu_factory = _CapturingConnectorFactory(name="zhihu")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=github_factory,
+        bilibili_factory=bilibili_factory,
+        juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=zhihu_factory,
+        max_results_cap=5,
+    )
+
+    tool = registry.get_tool(tool_name)
+    obs = asyncio.run(tool.ainvoke(invoke_args))
+
+    factory_by_tool = {
+        "search_github_ai_news": github_factory,
+        "search_bilibili_ai_news": bilibili_factory,
+        "search_juya_ai_news": juya_factory,
+        "search_huggingface_trending_models": huggingface_factory,
+        "search_zhihu_practitioner_insights": zhihu_factory,
+    }
+    factory = factory_by_tool[tool_name]
+    assert factory.last_connector is not None
+    assert factory.last_connector.last_max_items == 5
+    assert isinstance(obs, ToolObservation)
+    assert obs.data["item_count"] == 5
+
+
 def test_build_tool_registry_github_search_uses_search_args_and_factory_per_call(
     tmp_path: Path,
 ) -> None:

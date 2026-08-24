@@ -258,6 +258,43 @@ def test_search_huggingface_trending_models_maps_filtered_discovery_fields() -> 
     assert connector.last_request.max_items == 3
 
 
+def test_search_huggingface_trending_models_includes_formatted_text_with_source_link_and_hub_stats() -> None:
+    item = _sample_item(
+        source=SourceKind.HUGGINGFACE,
+        source_id="org/model",
+        title="Trending Model",
+    )
+    item = item.model_copy(
+        update={
+            "source_evidence": {
+                "trending_score": 88.0,
+                "downloads_30d": 1200,
+                "likes": 42,
+            }
+        }
+    )
+    connector = _FakeConnector(name="huggingface", items=[item], raw_count=4)
+
+    obs = asyncio.run(
+        search_huggingface_trending_models(
+            connector=connector,
+            args=HuggingFaceSearchArgs(
+                discovery_mode="global",
+                max_results=5,
+            ),
+        )
+    )
+
+    formatted = obs.data["formatted_text"]
+    assert "Source:" in formatted
+    assert "Link:" in formatted
+    assert "Hugging Face" in formatted
+    assert "https://example.com/org/model" in formatted
+    assert "trending_score" in formatted
+    assert "downloads" in formatted
+    assert "likes" in formatted
+
+
 def test_search_huggingface_trending_models_ok_is_json_safe() -> None:
     item = _sample_item(
         source=SourceKind.HUGGINGFACE,

@@ -105,8 +105,14 @@ def build_tool_registry(
     model: Any = None,
     now_provider: Callable[[], datetime] | None = None,
     on_stage: Callable[[str], None] | None = None,
+    max_results_cap: int | None = None,
 ) -> ToolRegistry:
     """Assemble LangChain tools with injected store and connector factories."""
+
+    def _clamp_max_results(max_results: int) -> int:
+        if max_results_cap is None:
+            return max_results
+        return min(max_results, max_results_cap)
 
     @tool
     async def load_latest_digest() -> ToolObservation:
@@ -158,7 +164,10 @@ def build_tool_registry(
         connector = github_factory()
         return await _search_github_ai_news_pure(
             connector=connector,
-            search=SearchQueryInput(query=query, max_results=max_results),
+            search=SearchQueryInput(
+                query=query,
+                max_results=_clamp_max_results(max_results),
+            ),
             timeframe=timeframe,
         )
 
@@ -174,7 +183,10 @@ def build_tool_registry(
         connector = bilibili_factory()
         return await _search_bilibili_ai_news_pure(
             connector=connector,
-            search=SearchQueryInput(query=query, max_results=max_results),
+            search=SearchQueryInput(
+                query=query,
+                max_results=_clamp_max_results(max_results),
+            ),
             timeframe=timeframe,
         )
 
@@ -188,7 +200,10 @@ def build_tool_registry(
         connector = juya_factory()
         return await _search_juya_ai_news_pure(
             connector=connector,
-            search=SearchQueryInput(query=query, max_results=max_results),
+            search=SearchQueryInput(
+                query=query,
+                max_results=_clamp_max_results(max_results),
+            ),
             timeframe=timeframe,
         )
 
@@ -218,7 +233,7 @@ def build_tool_registry(
                     discovery_mode=discovery_mode,
                     search=search,
                     pipeline_tag=pipeline_tag,
-                    max_results=max_results,
+                    max_results=_clamp_max_results(max_results),
                 ),
             )
 
@@ -234,7 +249,10 @@ def build_tool_registry(
             connector = zhihu_factory()
             return await _search_zhihu_practitioner_insights_pure(
                 connector=connector,
-                args=ZhihuSearchArgs(topics=topics, max_results=max_results),
+                args=ZhihuSearchArgs(
+                    topics=topics,
+                    max_results=_clamp_max_results(max_results),
+                ),
             )
 
         tools.append(search_zhihu_practitioner_insights)

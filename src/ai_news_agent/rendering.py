@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, SourceKind
+from ai_news_agent.models import ConnectorWarning, Digest, DigestEntry, NewsItem, SourceKind
 
 _SECTION_LABELS: dict[SourceKind, str] = {
     SourceKind.JUYA: "Juya",
@@ -169,6 +169,46 @@ def _render_entry_text(entry: DigestEntry) -> str:
     if entry.confidence_caveat:
         lines.append(f"Confidence: {entry.confidence_caveat}")
     return "\n".join(lines)
+
+
+_HF_POPULARITY_CAVEAT = (
+    "Hub trending reflects popularity, not model quality or fitness for your use case."
+)
+
+
+def render_search_items_text(items: list[NewsItem]) -> str:
+    """Render connector search hits as a deterministic plain-text list."""
+    blocks: list[str] = []
+    for item in items:
+        source_name = _SECTION_LABELS.get(item.source, item.source.value)
+        lines = [
+            item.title,
+            "",
+            f"Source: {source_name} ({item.source.value})",
+            f"Link: {item.url}",
+        ]
+        if item.raw_snippet:
+            lines.append(f"Snippet: {item.raw_snippet}")
+        if item.source is SourceKind.HUGGINGFACE:
+            evidence = item.source_evidence
+            hub_parts: list[str] = []
+            trending_score = evidence.get("trending_score")
+            if trending_score is not None:
+                hub_parts.append(f"trending_score={trending_score}")
+            downloads = evidence.get("downloads_30d")
+            if downloads is not None:
+                hub_parts.append(f"downloads={downloads}")
+            likes = evidence.get("likes")
+            if likes is not None:
+                hub_parts.append(f"likes={likes}")
+            if hub_parts:
+                lines.append(f"Hub: {', '.join(hub_parts)}")
+        blocks.append("\n".join(lines))
+
+    text = "\n\n---\n\n".join(blocks)
+    if any(item.source is SourceKind.HUGGINGFACE for item in items):
+        text = f"{text}\n\nNote: {_HF_POPULARITY_CAVEAT}" if text else f"Note: {_HF_POPULARITY_CAVEAT}"
+    return text
 
 
 def _render_mixed_entries_text(entries: list[DigestEntry]) -> str:

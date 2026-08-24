@@ -17,6 +17,7 @@ from ai_news_agent.tools.schemas import (
     InterfaceAgentResult,
     InterfaceAgentResultKind,
     ToolObservation,
+    ToolObservationStatus,
     tool_observation_to_dict,
 )
 
@@ -270,6 +271,24 @@ def _build_tool_agent_graph(
                     continue
                 if not isinstance(result, ToolObservation):
                     raise TypeError(f"Tool {name!r} did not return ToolObservation")
+                formatted_text = result.data.get("formatted_text")
+                if (
+                    result.status is ToolObservationStatus.OK
+                    and isinstance(formatted_text, str)
+                    and formatted_text.strip()
+                ):
+                    terminal_result = InterfaceAgentResult(
+                        kind=InterfaceAgentResultKind.CONVERSATIONAL,
+                        text=formatted_text,
+                    )
+                    done_line = _format_terminal_tool_call_done(name, terminal_result)
+                    progress_lines.append(done_line)
+                    _emit_custom_progress(done_line)
+                    logger.info(
+                        "tool_call end name=%r formatted_text_short_circuit",
+                        name,
+                    )
+                    continue
                 payload = tool_observation_to_dict(result)
                 done_line = _format_tool_call_done(name, result)
                 progress_lines.append(done_line)
