@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -36,6 +37,8 @@ _STAGE_LABELS: dict[str, str] = {
     "render_digest": "Rendering digest…",
 }
 
+_NODES_WITH_INLINE_COLLECT_PROGRESS = frozenset({"collect_sources"})
+
 
 def _make_finalize_run_node(*, now_provider: Callable[[], datetime] | None = None):
     def finalize_run_node(_: DigestGraphState) -> dict[str, object]:
@@ -51,11 +54,15 @@ def build_digest_graph(
     model: Any,
     store: DigestStore,
     now_provider: Callable[[], datetime] | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ):
     """Build the compiled LangGraph digest workflow."""
     builder = StateGraph(DigestGraphState)
     builder.add_node("parse_request", parse_request_node)
-    builder.add_node("collect_sources", make_collect_sources_node(connectors))
+    builder.add_node(
+        "collect_sources",
+        make_collect_sources_node(connectors, on_progress=on_progress),
+    )
     builder.add_node("rank_items", make_rank_items_node(now_provider=now_provider))
     builder.add_node("summarize_items", make_summarize_items_node(model))
     builder.add_node("persist_results", make_persist_results_node(store))
@@ -103,28 +110,57 @@ async def run_digest_streaming(
     now_provider: Callable[[], datetime] | None = None,
 ) -> AsyncIterator[tuple[str, bool, DigestResult | None]]:
     """Run the digest graph, yielding progress text then the final result."""
+    progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    yielded: set[str] = set()
+
+    def on_progress(line: str) -> None:
+        if line not in yielded:
+            yielded.add(line)
+            progress_queue.put_nowait(line)
+
     graph = build_digest_graph(
         connectors=connectors,
         model=model,
         store=store,
         now_provider=now_provider,
+        on_progress=on_progress,
     )
     start_ts = now_provider() if now_provider is not None else utcnow()
     seen_nodes: set[str] = set()
     final_state: DigestGraphState | None = None
 
-    async for mode, chunk in graph.astream(
-        initial_state(request, now=start_ts),
-        stream_mode=["updates", "values"],
-    ):
-        if mode == "values":
-            final_state = chunk
-            continue
-        for node_name in chunk:
-            if node_name not in _STAGE_LABELS or node_name in seen_nodes:
+    async def pump_graph() -> None:
+        nonlocal final_state
+        async for mode, chunk in graph.astream(
+            initial_state(request, now=start_ts),
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "values":
+                final_state = chunk
                 continue
-            seen_nodes.add(node_name)
-            yield _STAGE_LABELS[node_name], False, None
+            for node_name in chunk:
+                if (
+                    node_name not in _STAGE_LABELS
+                    or node_name in seen_nodes
+                    or node_name in _NODES_WITH_INLINE_COLLECT_PROGRESS
+                ):
+                    continue
+                seen_nodes.add(node_name)
+                label = _STAGE_LABELS[node_name]
+                if label not in yielded:
+                    yielded.add(label)
+                    progress_queue.put_nowait(label)
+        progress_queue.put_nowait(None)
+
+    pump_task = asyncio.create_task(pump_graph())
+    try:
+        while True:
+            line = await progress_queue.get()
+            if line is None:
+                break
+            yield line, False, None
+    finally:
+        await pump_task
 
     if final_state is None:
         return
@@ -140,6 +176,7 @@ async def run_digest_instrumented(
     model: Any,
     store: DigestStore,
     on_stage: Callable[[str], None] | None = None,
+    on_progress: Callable[[str], None] | None = None,
     now_provider: Callable[[], datetime] | None = None,
 ) -> DigestResult:
     """Run the digest graph, optionally invoking ``on_stage`` per completed node."""
@@ -148,6 +185,7 @@ async def run_digest_instrumented(
         model=model,
         store=store,
         now_provider=now_provider,
+        on_progress=on_progress,
     )
     start_ts = now_provider() if now_provider is not None else utcnow()
     seen_nodes: set[str] = set()
@@ -160,13 +198,18 @@ async def run_digest_instrumented(
         if mode == "values":
             final_state = chunk
             continue
-        if on_stage is None:
+        if on_stage is None and on_progress is None:
             continue
         for node_name in chunk:
             if node_name in seen_nodes:
                 continue
             seen_nodes.add(node_name)
-            on_stage(node_name)
+            if on_stage is not None:
+                on_stage(node_name)
+            if on_progress is not None and node_name not in _NODES_WITH_INLINE_COLLECT_PROGRESS:
+                label = _STAGE_LABELS.get(node_name)
+                if label is not None:
+                    on_progress(label)
 
     if final_state is None:
         raise RuntimeError("digest workflow produced no final state")

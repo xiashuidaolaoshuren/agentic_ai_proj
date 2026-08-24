@@ -158,7 +158,7 @@ def test_terminal_digest_tool_short_circuits() -> None:
     assert result.run_id == 7
     assert result.progress_lines == [
         "Calling generate_digest…",
-        "Done generate_digest: Digest text",
+        "Done generate_digest: Digest ready.",
     ]
 
 
@@ -353,6 +353,103 @@ def test_tool_agent_run_streaming_emits_ordered_tool_progress_then_done() -> Non
     assert isinstance(done_result, InterfaceAgentResult)
     assert done_result.kind == InterfaceAgentResultKind.CONVERSATIONAL
     assert done_result.text == "The latest digest has one entry."
+
+
+def test_tool_agent_run_streaming_live_calling_before_slow_digest_tool_completes() -> None:
+    """Slow digest tool must emit Calling before ainvoke finishes."""
+    proceed = asyncio.Event()
+    completed = asyncio.Event()
+
+    @tool
+    async def generate_ai_news_digest() -> InterfaceAgentResult:
+        """Generate the AI news digest for this request."""
+        await proceed.wait()
+        completed.set()
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="Full digest body with many sections.",
+            run_id=7,
+        )
+
+    registry = ToolRegistry([generate_ai_news_digest])
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "generate_ai_news_digest",
+                        "args": {},
+                        "id": "call-slow-digest",
+                    }
+                ],
+            ),
+            AIMessage(content="unused"),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    async def _run() -> list[tuple[str, bool, InterfaceAgentResult | None]]:
+        events: list[tuple[str, bool, InterfaceAgentResult | None]] = []
+        stream = runner.run_streaming("Give me today's AI digest.")
+
+        async def collect() -> None:
+            async for event in stream:
+                events.append(event)
+
+        task = asyncio.create_task(collect())
+        for _ in range(50):
+            if events:
+                break
+            await asyncio.sleep(0.01)
+        assert events, "expected Calling before slow digest tool completes"
+        assert events[0] == ("Calling generate_ai_news_digest…", False, None)
+        assert not completed.is_set()
+        proceed.set()
+        await task
+        return events
+
+    events = asyncio.run(_run())
+
+    assert events[0] == ("Calling generate_ai_news_digest…", False, None)
+
+
+def test_tool_agent_run_streaming_digest_done_is_short_summary_not_full_body() -> None:
+    @tool
+    async def generate_ai_news_digest() -> InterfaceAgentResult:
+        """Generate the AI news digest for this request."""
+        return InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.DIGEST,
+            text="Full digest body with many sections and URLs.",
+            run_id=7,
+        )
+
+    registry = ToolRegistry([generate_ai_news_digest])
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "generate_ai_news_digest",
+                        "args": {},
+                        "id": "call-digest-done",
+                    }
+                ],
+            ),
+            AIMessage(content="unused"),
+        ]
+    )
+    runner = build_tool_agent_runner(registry=registry, model=model)
+
+    events = asyncio.run(
+        _collect_tool_agent_stream(runner, "Give me today's AI digest.")
+    )
+    progress_lines = [text for text, done, _answer in events if not done and text]
+    done_line = progress_lines[-1]
+    assert done_line.startswith("Done generate_ai_news_digest:")
+    assert "Full digest body" not in done_line
+    assert done_line == "Done generate_ai_news_digest: Digest ready."
 
 
 def test_tool_agent_run_streaming_emits_failure_progress_line() -> None:

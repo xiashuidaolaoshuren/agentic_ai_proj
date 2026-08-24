@@ -380,6 +380,37 @@ def test_collect_sources_node_accumulates_items_and_warnings() -> None:
     assert len(out["warnings"]) == 1
 
 
+def test_collect_sources_node_emits_per_source_progress_lines() -> None:
+    conn_juya = _FakeConnector(
+        name="juya",
+        items=[_news_item("j1"), _news_item("j2")],
+    )
+    conn_hf = _FakeConnector(
+        name="huggingface",
+        items=[_news_item("hf1")],
+    )
+    progress: list[str] = []
+    req = DigestRequest(topics=["RAG"], connector_names=["juya", "huggingface"])
+    state: DigestGraphState = {
+        "request": req,
+        "connector_request": parse_request_node({"request": req})["connector_request"],
+    }
+    node = make_collect_sources_node(
+        [conn_juya, conn_hf],
+        on_progress=progress.append,
+    )
+
+    asyncio.run(node(state))
+
+    assert progress == [
+        "Collecting from sources…",
+        "Calling juya…",
+        "Calling huggingface…",
+        "Done juya: Found 2 juya results.",
+        "Done huggingface: Found 1 huggingface result.",
+    ]
+
+
 def test_collect_sources_node_filters_by_connector_names() -> None:
     conn_a = _FakeConnector(
         name="a",
@@ -1226,3 +1257,39 @@ def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> N
         )
     )
     assert finals[0].text == expected.text
+
+
+def test_run_digest_streaming_emits_per_source_collect_progress(tmp_path) -> None:
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], connector_names=["juya", "huggingface"])
+    store = DigestStore(tmp_path / "stream-per-source.db")
+    store.init_schema()
+    connectors = [
+        _FakeConnector(name="juya", items=[_news_item("j1"), _news_item("j2")]),
+        _FakeConnector(name="huggingface", items=[_news_item("hf1")]),
+    ]
+
+    async def collect():
+        events: list[tuple[str, bool, object | None]] = []
+        async for event in run_digest_streaming(
+            req,
+            connectors=connectors,
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(collect())
+    progress = [text for text, done, _ in events if not done]
+
+    assert "Parsing request…" in progress
+    assert "Collecting from sources…" in progress
+    assert "Calling juya…" in progress
+    assert "Done juya: Found 2 juya results." in progress
+    assert "Calling huggingface…" in progress
+    assert "Done huggingface: Found 1 huggingface result." in progress
+    assert "Ranking candidates…" in progress

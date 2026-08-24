@@ -1024,11 +1024,29 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
     async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
 
+    async def _instrumented(
+        _req: DigestRequest,
+        *,
+        connectors,
+        model,
+        store,
+        on_stage=None,
+        on_progress=None,
+        now_provider=None,
+    ) -> DigestResult:
+        del connectors, model, store, on_stage, now_provider
+        if on_progress is not None:
+            on_progress("Parsing request…")
+            on_progress("Collecting from sources…")
+            on_progress("Calling juya…")
+            on_progress("Done juya: Found 2 juya results.")
+        return digest_result
+
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
 
     with patch(
         "ai_news_agent.tools.registry.run_digest_instrumented",
-        AsyncMock(return_value=digest_result),
+        AsyncMock(side_effect=_instrumented),
     ):
         events = asyncio.run(
             _collect_stream(
@@ -1042,7 +1060,11 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
     progress = [text for text, done, _payload in events if not done and text]
     assert progress == [
         "Calling generate_ai_news_digest…",
-        "Done generate_ai_news_digest: Digest text",
+        "Parsing request…",
+        "Collecting from sources…",
+        "Calling juya…",
+        "Done juya: Found 2 juya results.",
+        "Done generate_ai_news_digest: Digest ready.",
     ]
     done_result = events[-1][2]
     assert events[-1][0] == ""

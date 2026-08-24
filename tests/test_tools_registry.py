@@ -14,6 +14,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import ValidationError
 
 from ai_news_agent.storage import DigestStore
+from ai_news_agent.progress import emit_progress
 from ai_news_agent.tools.registry import ToolRegistry, build_tool_registry
 from ai_news_agent.tools.schemas import (
     DigestItemRankArgs,
@@ -204,6 +205,7 @@ def test_generate_ai_news_digest_invokes_run_digest_once(tmp_path: Path) -> None
         model=model,
         store=store,
         on_stage=None,
+        on_progress=emit_progress,
         now_provider=None,
     )
 
@@ -301,6 +303,7 @@ def test_generate_ai_news_digest_has_no_args_schema(tmp_path: Path) -> None:
         model=run_digest_mock.await_args.kwargs["model"],
         store=store,
         on_stage=None,
+        on_progress=emit_progress,
         now_provider=None,
     )
 
@@ -310,6 +313,7 @@ def test_generate_ai_news_digest_passes_on_stage_to_run_digest_instrumented(
 ) -> None:
     from ai_news_agent.graph.state import DigestResult
     from ai_news_agent.models import Digest
+    from ai_news_agent.progress import emit_progress
     from ai_news_agent.request import DigestRequest
 
     store = DigestStore(tmp_path / "digest-on-stage.db")
@@ -357,6 +361,7 @@ def test_generate_ai_news_digest_passes_on_stage_to_run_digest_instrumented(
         model=run_digest_mock.await_args.kwargs["model"],
         store=store,
         on_stage=on_stage,
+        on_progress=emit_progress,
         now_provider=None,
     )
 

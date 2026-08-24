@@ -18,6 +18,7 @@ from ai_news_agent.followup_structured import (
     format_sources,
 )
 from ai_news_agent.graph.workflow import run_digest_instrumented
+from ai_news_agent.progress import emit_progress
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore
 from ai_news_agent.tools.connectors import (
@@ -258,6 +259,7 @@ def build_tool_registry(
                 model=model,
                 store=store,
                 on_stage=on_stage,
+                on_progress=emit_progress,
                 now_provider=now_provider,
             )
             return InterfaceAgentResult(
