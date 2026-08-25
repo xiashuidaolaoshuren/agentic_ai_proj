@@ -57,6 +57,39 @@ _HF_PIPELINE_FILTER = re.compile(
     re.IGNORECASE,
 )
 
+_ZHIHU_CUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\bzhihu\s+(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\s+on\s+zhihu\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\s+on\s+.+\s+on\s+zhihu\b",
+        re.IGNORECASE,
+    ),
+)
+
+_ZHIHU_TOPIC_FILTER = re.compile(
+    r"\b(?:zhihu\s+)?(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)"
+    r"\s+on\s+(.+?)(?:\s+on\s+zhihu\b|$)",
+    re.IGNORECASE,
+)
+
+
+def _zhihu_topic_from_message(text: str) -> str | None:
+    if not any(pattern.search(text) for pattern in _ZHIHU_CUE_PATTERNS):
+        return None
+    match = _ZHIHU_TOPIC_FILTER.search(text)
+    if match is None:
+        return None
+    topic = match.group(1).strip()
+    if not topic or topic.lower() == "zhihu":
+        return None
+    return topic
+
 
 def _huggingface_fields_from_message(
     text: str,
@@ -148,6 +181,9 @@ def parse_connector_names_from_message(text: str) -> list[str] | None:
     ) or re.search(
         r"\b(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\s+on\s+zhihu\b",
         low,
+    ) or re.search(
+        r"\b(?:practitioner|insights?|lessons?|trade-?offs?|pitfalls?)\s+on\s+.+\s+on\s+zhihu\b",
+        low,
     ):
         return ["zhihu"]
 
@@ -225,11 +261,14 @@ def parse_digest_intent(message: str) -> DigestRequest:
     )
 
     topics: list[str] | None = None
+    zhihu_topic = _zhihu_topic_from_message(text)
     topics_match = _TOPICS_PREFIX.search(text)
     if topics_match:
         topics = [t.strip() for t in topics_match.group(1).split(",") if t.strip()]
     elif explicit:
         topics = []
+    elif zhihu_topic is not None:
+        topics = [zhihu_topic]
 
     timeframe: str | None = None
     for pattern, label in _TIMEFRAME_PATTERNS:

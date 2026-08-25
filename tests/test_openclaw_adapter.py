@@ -192,6 +192,15 @@ def test_resolve_openclaw_digest_request_zhihu_practitioner_message() -> None:
     assert req.primary_source == "zhihu"
 
 
+def test_resolve_openclaw_digest_request_zhihu_practitioner_message_extracts_topic() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="zhihu practitioner insights on RAG")
+    assert req.connector_names == ["zhihu"]
+    assert req.primary_source == "zhihu"
+    assert req.topics == ["RAG"]
+
+
 def test_adapters_package_exports_public_surface() -> None:
     from ai_news_agent import adapters
 

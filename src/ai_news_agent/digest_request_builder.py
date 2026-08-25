@@ -7,6 +7,7 @@ from dataclasses import replace
 from ai_news_agent.intent import parse_connector_names_from_message, parse_digest_intent
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import normalize_source_names, resolve_connector_names
+from ai_news_agent.topics import DEFAULT_TOPICS
 
 _BILIBILI_CHANNEL_DEFAULT_TIMEFRAME = "last_7_days"
 
@@ -56,6 +57,7 @@ def _parsed_has_digest_fields(parsed: DigestRequest) -> bool:
         or parsed.huggingface_discovery_mode is not None
         or parsed.huggingface_search is not None
         or parsed.huggingface_pipeline_tag is not None
+        or list(parsed.topics) != list(DEFAULT_TOPICS)
     )
 
 

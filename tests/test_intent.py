@@ -182,6 +182,30 @@ def test_parse_digest_intent_huggingface_filtered_by_topic() -> None:
     assert req.huggingface_search == "RAG"
 
 
+def test_parse_digest_intent_zhihu_practitioner_extracts_topic() -> None:
+    req = parse_digest_intent("zhihu practitioner insights on RAG")
+    assert req.topics == ["RAG"]
+
+
+def test_parse_digest_intent_zhihu_practitioner_trailing_on_zhihu_extracts_topic() -> None:
+    req = parse_digest_intent("practitioner insights on RAG on zhihu")
+    assert req.topics == ["RAG"]
+
+
+def test_parse_digest_intent_zhihu_practitioner_without_topic_keeps_defaults() -> None:
+    from ai_news_agent.topics import DEFAULT_TOPICS
+
+    req = parse_digest_intent("zhihu practitioner insights")
+    assert list(req.topics) == list(DEFAULT_TOPICS)
+
+
+def test_parse_digest_intent_zhihu_source_cue_without_real_topic_keeps_defaults() -> None:
+    from ai_news_agent.topics import DEFAULT_TOPICS
+
+    req = parse_digest_intent("practitioner insights on zhihu")
+    assert list(req.topics) == list(DEFAULT_TOPICS)
+
+
 def test_parse_digest_intent_huggingface_filtered_by_pipeline_tag() -> None:
     req = parse_digest_intent("huggingface models for text-generation")
     assert req.huggingface_discovery_mode == "filtered"
