@@ -108,6 +108,7 @@ def make_render_digest_node(
         style = req.output_style if req is not None else None
         language = req.output_language if req is not None else None
         warnings = list(state.get("warnings") or [])
+        news_items = list(state.get("collected_items") or [])
         try:
             if render_markdown is not None:
                 markdown = render_markdown(digest, warnings=warnings)
@@ -118,7 +119,7 @@ def make_render_digest_node(
                     output_language=language,
                 )
             else:
-                markdown = md_default(digest, warnings=warnings)
+                markdown = md_default(digest, warnings=warnings, news_items=news_items)
 
             if render_text is not None:
                 text = render_text(digest, warnings=warnings)
@@ -129,7 +130,7 @@ def make_render_digest_node(
                     output_language=language,
                 )
             else:
-                text = txt_default(digest, warnings=warnings)
+                text = txt_default(digest, warnings=warnings, news_items=news_items)
 
             return {"markdown": markdown, "text": text}
         except Exception as exc:  # noqa: BLE001 - surface as workflow error

@@ -287,6 +287,59 @@ def test_summarize_juya_entry_uses_juya_source_display_name() -> None:
     assert digest.entries[0].source_name == "Juya"
 
 
+def test_summarize_huggingface_skips_generate_entry_fields_but_persists_stub_entry() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-stub",
+        url="https://huggingface.co/hf-stub",
+        title="Stub model",
+        collected_at=_fixed_now(),
+        raw_snippet="Model card excerpt.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={"trending_score": 50.0, "downloads_30d": 500},
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+
+    assert fake.calls == []
+    assert len(digest.entries) == 1
+    entry = digest.entries[0]
+    assert entry.source_kind is SourceKind.HUGGINGFACE
+    assert entry.title == "Stub model"
+    assert entry.summary == "Model card excerpt."
+    assert entry.why_it_matters == ""
+    assert entry.background_knowledge == ""
+    assert entry.follow_up_action is FollowUpAction.TRY
+
+
+def test_summarize_huggingface_only_does_not_require_model() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-only",
+        url="https://huggingface.co/hf-only",
+        title="Only HF",
+        collected_at=_fixed_now(),
+        raw_snippet="Snippet.",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=None,
+    )
+    assert len(digest.entries) == 1
+
+
 def test_summarize_huggingface_entry_uses_brand_source_display_name() -> None:
     from ai_news_agent.summarizer import summarize_ranked_items
 
@@ -333,7 +386,7 @@ def test_summarize_zhihu_entry_uses_brand_source_display_name() -> None:
     assert digest.entries[0].source_name == "Zhihu"
 
 
-def test_summarize_huggingface_context_includes_source_evidence() -> None:
+def test_summarize_huggingface_context_skips_llm_summarize() -> None:
     from ai_news_agent.summarizer import summarize_ranked_items
 
     ni = NewsItem(
@@ -353,9 +406,7 @@ def test_summarize_huggingface_context_includes_source_evidence() -> None:
         topics=["AI"],
         model=fake,
     )
-    ctx = fake.calls[0]
-    assert "source_evidence" in ctx
-    assert ctx["source_evidence"]["trending_score"] == 42.0
+    assert fake.calls == []
 
 
 def test_summarize_huggingface_entry_adds_popularity_not_quality_caveat() -> None:

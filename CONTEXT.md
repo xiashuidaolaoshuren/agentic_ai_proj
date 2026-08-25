@@ -19,8 +19,12 @@ A source whose digest items are open-source momentum signals (trending repos), n
 _Avoid_: Primary news feed, Juya host, generic RSS, default always-on platform feed
 
 **Hugging Face (model momentum signal)**:
-A source for currently notable model repositories, using Hub-native momentum evidence such as trending score, recent downloads, likes, and activity rather than treating models as article-like news.
-_Avoid_: Primary news feed, calling popularity model quality, claiming precise adoption velocity from cumulative counters
+A source for currently notable model repositories, using Hub-native momentum evidence such as trending score, recent downloads, likes, and activity rather than treating models as article-like news. In the **digest**, Hugging Face is presented as a **comparison table** of model families for quick Hub stat scanning; **search** keeps the numbered Source/Link list.
+_Avoid_: Primary news feed, calling popularity model quality, claiming precise adoption velocity from cumulative counters, article-like HF entry blocks in the digest, LLM paraphrase of Hub stats in the digest table
+
+**Hugging Face comparison table**:
+The digest presentation for Hugging Face — one GFM table row per **model family** with Rank, Model, Link, Trending, Downloads (30d), Likes, Pipeline, and Also columns. Hub stats come from collected `NewsItem` evidence; no per-item LLM summarize. Mixed digests keep entry blocks for other sources; only the Hugging Face section is a table. **Display rank** in the Rank column is the global digest index.
+_Avoid_: `###` summary blocks for Hugging Face in the digest, treating each table row as a raw Hub repo rather than a family, restarting rank at 1 inside the Hugging Face section in mixed digests
 
 **Zhihu (practitioner insight signal)**:
 A source for Chinese-language practitioner lessons, trade-offs, and pitfalls about AI topics, distinct from primary academic evidence.

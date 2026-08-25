@@ -47,13 +47,17 @@ def summarize_ranked_items(
             timeframe=timeframe,
         )
 
-    if model is None:
+    needs_llm = any(row.item.source is not SourceKind.HUGGINGFACE for row in selected)
+    if needs_llm and model is None:
         raise ValueError("model is required when there are selected ranked_items to summarize")
 
     entries: list[DigestEntry] = []
     global_topics_payload = topics_list
 
     for r in selected:
+        if r.item.source is SourceKind.HUGGINGFACE:
+            entries.append(_build_huggingface_stub_entry(r.item))
+            continue
         ctx = _context_payload(
             r,
             global_topics_payload,
@@ -137,6 +141,23 @@ def _normalize_text_field(val: Any, fallback: str) -> str:
         return fallback
     s = str(val).strip()
     return s if s else fallback
+
+
+def _build_huggingface_stub_entry(item: NewsItem) -> DigestEntry:
+    summary = (
+        item.raw_snippet.strip()
+        if item.raw_snippet and item.raw_snippet.strip()
+        else item.title
+    )
+    return _build_digest_entry(
+        item,
+        {
+            "summary": summary,
+            "why_it_matters": "",
+            "background_knowledge": "",
+            "follow_up_action": "try",
+        },
+    )
 
 
 def _build_digest_entry(item: NewsItem, raw: dict[str, Any]) -> DigestEntry:

@@ -68,18 +68,76 @@ def _juya_entry(*, title: str = "Juya bulletin") -> DigestEntry:
     )
 
 
-def _huggingface_entry(*, title: str = "Trending model") -> DigestEntry:
+def _huggingface_entry(*, title: str = "Trending model", source_id: str = "hf-1") -> DigestEntry:
     return DigestEntry(
         source_kind=SourceKind.HUGGINGFACE,
-        source_id="hf-1",
+        source_id=source_id,
         title=title,
         source_name="Hugging Face",
-        source_url="https://huggingface.co/models/hf-1",
+        source_url=f"https://huggingface.co/{source_id}",
         summary="HF summary.",
         why_it_matters="Why HF.",
         background_knowledge="BG HF.",
         follow_up_action=FollowUpAction.TRY,
     )
+
+
+def _hf_news_item(*, source_id: str = "hf-1", title: str = "Trending model"):
+    from ai_news_agent.models import ConfidenceLevel, NewsItem
+
+    return NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id=source_id,
+        url=f"https://huggingface.co/{source_id}",
+        title=title,
+        collected_at=_fixture_dt(),
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "likes": 42,
+            "pipeline_tag": "text-generation",
+        },
+    )
+
+
+def test_render_digest_markdown_huggingface_only_uses_comparison_table() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_huggingface_entry(title="Qwen3.8-27B")],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(digest, news_items=[_hf_news_item(title="Qwen3.8-27B")])
+
+    assert "| Rank | Model | Link |" in out
+    assert "| 1 | Qwen3.8-27B |" in out
+    assert "88" in out
+    assert "1200" in out
+    assert "**Summary:**" not in out
+    assert "### " not in out
+
+
+def test_render_digest_markdown_mixed_juya_huggingface_uses_table_with_global_rank() -> None:
+    from ai_news_agent.rendering import render_digest_markdown
+
+    digest = Digest(
+        generated_at=_fixture_dt(),
+        entries=[_juya_entry(), _huggingface_entry(title="Qwen3.8-27B")],
+        topics=["AI"],
+        timeframe="today",
+    )
+    out = render_digest_markdown(
+        digest,
+        news_items=[_hf_news_item(title="Qwen3.8-27B")],
+    )
+
+    assert "### 1. Juya bulletin" in out
+    assert "\n## Hugging Face\n" in out
+    assert "| 2 | Qwen3.8-27B |" in out
+    assert "**Why it matters:** Why HF." not in out
 
 
 def _zhihu_entry(*, title: str = "Practitioner insight") -> DigestEntry:
@@ -105,11 +163,14 @@ def test_render_digest_markdown_mixed_sources_use_global_display_ranks() -> None
         topics=["AI"],
         timeframe="today",
     )
-    out = render_digest_markdown(digest)
+    out = render_digest_markdown(
+        digest,
+        news_items=[_hf_news_item(source_id="hf-1", title="HF model")],
+    )
     assert "### 1. Juya bulletin" in out
     assert "### 2. Trending agent toolkit" in out
-    assert "### 3. HF model" in out
-    assert "### 1. HF model" not in out
+    assert "| 3 | HF model |" in out
+    assert "### 3. HF model" not in out
 
 
 def test_render_digest_text_mixed_sources_use_global_display_ranks() -> None:
@@ -121,10 +182,13 @@ def test_render_digest_text_mixed_sources_use_global_display_ranks() -> None:
         topics=["AI"],
         timeframe="today",
     )
-    out = render_digest_text(digest)
+    out = render_digest_text(
+        digest,
+        news_items=[_hf_news_item(source_id="hf-1", title="HF model")],
+    )
     assert "1. Juya bulletin" in out
     assert "2. Trending agent toolkit" in out
-    assert "3. HF model" in out
+    assert "| 3 | HF model |" in out
 
 
 def test_render_search_items_text_prefixes_display_ranks() -> None:
@@ -196,10 +260,12 @@ def test_render_digest_markdown_mixed_huggingface_and_zhihu_section_labels() -> 
         topics=["AI"],
         timeframe="today",
     )
-    out = render_digest_markdown(digest)
+    out = render_digest_markdown(digest, news_items=[_hf_news_item()])
     assert "\n## Hugging Face\n" in out
     assert "\n## Zhihu\n" in out
     assert out.index("\n## Hugging Face\n") < out.index("\n## Zhihu\n")
+    assert "| Rank | Model | Link |" in out
+    assert "### 2. Practitioner insight" in out
 
 
 def test_render_digest_markdown_single_huggingface_has_no_section_wrapper() -> None:
@@ -211,9 +277,10 @@ def test_render_digest_markdown_single_huggingface_has_no_section_wrapper() -> N
         topics=["AI"],
         timeframe="today",
     )
-    out = render_digest_markdown(digest)
+    out = render_digest_markdown(digest, news_items=[_hf_news_item(title="Trending model")])
     assert "## Hugging Face" not in out
-    assert "## 1. Trending model" in out
+    assert "| Rank | Model | Link |" in out
+    assert "| 1 | Trending model |" in out
 
 
 def test_render_digest_editorial_juya_header_when_source_kind_juya() -> None:

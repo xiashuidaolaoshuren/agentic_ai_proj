@@ -114,6 +114,84 @@ def _format_display_rank_prefix(display_rank: int | None) -> str:
     return f"{display_rank}. "
 
 
+def _is_huggingface_only(entries: list[DigestEntry]) -> bool:
+    return bool(entries) and all(
+        entry.source_kind is SourceKind.HUGGINGFACE for entry in entries
+    )
+
+
+def _news_items_by_key(
+    news_items: list[NewsItem] | None,
+) -> dict[tuple[SourceKind, str], NewsItem]:
+    if not news_items:
+        return {}
+    return {(item.source, item.source_id): item for item in news_items}
+
+
+def _format_table_cell(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _also_column(item: NewsItem | None) -> str:
+    if item is None:
+        return ""
+    variants = item.source_evidence.get("family_variants")
+    if not isinstance(variants, list):
+        return ""
+    titles: list[str] = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            continue
+        title = str(variant.get("title", variant.get("source_id", ""))).strip()
+        if title:
+            titles.append(title)
+    return ", ".join(titles)
+
+
+def _render_huggingface_comparison_table(
+    entries: list[DigestEntry],
+    *,
+    ranks: dict[tuple[SourceKind, str], int],
+    news_items: list[NewsItem] | None = None,
+    escape_markdown: bool,
+) -> str:
+    lookup = _news_items_by_key(news_items)
+    header = "| Rank | Model | Link | Trending | Downloads | Likes | Pipeline | Also |"
+    separator = "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    rows: list[str] = [header, separator]
+    for entry in entries:
+        item = lookup.get((entry.source_kind, entry.source_id))
+        evidence = item.source_evidence if item is not None else {}
+        rank = ranks[(entry.source_kind, entry.source_id)]
+        model_name = (
+            _escape_markdown_inline(entry.title) if escape_markdown else entry.title
+        )
+        also = _also_column(item)
+        if escape_markdown:
+            also = _escape_markdown_inline(also)
+        link = f"<{entry.source_url}>" if escape_markdown else entry.source_url
+        rows.append(
+            "| "
+            + " | ".join(
+                [
+                    str(rank),
+                    model_name,
+                    link,
+                    _format_table_cell(evidence.get("trending_score")),
+                    _format_table_cell(evidence.get("downloads_30d")),
+                    _format_table_cell(evidence.get("likes")),
+                    _format_table_cell(evidence.get("pipeline_tag")),
+                    also,
+                ]
+            )
+            + " |"
+        )
+    rows.extend(["", f"Note: {_HF_POPULARITY_CAVEAT}"])
+    return "\n".join(rows)
+
+
 def _render_entry_markdown(
     entry: DigestEntry,
     *,
@@ -137,11 +215,25 @@ def _render_entry_markdown(
     return "\n".join(parts)
 
 
-def _render_mixed_entries_markdown(entries: list[DigestEntry]) -> str:
+def _render_mixed_entries_markdown(
+    entries: list[DigestEntry],
+    *,
+    news_items: list[NewsItem] | None = None,
+) -> str:
     ranks = _entry_display_ranks(entries)
     blocks: list[str] = []
     for label, group in _group_entries_by_section(entries):
         blocks.extend([f"## {label}", ""])
+        if group and group[0].source_kind is SourceKind.HUGGINGFACE:
+            blocks.append(
+                _render_huggingface_comparison_table(
+                    group,
+                    ranks=ranks,
+                    news_items=news_items,
+                    escape_markdown=True,
+                )
+            )
+            continue
         blocks.append(
             "\n\n".join(
                 _render_entry_markdown(
@@ -159,6 +251,7 @@ def render_digest_markdown(
     digest: Digest,
     *,
     warnings: list[ConnectorWarning] | None = None,
+    news_items: list[NewsItem] | None = None,
 ) -> str:
     notice = format_connector_warnings_notice(warnings or [], [])
     blocks: list[str] = []
@@ -167,8 +260,20 @@ def render_digest_markdown(
     blocks.extend([_render_header_markdown(digest), ""])
     if not digest.entries:
         blocks.append("*No entries in this digest.*")
+    elif _is_huggingface_only(digest.entries):
+        ranks = _entry_display_ranks(digest.entries)
+        blocks.append(
+            _render_huggingface_comparison_table(
+                digest.entries,
+                ranks=ranks,
+                news_items=news_items,
+                escape_markdown=True,
+            )
+        )
     elif _is_mixed_digest(digest.entries):
-        blocks.append(_render_mixed_entries_markdown(digest.entries))
+        blocks.append(
+            _render_mixed_entries_markdown(digest.entries, news_items=news_items)
+        )
     else:
         blocks.append(
             "\n\n".join(
@@ -255,12 +360,26 @@ def render_search_items_text(items: list[NewsItem]) -> str:
     return text
 
 
-def _render_mixed_entries_text(entries: list[DigestEntry]) -> str:
+def _render_mixed_entries_text(
+    entries: list[DigestEntry],
+    *,
+    news_items: list[NewsItem] | None = None,
+) -> str:
     ranks = _entry_display_ranks(entries)
     blocks: list[str] = []
     for label, group in _group_entries_by_section(entries):
         blocks.append(label)
         blocks.append("")
+        if group and group[0].source_kind is SourceKind.HUGGINGFACE:
+            blocks.append(
+                _render_huggingface_comparison_table(
+                    group,
+                    ranks=ranks,
+                    news_items=news_items,
+                    escape_markdown=False,
+                )
+            )
+            continue
         blocks.append(
             "\n\n---\n\n".join(
                 _render_entry_text(
@@ -277,6 +396,7 @@ def render_digest_text(
     digest: Digest,
     *,
     warnings: list[ConnectorWarning] | None = None,
+    news_items: list[NewsItem] | None = None,
 ) -> str:
     notice = format_connector_warnings_notice(warnings or [], [])
     parts: list[str] = []
@@ -285,8 +405,20 @@ def render_digest_text(
     parts.extend([_render_header_text(digest), ""])
     if not digest.entries:
         parts.append("No entries in this digest.")
+    elif _is_huggingface_only(digest.entries):
+        ranks = _entry_display_ranks(digest.entries)
+        parts.append(
+            _render_huggingface_comparison_table(
+                digest.entries,
+                ranks=ranks,
+                news_items=news_items,
+                escape_markdown=False,
+            )
+        )
     elif _is_mixed_digest(digest.entries):
-        parts.append(_render_mixed_entries_text(digest.entries))
+        parts.append(
+            _render_mixed_entries_text(digest.entries, news_items=news_items)
+        )
     else:
         parts.append(
             "\n\n---\n\n".join(
