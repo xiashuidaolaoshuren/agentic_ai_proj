@@ -44,6 +44,7 @@ class _FakeInterfaceRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
         allow_digest: bool = True,
@@ -82,6 +83,7 @@ class _OnStageInvokingRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
@@ -112,6 +114,7 @@ class _WorkflowInvokingRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
@@ -146,6 +149,7 @@ class _ConcurrentOverwriteRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage=None,
     ) -> InterfaceAgentResult:
@@ -283,6 +287,8 @@ def test_digest_service_runtime_live_builds_interface_tool_router(
     assert callable(router_calls[0]["workflow_runner"])
     assert router_calls[0]["streaming_workflow_runner"] is None
     assert "juya_factory" in router_calls[0]
+    assert "huggingface_factory" in router_calls[0]
+    assert "zhihu_factory" in router_calls[0]
     assert runtime._interface_router is fake_router
 
 
@@ -324,8 +330,12 @@ def test_digest_service_runtime_live_passes_juya_factory(
     DigestServiceRuntime(fake=False, db_path=tmp_path / "live-juya-factory.db")
 
     assert any(call.get("name") == "juya" for call in factory_calls)
+    assert any(call.get("name") == "huggingface" for call in factory_calls)
+    assert any(call.get("name") == "zhihu" for call in factory_calls)
     assert len(router_calls) == 1
     assert router_calls[0]["juya_factory"] is not None
+    assert router_calls[0]["huggingface_factory"] is not None
+    assert router_calls[0]["zhihu_factory"] is not None
 
 
 def test_digest_service_runtime_fake_mode_has_no_interface_router(tmp_path: Path) -> None:

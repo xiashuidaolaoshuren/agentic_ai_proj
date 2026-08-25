@@ -265,6 +265,136 @@ def test_source_kind_juya_value_and_news_item_roundtrip() -> None:
     assert item2 == item
 
 
+def test_source_kind_huggingface_and_zhihu_values_and_news_item_roundtrip() -> None:
+    assert SourceKind.HUGGINGFACE.value == "huggingface"
+    assert SourceKind.ZHIHU.value == "zhihu"
+    now = datetime.now(UTC)
+    hf_item = NewsItem.model_validate(
+        {
+            "source": "huggingface",
+            "source_id": "meta-llama/Llama-3.1-8B",
+            "url": "https://huggingface.co/meta-llama/Llama-3.1-8B",
+            "title": "Llama 3.1 8B",
+            "published_at": None,
+            "collected_at": now.isoformat(),
+            "author": "meta-llama",
+            "stars_or_views": None,
+            "language": None,
+            "metadata_completeness": 0.9,
+            "raw_snippet": "Model card excerpt",
+            "tags": ["text-generation"],
+            "topic_matches": ["model releases"],
+            "content_confidence": None,
+        }
+    )
+    assert hf_item.source is SourceKind.HUGGINGFACE
+    hf_dump = hf_item.model_dump(mode="json")
+    assert NewsItem.model_validate(hf_dump) == hf_item
+
+    zh_item = NewsItem.model_validate(
+        {
+            "source": "zhihu",
+            "source_id": "zhihu-answer-12345",
+            "url": "https://www.zhihu.com/question/123/answer/456",
+            "title": "部署大模型的踩坑经验",
+            "published_at": None,
+            "collected_at": now.isoformat(),
+            "author": None,
+            "stars_or_views": None,
+            "language": "zh",
+            "metadata_completeness": 0.6,
+            "raw_snippet": "实战部署时需要注意显存和量化",
+            "tags": [],
+            "topic_matches": ["RAG"],
+            "content_confidence": ConfidenceLevel.MEDIUM,
+        }
+    )
+    assert zh_item.source is SourceKind.ZHIHU
+    zh_dump = zh_item.model_dump(mode="json")
+    assert NewsItem.model_validate(zh_dump) == zh_item
+
+
+def test_news_item_source_evidence_defaults_to_empty_dict() -> None:
+    now = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="1",
+        url="https://example.com/r",
+        title="Example repo",
+        collected_at=now,
+    )
+    assert item.source_evidence == {}
+
+
+def test_news_item_model_validate_coalesces_none_source_evidence() -> None:
+    item = NewsItem.model_validate(
+        {
+            "source": "github",
+            "source_id": "1",
+            "url": "https://x",
+            "title": "t",
+            "source_evidence": None,
+        }
+    )
+    assert item.source_evidence == {}
+
+
+def test_news_item_model_validate_missing_source_evidence_defaults_to_empty_dict() -> None:
+    item = NewsItem.model_validate(
+        {
+            "source": "github",
+            "source_id": "1",
+            "url": "https://x",
+            "title": "t",
+        }
+    )
+    assert item.source_evidence == {}
+
+
+def test_news_item_source_evidence_json_roundtrip() -> None:
+    now = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
+    evidence = {
+        "trending_score": 42.5,
+        "downloads_30d": 1000,
+        "likes": 50,
+        "pipeline_tag": "text-generation",
+        "gated": False,
+        "discovery_mode": "global",
+    }
+    item = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="org/model",
+        url="https://huggingface.co/org/model",
+        title="Model",
+        collected_at=now,
+        source_evidence=evidence,
+    )
+    dumped = item.model_dump(mode="json")
+    assert dumped["source_evidence"] == evidence
+    restored = NewsItem.model_validate(dumped)
+    assert restored.source_evidence == evidence
+    assert restored == item
+
+
+def test_huggingface_item_keeps_hub_metrics_in_source_evidence_not_stars_or_views() -> None:
+    now = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="org/model",
+        url="https://huggingface.co/org/model",
+        title="Model",
+        collected_at=now,
+        stars_or_views=None,
+        source_evidence={
+            "trending_score": 99.0,
+            "downloads_30d": 5000,
+            "likes": 200,
+        },
+    )
+    assert item.stars_or_views is None
+    assert item.source_evidence["trending_score"] == 99.0
+
+
 def test_invalid_enum_in_deserialize_raises() -> None:
     d = {
         "source": "not-a-real-source",

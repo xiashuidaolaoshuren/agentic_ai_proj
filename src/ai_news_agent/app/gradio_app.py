@@ -36,19 +36,33 @@ _UI_ERROR_MESSAGE = (
     "Please check the terminal or log file for details and try again."
 )
 
-_SOURCE_TOGGLE_CHOICES: tuple[str, ...] = ("juya", "github", "bilibili")
+_SOURCE_TOGGLE_CHOICES: tuple[str, ...] = (
+    "juya",
+    "huggingface",
+    "github",
+    "zhihu",
+    "bilibili",
+)
 
 _EMPTY_SOURCES_MESSAGE = (
-    "Please enable at least one source (Juya, GitHub, or Bilibili)."
+    "Please enable at least one source (Juya, Hugging Face, GitHub, Zhihu, or Bilibili)."
+)
+
+_DEFAULT_ITEMS_PER_SOURCE = 5
+_MAX_ITEMS_PER_SOURCE = 20
+_INVALID_ITEMS_PER_SOURCE_MESSAGE = (
+    f"Items per source must be a whole number from 1 to {_MAX_ITEMS_PER_SOURCE}."
 )
 
 _EXAMPLE_ROWS: list[list] = [
-    ["Give me today's AI digest", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest https://daily.juya.uk/issues/2026-06-16/", list(DEFAULT_SOURCE_NAMES)],
-    ["Give me today's AI digest from github only", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest https://github.com/langchain-ai/langgraph", list(DEFAULT_SOURCE_NAMES)],
-    ["Digest bilibili channel 285286947", list(DEFAULT_SOURCE_NAMES)],
-    ["show sources", list(DEFAULT_SOURCE_NAMES)],
+    ["Give me today's AI digest", ["juya"]],
+    ["Digest https://daily.juya.uk/", ["juya"]],
+    ["Give me today's AI digest from github only", ["github"]],
+    ["Digest https://github.com/langchain-ai/langgraph", ["github"]],
+    ["Digest bilibili channel 285286947", ["bilibili"]],
+    ["Show Hugging Face trending models", ["huggingface"]],
+    ["Find Zhihu practitioner insights on RAG", ["zhihu"]],
+    ["show sources", ["juya"]],
 ]
 
 logger = get_logger("gradio")
@@ -79,6 +93,19 @@ async def _aclose_connectors(connectors: Sequence[SourceConnector]) -> None:
         closer = getattr(c, "aclose", None)
         if closer is not None:
             await closer()
+
+
+def _coerce_items_per_source(raw: object) -> int | None:
+    """Return validated session N, or ``None`` when the UI value is invalid."""
+    if raw is None or raw == "":
+        return _DEFAULT_ITEMS_PER_SOURCE
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 1 or value > _MAX_ITEMS_PER_SOURCE:
+        return None
+    return value
 
 
 async def _run_digest_async(
@@ -189,6 +216,8 @@ def _build_service(*, fake: bool, db_path: Path) -> ChatService:
             github_factory=build_connector_factory(fake=fake, name="github"),
             bilibili_factory=build_connector_factory(fake=fake, name="bilibili"),
             juya_factory=build_connector_factory(fake=fake, name="juya"),
+            huggingface_factory=build_connector_factory(fake=fake, name="huggingface"),
+            zhihu_factory=build_connector_factory(fake=fake, name="zhihu"),
             build_connectors_fn=build_connectors_fn,
             interface_name="gradio",
         )
@@ -210,14 +239,20 @@ def create_app(service: ChatService) -> gr.Blocks:
         message: str,
         _history: list,
         enabled_sources: list[str],
+        items_per_source: object,
     ) -> AsyncIterator[str]:
         if not enabled_sources:
             yield _EMPTY_SOURCES_MESSAGE
+            return
+        session_n = _coerce_items_per_source(items_per_source)
+        if session_n is None:
+            yield _INVALID_ITEMS_PER_SOURCE_MESSAGE
             return
         try:
             async for partial in service.handle_message_streaming_async(
                 message,
                 session_connector_names=enabled_sources,
+                session_items_per_source=session_n,
             ):
                 yield partial
         except Exception:
@@ -228,8 +263,9 @@ def create_app(service: ChatService) -> gr.Blocks:
         gr.Markdown(
             "# AI News Research Agent\n"
             "Ask for an AI news digest (e.g. mention \"digest\"). Juya is the default bulletin; "
-            "enable GitHub or Bilibili for opt-in repo/video discovery. Include GitHub repo URLs, "
-            "Bilibili video URLs, channel hints, or `daily.juya.uk` issue links for targeted runs. "
+            "enable Hugging Face, GitHub, Zhihu, or Bilibili for opt-in model, repo, practitioner, "
+            "or video discovery. Include GitHub repo URLs, Bilibili video URLs, channel hints, "
+            "or `daily.juya.uk` issue links for targeted runs. "
             'Follow up with "show sources", ranking hints, or "show caveats".'
         )
         source_toggles = gr.CheckboxGroup(
@@ -238,12 +274,24 @@ def create_app(service: ChatService) -> gr.Blocks:
             label="Sources",
             info=(
                 "Session filters for digest runs. Juya is selected by default; override one "
-                "request with phrases like 'github only', 'bilibili only', or a Juya issue URL."
+                "request with phrases like 'huggingface only', 'github only', 'zhihu only', "
+                "'bilibili only', or a Juya issue URL."
+            ),
+        )
+        items_per_source_input = gr.Number(
+            value=_DEFAULT_ITEMS_PER_SOURCE,
+            minimum=1,
+            maximum=_MAX_ITEMS_PER_SOURCE,
+            precision=0,
+            label="Items per source",
+            info=(
+                "Up to this many ranked items from each checked source; empty sources are "
+                "omitted. Default 5."
             ),
         )
         chat = gr.ChatInterface(
             fn=respond_stream,
-            additional_inputs=[source_toggles],
+            additional_inputs=[source_toggles, items_per_source_input],
             examples=None,
         )
         with gr.Accordion("Example prompts", open=False):

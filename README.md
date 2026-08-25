@@ -1,6 +1,6 @@
 # AI News Research Agent
 
-Local-first Python agent that generates **on-demand AI news digests** from **Juya** (default daily bulletin), optional **GitHub** trending-repo signals, and conservative **Bilibili**-oriented sources. It ranks candidates, summarizes them with an LLM (or offline fakes), persists runs to SQLite, and exposes a **CLI** plus optional **Gradio** chat UI.
+Local-first Python agent that generates **on-demand AI news digests** from **Juya** (default daily bulletin), optional **Hugging Face** trending models, optional **GitHub** trending-repo signals, optional **Zhihu** practitioner insights, and conservative **Bilibili**-oriented sources. It ranks candidates, summarizes them with an LLM (or offline fakes), persists runs to SQLite, and exposes a **CLI** plus optional **Gradio** chat UI.
 
 Design details: [AI News Research Agent design](docs/superpowers/specs/2026-05-02-ai-news-research-agent-design.md).
 
@@ -9,6 +9,8 @@ Design details: [AI News Research Agent design](docs/superpowers/specs/2026-05-0
 **Milestone 2 (LLM tool usage layer)** is complete: bounded tool-calling for follow-up inspection and connector search; Gradio wires a tool agent in live and fake modes. Plan: [Milestone 2 implementation plan](docs/superpowers/plans/2026-05-21-llm-tool-usage-layer-plan.md).
 
 **Milestone 3 (OpenClaw integration)** is complete: a local OpenClaw skill delegates digest requests to the existing `ai-news-agent` CLI via a thin adapter boundary. Plan: [Milestone 3 OpenClaw integration plan](docs/superpowers/plans/2026-06-08-openclaw-integration-plan.md).
+
+**Milestone 6 (AI ecosystem and practitioner signals)** is complete: opt-in Hugging Face trending-model and Zhihu practitioner-insight connectors, kind-aware ranking, Gradio/CLI/OpenClaw source names, and dedicated search tools. Bare digests stay Juya-only. Design: [Milestone 6 design](docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md). ADR: [ADR-0002](docs/adr/0002-milestone-6-ecosystem-and-practitioner-signals.md).
 
 ## Prerequisites
 
@@ -44,6 +46,8 @@ Copy [`.env.example`](.env.example) to `.env` and fill values as needed (never c
 | `OPENAI_BASE_URL` | Optional | Custom gateway / compatible endpoint (applies to both summarization and tool agent) |
 | `OPENAI_MODEL` | Optional | Model name (default `gpt-4o-mini`) |
 | `GITHUB_TOKEN` | Optional | Higher GitHub API rate limits ([`connectors/github.py`](src/ai_news_agent/connectors/github.py)) |
+| `HUGGINGFACE_TOKEN` | Optional | Higher Hugging Face Hub rate limits ([`connectors/huggingface.py`](src/ai_news_agent/connectors/huggingface.py)) |
+| `ZHIHU_ACCESS_SECRET` | Live Zhihu practitioner search | Zhihu Developer Platform Access Secret, sent as Bearer ([`env.py`](src/ai_news_agent/env.py)) |
 | `BILIBILI_SESSDATA` | Optional | Bilibili session token ([`env.py`](src/ai_news_agent/env.py)) |
 | `BILIBILI_BILI_JCT` | Optional | Bilibili CSRF token (often required with `SESSDATA`) |
 | `BILIBILI_BUVID3` | Optional | Bilibili device id cookie (helps avoid HTTP 412) |
@@ -62,10 +66,13 @@ Smoke acceptance tests (no network):
 uv run pytest tests/test_mvp_smoke.py -q
 ```
 
-One-shot fake digest (deterministic connectors + summarizer):
+One-shot fake digest (deterministic connectors + summarizer). Omitted `--sources` stays **Juya-only**:
 
 ```bash
 uv run ai-news-agent digest --fake
+uv run ai-news-agent digest --fake --sources huggingface
+uv run ai-news-agent digest --fake --sources zhihu
+uv run ai-news-agent digest --fake --sources huggingface,zhihu,github
 ```
 
 Gradio chat UI in offline mode:
@@ -78,7 +85,7 @@ Open the printed URL (default port **7860**). Try **“Give me today's AI digest
 
 ## Live digest (network + LLM)
 
-Requires `OPENAI_API_KEY` (in `.env` or your shell). Optionally set `GITHUB_TOKEN` for reliability.
+Requires `OPENAI_API_KEY` (in `.env` or your shell). Optionally set `GITHUB_TOKEN`, `HUGGINGFACE_TOKEN`, and `ZHIHU_ACCESS_SECRET` for reliability.
 
 Bare request (Juya-only default):
 
@@ -92,9 +99,21 @@ Explicit mixed sources (GitHub + Bilibili, no Juya):
 uv run ai-news-agent digest --sources github,bilibili --topics "RAG,agents" --timeframe today
 ```
 
+Hugging Face trending models (opt-in; Hub popularity is not model quality):
+
+```bash
+uv run ai-news-agent digest --sources huggingface --topics RAG --timeframe today
+```
+
+Zhihu practitioner insights (opt-in; official search only, no page crawl):
+
+```bash
+uv run ai-news-agent digest --sources zhihu --topics RAG --timeframe today
+```
+
 Useful flags:
 
-- `--sources` — comma-separated: `juya`, `github`, `bilibili` (default: `juya`)
+- `--sources` — comma-separated: `juya`, `huggingface`, `github`, `zhihu`, `bilibili` (default: `juya`)
 - `--topics` — comma-separated topic strings (omit for built-in defaults)
 - `--timeframe` — passed through to connectors (e.g. `today`)
 - `--top-n`, `--max-items` — ranking/collection limits
@@ -125,7 +144,7 @@ The UI delegates to [`ChatService`](src/ai_news_agent/chat.py):
   3. **Legacy fallback** → `chat_model.generate_followup_reply` only if no tool agent is configured (not used by default live Gradio).
   4. **Guidance** message if neither tool agent nor chat model is available.
 
-Example prompts live in a collapsible **Example prompts** panel below the chat. Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
+Example prompts live in a collapsible **Example prompts** panel below the chat. Clicking an example sets **Sources** to match that prompt (Items per source is unchanged). Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
 
 ### Milestone 2 — Follow-up tools (Gradio / ChatService)
 
@@ -140,11 +159,11 @@ Example prompts live in a collapsible **Example prompts** panel below the chat. 
 | Legacy LLM | Grounded reply via `generate_followup_reply` | Only when `tool_agent_runner` is not set |
 | Guidance | Static hint to use structured prompts | When no model or tool agent is configured |
 
-Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source_trace`, `get_ranking_explanation`, `search_juya_ai_news`, `search_github_ai_news`, `search_bilibili_ai_news` (see [`tools/registry.py`](src/ai_news_agent/tools/registry.py)).
+Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source_trace`, `get_ranking_explanation`, `search_juya_ai_news`, `search_github_ai_news`, `search_bilibili_ai_news`, `search_huggingface_trending_models`, `search_zhihu_practitioner_insights` (see [`tools/registry.py`](src/ai_news_agent/tools/registry.py)).
 
 **Fake mode (`--fake`):**
 
-- Digest: `FakeDigestModel` + fake Juya/GitHub/Bilibili connectors (no API keys).
+- Digest: `FakeDigestModel` + fake Juya/Hugging Face/GitHub/Zhihu/Bilibili connectors (no API keys).
 - Structured follow-ups: work as in live mode (deterministic from stored traces).
 - Open-ended follow-ups: return a **fixed offline message** from the fake tool agent (no real tool-calling model, no connector search). Use structured prompts for reliable offline demos.
 
@@ -157,22 +176,25 @@ Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source
 | Digest | `Give me today's AI digest` |
 | Structured | `show sources`, `Which item should I study first?`, `Any confidence caveats?` |
 | Open-ended | `Why does the top item matter for RAG agents?` |
-| Source exploration | `Search Juya for agent news`, `Search GitHub for langgraph agents`, `Search Bilibili for RAG tutorials` |
+| Source exploration | `Search Juya for agent news`, `Search Hugging Face for trending RAG models`, `Search GitHub for langgraph agents`, `Search Zhihu for practitioner insights on RAG`, `Search Bilibili for RAG tutorials` |
 
 In **fake mode**, open-ended and source-exploration prompts return the offline tool-agent guidance string, not live search results.
 
 ### Source toggles and selection
 
-Gradio shows **session-sticky** checkboxes for `juya`, `github`, and `bilibili` (**Juya selected by default**). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`.
+Gradio shows **session-sticky** checkboxes for `juya`, `huggingface`, `github`, `zhihu`, and `bilibili` (**Juya selected by default**). Each digest run uses the current checkbox selection via `DigestRequest.connector_names`. Use **Items per source** (default 5, range 1–20) to cap how many ranked items appear from each enabled source in mixed digests.
 
-Bare digest requests (no source toggles or explicit `--sources`) resolve to **Juya-only** via [`DEFAULT_SOURCE_NAMES`](src/ai_news_agent/sources.py). Select multiple checkboxes or pass a comma-separated `--sources` list for a **mixed digest**; section order is primary intent first, otherwise Juya → GitHub → Bilibili (empty sections omitted).
+Bare digest requests (no source toggles or explicit `--sources`) resolve to **Juya-only** via [`DEFAULT_SOURCE_NAMES`](src/ai_news_agent/sources.py). Select multiple checkboxes or pass a comma-separated `--sources` list for a **mixed digest**; section order is primary intent first, otherwise Juya → Hugging Face → GitHub → Zhihu → Bilibili (empty sections omitted).
 
 You can override the toggles for a single request with natural-language phrases:
 
 - `Give me today's AI digest` (Juya-only default)
 - `Give me today's AI digest from github only`
+- `huggingface only digest today`
+- `trending RAG models on hugging face`
+- `zhihu practitioner insights on RAG`
 - `bilibili only digest today`
-- `use juya and github for today's digest`
+- `use juya and huggingface for today's digest`
 
 CLI, Gradio, and OpenClaw share the canonical source registry in [`sources.py`](src/ai_news_agent/sources.py). The OpenClaw adapter maps hints to the same `DigestRequest.connector_names` field via CLI flags.
 
@@ -228,7 +250,7 @@ Design: [OpenClaw integration design](docs/superpowers/specs/2026-06-08-openclaw
 - **uv** on PATH (required by the skill metadata).
 - This repository installed (`uv sync --group dev` from repo root).
 - **Live digests:** `OPENAI_API_KEY` in `.env` or your shell (same as CLI/Gradio live mode).
-- Optional: `GITHUB_TOKEN`, Bilibili cookie vars (see [Environment variables](#environment-variables)).
+- Optional: `GITHUB_TOKEN`, `HUGGINGFACE_TOKEN`, `ZHIHU_ACCESS_SECRET`, Bilibili cookie vars (see [Environment variables](#environment-variables)).
 
 ### Skill setup
 
@@ -268,6 +290,8 @@ Send natural-language digest requests through any OpenClaw-connected channel. Th
 | Give me today's AI digest. | `openclaw-digest --timeframe today --sources juya` |
 | Give me today's AI digest from GitHub only. | `openclaw-digest --timeframe today --sources github` |
 | Give me this week's AI digest on RAG and agents. | `openclaw-digest --timeframe last_7_days --sources juya --topics RAG,agents` |
+| Give me Hugging Face trending RAG models. | `openclaw-digest --message "trending RAG models on hugging face"` |
+| Give me Zhihu practitioner insights on RAG. | `openclaw-digest --message "zhihu practitioner insights on RAG"` |
 | Give me a mixed digest from GitHub and Bilibili. | `openclaw-digest --timeframe today --sources github,bilibili` |
 | Digest bilibili video BV1gRJs63EYX | `openclaw-digest --message "Digest bilibili video BV1gRJs63EYX"` |
 | Digest https://github.com/langchain-ai/langgraph | `openclaw-digest --message "Digest https://github.com/langchain-ai/langgraph"` |
@@ -315,6 +339,9 @@ Offline smoke (no API key, no network) — run directly from repo root:
 
 ```bash
 uv run ai-news-agent digest --fake --timeframe today
+uv run ai-news-agent digest --fake --timeframe today --sources huggingface
+uv run ai-news-agent digest --fake --timeframe today --sources zhihu
+uv run ai-news-agent digest --fake --timeframe today --sources huggingface,zhihu,github
 uv run ai-news-agent digest --fake --timeframe today --sources github,bilibili
 ```
 
@@ -360,17 +387,19 @@ Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if
 
 ## Known limits
 
-**Connectors (Milestone 1):**
+**Connectors:**
 
 - **Juya** is the **default bare digest** source (`daily.juya.uk` RSS + per-issue markdown enrichment). Target the website URL only; the legacy GitHub repo alias is rejected.
+- **Hugging Face** is an **opt-in** Hub-native **trending models** source (global or topic/task-filtered). Ranking uses Hub `trending_score` plus downloads/likes tie-breakers; Hub popularity is **not** model quality. Models only — not datasets or Spaces.
 - **GitHub** opt-in collection ranks repositories with a **momentum** score (star count × recency). This is a transparent heuristic for trending signal, **not** historical star velocity or true growth rate.
+- **Zhihu** is an **opt-in practitioner-insight** source. Collection uses the official search API only (deterministic 实战/踩坑, 部署/成本, 评测/对比 lenses; max three calls). Rankable evidence is API relevance, lens match, and returned-text completeness — not popularity or freshness. Linked pages are never fetched. Thin results are discovery-only.
 - **Bilibili** is **metadata-first** at digest time; follow-up enrichment can add transcripts when subtitle tracks exist. Many videos have no published CC/AI subtitles (`subtitle_unavailable`). Items are labeled lower confidence when content is thin (see [`connectors/bilibili.py`](src/ai_news_agent/connectors/bilibili.py)).
 
 **Milestone 2 tool layer:**
 
 - Tool agent has a **bounded iteration cap**; very complex multi-step questions may hit the fallback message.
 - **Fake mode** does not run a real tool-calling model or live connector search for open-ended prompts.
-- **Out of scope:** scheduled runs, cloud deployment, arXiv / Hugging Face / RSS connectors, vector RAG, OpenClaw follow-up orchestration (see design spec milestones).
+- **Out of scope:** scheduled runs, cloud deployment, arXiv / generic RSS connectors, Hugging Face datasets/Spaces, Zhihu hotlist/direct-answer/page crawl, vector RAG, OpenClaw follow-up orchestration (see design spec milestones).
 
 **Milestone 3 OpenClaw:**
 
@@ -384,3 +413,6 @@ Set `BILIBILI_SESSDATA`, `BILIBILI_BILI_JCT`, and `BILIBILI_BUVID3` in `.env` if
 - [Milestone 3 OpenClaw integration plan](docs/superpowers/plans/2026-06-08-openclaw-integration-plan.md)
 - [Milestone 3 OpenClaw integration design](docs/superpowers/specs/2026-06-08-openclaw-integration-design.md)
 - [Design spec](docs/superpowers/specs/2026-05-02-ai-news-research-agent-design.md)
+- [Milestone 6 AI ecosystem and practitioner signals design](docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md)
+- [Milestone 6 implementation plan](docs/superpowers/plans/2026-08-16-ai-ecosystem-and-practitioner-signals-plan.md)
+- [ADR-0002 Milestone 6 source roles](docs/adr/0002-milestone-6-ecosystem-and-practitioner-signals.md)

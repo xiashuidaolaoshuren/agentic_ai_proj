@@ -627,3 +627,377 @@ def test_order_selected_for_digest_sections_fallback_and_primary() -> None:
         primary_source=None,
     )
     assert [r.item.source_id for r in github_only] == ["gh-1"]
+
+
+def test_order_selected_for_digest_includes_huggingface_and_zhihu_sections() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.ranking import order_selected_for_digest
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    juya = RankedItem(
+        item=NewsItem(
+            source=SourceKind.JUYA,
+            source_id="juya-1",
+            url="https://daily.juya.uk/issue-1/",
+            title="Juya issue",
+            published_at=now - timedelta(days=1),
+            collected_at=now,
+            raw_snippet="bulletin",
+        ),
+        score_total=5.0,
+        selected=True,
+    )
+    huggingface = RankedItem(
+        item=NewsItem(
+            source=SourceKind.HUGGINGFACE,
+            source_id="hf-1",
+            url="https://huggingface.co/models/hf-1",
+            title="HF model",
+            published_at=now - timedelta(days=1),
+            collected_at=now,
+            raw_snippet="model card",
+        ),
+        score_total=8.0,
+        selected=True,
+    )
+    github = RankedItem(
+        item=NewsItem(
+            source=SourceKind.GITHUB,
+            source_id="gh-1",
+            url="https://github.com/o/repo",
+            title="GitHub repo",
+            published_at=now - timedelta(days=2),
+            collected_at=now,
+            raw_snippet="readme",
+        ),
+        score_total=9.0,
+        selected=True,
+    )
+    zhihu = RankedItem(
+        item=NewsItem(
+            source=SourceKind.ZHIHU,
+            source_id="zh-1",
+            url="https://www.zhihu.com/question/1",
+            title="Zhihu post",
+            published_at=now - timedelta(days=1),
+            collected_at=now,
+            raw_snippet="insight",
+        ),
+        score_total=6.0,
+        selected=True,
+    )
+    bili = RankedItem(
+        item=NewsItem(
+            source=SourceKind.BILIBILI,
+            source_id="BV1",
+            url="https://www.bilibili.com/video/BV1",
+            title="Bilibili video",
+            published_at=now - timedelta(hours=2),
+            collected_at=now,
+            raw_snippet="video",
+        ),
+        score_total=3.0,
+        selected=True,
+    )
+    ranked = [github, zhihu, bili, huggingface, juya]
+
+    fallback = order_selected_for_digest(
+        ranked,
+        timeframe="last_7_days",
+        now=now,
+        primary_source=None,
+    )
+    assert [r.item.source.value for r in fallback] == [
+        "juya",
+        "huggingface",
+        "github",
+        "zhihu",
+        "bilibili",
+    ]
+
+    primary_hf = order_selected_for_digest(
+        ranked,
+        timeframe="last_7_days",
+        now=now,
+        primary_source="huggingface",
+    )
+    assert primary_hf[0].item.source is SourceKind.HUGGINGFACE
+
+    without_zhihu = order_selected_for_digest(
+        [juya, huggingface, github, bili],
+        timeframe="last_7_days",
+        now=now,
+        primary_source=None,
+    )
+    assert all(r.item.source is not SourceKind.ZHIHU for r in without_zhihu)
+
+
+def _hf_item(
+    *,
+    source_id: str = "hf-1",
+    trending_score: float = 100.0,
+    stars_or_views: int | None = None,
+    **extra_evidence: float,
+) -> NewsItem:
+    now = _fixed_ts()
+    evidence: dict[str, float | int] = {"trending_score": trending_score, **extra_evidence}
+    return NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id=source_id,
+        url=f"https://huggingface.co/models/{source_id}",
+        title=f"Model {source_id}",
+        published_at=now,
+        collected_at=now,
+        metadata_completeness=0.8,
+        topic_matches=["AI"],
+        content_confidence=ConfidenceLevel.MEDIUM,
+        stars_or_views=stars_or_views,
+        raw_snippet="model card excerpt",
+        source_evidence=evidence,
+    )
+
+
+def test_rank_items_huggingface_uses_trending_not_engagement() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    item = _hf_item(trending_score=500.0)
+    ranked = rank_items([item], top_n=1, now=_fixed_ts())[0]
+    bd = ranked.score_breakdown
+
+    assert "trending" in bd
+    assert "engagement" not in bd
+    assert bd["trending"] > 0
+
+
+def test_rank_items_huggingface_higher_trending_score_increases_trending() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    low = _hf_item(source_id="hf-low", trending_score=10.0)
+    high = _hf_item(source_id="hf-high", trending_score=10_000.0)
+    r_low = rank_items([low], top_n=1, now=now)[0]
+    r_high = rank_items([high], top_n=1, now=now)[0]
+
+    assert r_high.score_breakdown["trending"] > r_low.score_breakdown["trending"]
+
+
+def test_rank_items_huggingface_stars_or_views_does_not_affect_total() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    no_stars = _hf_item(source_id="hf-a", trending_score=250.0, stars_or_views=None)
+    with_stars = _hf_item(source_id="hf-b", trending_score=250.0, stars_or_views=999_999)
+    r_no = rank_items([no_stars], top_n=1, now=now)[0]
+    r_with = rank_items([with_stars], top_n=1, now=now)[0]
+
+    assert r_no.score_total == r_with.score_total
+
+
+def _zhihu_item(
+    *,
+    source_id: str = "zh-1",
+    relevance: float = 0.7,
+    query_lens: str | None = "practitioner",
+    evidence_text_length: int = 200,
+) -> NewsItem:
+    now = _fixed_ts()
+    return NewsItem(
+        source=SourceKind.ZHIHU,
+        source_id=source_id,
+        url=f"https://www.zhihu.com/question/{source_id}",
+        title=f"Zhihu post {source_id}",
+        published_at=now,
+        collected_at=now,
+        metadata_completeness=0.75,
+        topic_matches=["AI"],
+        content_confidence=ConfidenceLevel.MEDIUM,
+        stars_or_views=None,
+        raw_snippet="practitioner insight excerpt",
+        source_evidence={
+            "relevance": relevance,
+            "query_lens": query_lens,
+            "evidence_text_length": evidence_text_length,
+        },
+    )
+
+
+def test_rank_items_zhihu_uses_api_relevance_lens_and_completeness() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    item = _zhihu_item()
+    ranked = rank_items([item], top_n=1, now=_fixed_ts())[0]
+    bd = ranked.score_breakdown
+
+    assert "api_relevance" in bd
+    assert "lens_match" in bd
+    assert "text_completeness" in bd
+    assert "engagement" not in bd
+    assert "freshness" not in bd
+
+
+def test_rank_items_zhihu_higher_api_relevance_increases_api_relevance() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    low = _zhihu_item(source_id="zh-low", relevance=0.2)
+    high = _zhihu_item(source_id="zh-high", relevance=0.95)
+    r_low = rank_items([low], top_n=1, now=now)[0]
+    r_high = rank_items([high], top_n=1, now=now)[0]
+
+    assert r_high.score_breakdown["api_relevance"] > r_low.score_breakdown["api_relevance"]
+
+
+def test_rank_items_zhihu_longer_evidence_increases_text_completeness() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    thin = _zhihu_item(source_id="zh-thin", evidence_text_length=40)
+    rich = _zhihu_item(source_id="zh-rich", evidence_text_length=500)
+    r_thin = rank_items([thin], top_n=1, now=now)[0]
+    r_rich = rank_items([rich], top_n=1, now=now)[0]
+
+    assert r_rich.score_breakdown["text_completeness"] > r_thin.score_breakdown["text_completeness"]
+
+
+def _mixed_juya_huggingface_pool(now: datetime) -> list[NewsItem]:
+    from datetime import timedelta
+
+    juya_items = [
+        NewsItem(
+            source=SourceKind.JUYA,
+            source_id=f"juya-{i}",
+            url=f"https://daily.juya.uk/{i}",
+            title=f"Juya {i}",
+            published_at=now - timedelta(hours=i),
+            collected_at=now,
+            metadata_completeness=0.9,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            raw_snippet="bulletin text here",
+        )
+        for i in range(4)
+    ]
+    hf_items = [
+        NewsItem(
+            source=SourceKind.HUGGINGFACE,
+            source_id=f"hf-{i}",
+            url=f"https://huggingface.co/m{i}",
+            title=f"HF model {i}",
+            collected_at=now,
+            metadata_completeness=0.5,
+            topic_matches=[],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            source_evidence={"trending_score": max(1, 10 - i)},
+        )
+        for i in range(4)
+    ]
+    return juya_items + hf_items
+
+
+def test_rank_items_items_per_source_selects_huggingface_families_not_variants() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    items = [
+        _hf_item(source_id="Qwen/Qwen3.8-27B", trending_score=100.0),
+        _hf_item(source_id="Other/Qwen3.8-27B-GGUF", trending_score=99.0),
+        _hf_item(source_id="Other/Qwen3.8-27B-MLX", trending_score=98.0),
+        _hf_item(source_id="org/model-b", trending_score=90.0),
+        _hf_item(source_id="org/model-c", trending_score=80.0),
+    ]
+    ranked = rank_items(items, top_n=5, items_per_source=2, now=now)
+    selected_hf = [r for r in ranked if r.selected and r.item.source is SourceKind.HUGGINGFACE]
+
+    assert len(selected_hf) == 2
+    selected_ids = {row.item.source_id for row in selected_hf}
+    assert "Qwen/Qwen3.8-27B" in selected_ids
+    assert "Other/Qwen3.8-27B-GGUF" not in selected_ids
+    assert "Other/Qwen3.8-27B-MLX" not in selected_ids
+
+
+def test_rank_items_items_per_source_selects_n_per_kind_mixed_juya_huggingface() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    ranked = rank_items(
+        _mixed_juya_huggingface_pool(now),
+        top_n=2,
+        items_per_source=2,
+        now=now,
+    )
+    selected = [r for r in ranked if r.selected]
+    by_kind: dict[SourceKind, list[RankedItem]] = {}
+    for row in selected:
+        by_kind.setdefault(row.item.source, []).append(row)
+
+    assert len(by_kind.get(SourceKind.JUYA, [])) == 2
+    assert len(by_kind.get(SourceKind.HUGGINGFACE, [])) == 2
+    assert len(selected) == 4
+
+
+def test_rank_items_items_per_source_none_keeps_overall_top_n() -> None:
+    from ai_news_agent.ranking import rank_items
+
+    now = _fixed_ts()
+    ranked = rank_items(
+        _mixed_juya_huggingface_pool(now),
+        top_n=2,
+        items_per_source=None,
+        now=now,
+    )
+
+    assert sum(1 for r in ranked if r.selected) == 2
+
+
+def test_rank_items_items_per_source_bilibili_guarantee_stays_within_quota() -> None:
+    from datetime import timedelta
+
+    from ai_news_agent.ranking import rank_items
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    bilibili_newest = NewsItem(
+        source=SourceKind.BILIBILI,
+        source_id="BVjune2new",
+        url="https://www.bilibili.com/video/BVjune2new",
+        title="June 2 newest",
+        published_at=now - timedelta(hours=2),
+        collected_at=now,
+        metadata_completeness=0.25,
+        topic_matches=[],
+        content_confidence=ConfidenceLevel.LOW,
+        stars_or_views=1,
+        raw_snippet=None,
+    )
+    github_items = [
+        NewsItem(
+            source=SourceKind.GITHUB,
+            source_id=f"gh{i}",
+            url=f"https://github.com/o/gh{i}",
+            title=f"repo{i}",
+            published_at=now - timedelta(days=i + 1),
+            collected_at=now,
+            metadata_completeness=0.95,
+            topic_matches=["AI", "LLM"],
+            content_confidence=ConfidenceLevel.MEDIUM,
+            stars_or_views=5000 + i,
+            raw_snippet="readme body",
+        )
+        for i in range(4)
+    ]
+
+    ranked = rank_items(
+        github_items + [bilibili_newest],
+        top_n=5,
+        items_per_source=2,
+        now=now,
+        timeframe="last_7_days",
+    )
+    selected = [r for r in ranked if r.selected]
+    github_selected = [r for r in selected if r.item.source is SourceKind.GITHUB]
+    bilibili_selected = [r for r in selected if r.item.source is SourceKind.BILIBILI]
+
+    assert len(github_selected) == 2
+    assert len(bilibili_selected) == 1
+    assert bilibili_selected[0].item.source_id == "BVjune2new"
+    assert len(selected) == 3

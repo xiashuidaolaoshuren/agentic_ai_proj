@@ -147,6 +147,26 @@ def test_validate_source_selector_consistency_rejects_bilibili_only_with_github_
         validate_source_selector_consistency(req)
 
 
+def test_validate_source_selector_consistency_rejects_huggingface_only_with_github_url() -> None:
+    req = DigestRequest(
+        topics=[],
+        connector_names=["huggingface"],
+        github_manual_urls=["https://github.com/acme/widget"],
+    )
+    with pytest.raises(ValueError, match="GitHub"):
+        validate_source_selector_consistency(req)
+
+
+def test_validate_source_selector_consistency_rejects_zhihu_only_with_bilibili_url() -> None:
+    req = DigestRequest(
+        topics=[],
+        connector_names=["zhihu"],
+        bilibili_manual_urls=["https://www.bilibili.com/video/BV1demo0001"],
+    )
+    with pytest.raises(ValueError, match="Bilibili"):
+        validate_source_selector_consistency(req)
+
+
 def test_build_digest_request_payload_includes_message() -> None:
     payload = build_digest_request_payload(
         message="Digest bilibili video BV1gRJs63EYX",

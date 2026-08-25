@@ -60,6 +60,7 @@ class _FakeInterfaceRouter:
         message: str,
         digest_request=None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         allow_digest: bool = True,
     ) -> InterfaceAgentResult:
@@ -68,6 +69,7 @@ class _FakeInterfaceRouter:
                 "message": message,
                 "digest_request": digest_request,
                 "session_connector_names": session_connector_names,
+                "session_items_per_source": session_items_per_source,
                 "correlation_id": correlation_id,
                 "allow_digest": allow_digest,
             }

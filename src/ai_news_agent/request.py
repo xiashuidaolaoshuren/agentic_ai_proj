@@ -24,6 +24,8 @@ class DigestRequest:
     max_items_per_source: int = 20
     top_n: int = 5
     language_hint: str | None = None
+    #: When set, ranking selects up to this many items per source kind (Gradio).
+    items_per_source: int | None = None
     #: Legacy Bilibili selectors (prefer bilibili_* fields).
     target_channels: list[str] = field(default_factory=_empty_str_list)
     manual_urls: list[str] = field(default_factory=_empty_str_list)
@@ -41,12 +43,17 @@ class DigestRequest:
     #: Resolved primary source name (first of ``connector_names``); recorded for
     #: downstream ranking/rendering (T5). Defaults to ``None`` until resolved.
     primary_source: str | None = None
+    huggingface_discovery_mode: str | None = None
+    huggingface_search: str | None = None
+    huggingface_pipeline_tag: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_items_per_source < 1:
             raise ValueError("max_items_per_source must be >= 1")
         if self.top_n < 0:
             raise ValueError("top_n must be non-negative")
+        if self.items_per_source is not None and self.items_per_source < 1:
+            raise ValueError("items_per_source must be >= 1")
 
         if self.topics is None:
             norm_topics = list(DEFAULT_TOPICS)
@@ -73,3 +80,40 @@ def primary_source_from_names(names: list[str] | None) -> str | None:
     if not names:
         return None
     return names[0]
+
+
+def huggingface_fields_from_structured_sources(
+    *,
+    connector_names: list[str] | None,
+    topics: list[str] | None,
+    topics_explicit: bool,
+    huggingface_discovery_mode: str | None = None,
+    huggingface_search: str | None = None,
+    huggingface_pipeline_tag: str | None = None,
+) -> dict[str, str]:
+    """Map explicit structured topics onto Hugging Face filtered discovery.
+
+    Returns extra ``DigestRequest`` kwargs. Does nothing when Hugging Face is
+    not selected, topics were omitted, topics are empty, or any Hugging Face
+    discovery field is already set.
+    """
+    if not topics_explicit:
+        return {}
+    if (
+        huggingface_discovery_mode is not None
+        or huggingface_search is not None
+        or huggingface_pipeline_tag is not None
+    ):
+        return {}
+    if not connector_names or "huggingface" not in connector_names:
+        return {}
+    first = next(
+        (str(topic).strip() for topic in (topics or []) if str(topic).strip()),
+        None,
+    )
+    if first is None:
+        return {}
+    return {
+        "huggingface_discovery_mode": "filtered",
+        "huggingface_search": first,
+    }

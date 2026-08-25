@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Any
 
-from ai_news_agent.chat import _message_requests_digest
+from ai_news_agent.chat import _apply_session_items_per_source, _message_requests_digest
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.followup_structured import (
     NO_SAVED_DIGEST,
@@ -78,6 +78,8 @@ class InterfaceToolRouter:
         github_factory: ConnectorFactory,
         bilibili_factory: ConnectorFactory,
         juya_factory: ConnectorFactory,
+        huggingface_factory: ConnectorFactory | None = None,
+        zhihu_factory: ConnectorFactory | None = None,
         build_connectors_fn: BuildConnectorsFn,
         now_provider: Callable[[], datetime] | None = None,
         interface_name: str,
@@ -91,6 +93,8 @@ class InterfaceToolRouter:
         self._github_factory = github_factory
         self._bilibili_factory = bilibili_factory
         self._juya_factory = juya_factory
+        self._huggingface_factory = huggingface_factory
+        self._zhihu_factory = zhihu_factory
         self._build_connectors_fn = build_connectors_fn
         self._now_provider = now_provider
         self._interface_name = interface_name
@@ -102,6 +106,7 @@ class InterfaceToolRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         allow_digest: bool = True,
@@ -110,6 +115,7 @@ class InterfaceToolRouter:
             message,
             digest_request=digest_request,
             session_connector_names=session_connector_names,
+            session_items_per_source=session_items_per_source,
         )
         logger.info(
             "interface route intent=%s interface=%s correlation_id=%s",
@@ -148,6 +154,7 @@ class InterfaceToolRouter:
                 digest_request=req,
                 on_stage=on_stage,
                 connectors=connectors,
+                max_results_cap=session_items_per_source,
             )
             try:
                 agent_result = await runner.run(message)
@@ -202,6 +209,7 @@ class InterfaceToolRouter:
         message: str,
         digest_request: DigestRequest | None = None,
         session_connector_names: list[str] | None = None,
+        session_items_per_source: int | None = None,
         correlation_id: str | None = None,
         on_stage: Callable[[str], None] | None = None,
         allow_digest: bool = True,
@@ -210,6 +218,7 @@ class InterfaceToolRouter:
             message,
             digest_request=digest_request,
             session_connector_names=session_connector_names,
+            session_items_per_source=session_items_per_source,
         )
 
         if intent is _RouteIntent.NO_SAVED_DIGEST:
@@ -244,6 +253,7 @@ class InterfaceToolRouter:
                 digest_request=req,
                 on_stage=on_stage,
                 connectors=connectors,
+                max_results_cap=session_items_per_source,
             )
             final_state: InterfaceAgentResult | None = None
             fallback_reason: str | None = None
@@ -298,6 +308,7 @@ class InterfaceToolRouter:
         *,
         digest_request: DigestRequest | None,
         session_connector_names: list[str] | None,
+        session_items_per_source: int | None = None,
     ) -> tuple[_RouteIntent, DigestRequest | None]:
         if digest_request is not None:
             return _RouteIntent.DIGEST, digest_request
@@ -312,6 +323,7 @@ class InterfaceToolRouter:
                     message,
                     session_connector_names=session_connector_names,
                 )
+                req = _apply_session_items_per_source(req, session_items_per_source)
                 return _RouteIntent.DIGEST, req
             return _RouteIntent.OPEN_ENDED_FOLLOWUP, None
 
@@ -320,6 +332,7 @@ class InterfaceToolRouter:
                 message,
                 session_connector_names=session_connector_names,
             )
+            req = _apply_session_items_per_source(req, session_items_per_source)
             return _RouteIntent.DIGEST, req
         return _RouteIntent.NO_SAVED_DIGEST, None
 
@@ -330,6 +343,7 @@ class InterfaceToolRouter:
         digest_request: DigestRequest | None,
         on_stage: Callable[[str], None] | None = None,
         connectors: Sequence[Any] | None = None,
+        max_results_cap: int | None = None,
     ) -> ToolAgentRunner:
         if intent is _RouteIntent.DIGEST:
             assert digest_request is not None
@@ -338,11 +352,14 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
                 digest_request=digest_request,
                 connectors=connectors or [],
                 model=self._digest_model,
                 now_provider=self._now_provider,
                 on_stage=on_stage,
+                max_results_cap=max_results_cap,
             )
         elif intent is _RouteIntent.STRUCTURED_FOLLOWUP:
             registry = build_tool_registry(
@@ -350,7 +367,10 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
                 register_structured_tools=True,
+                max_results_cap=max_results_cap,
             )
         else:
             registry = build_tool_registry(
@@ -358,6 +378,9 @@ class InterfaceToolRouter:
                 github_factory=self._github_factory,
                 bilibili_factory=self._bilibili_factory,
                 juya_factory=self._juya_factory,
+                huggingface_factory=self._huggingface_factory,
+                zhihu_factory=self._zhihu_factory,
+                max_results_cap=max_results_cap,
             )
         return build_tool_agent_runner(
             registry=registry,
@@ -559,6 +582,8 @@ def build_interface_tool_router(
     github_factory: ConnectorFactory,
     bilibili_factory: ConnectorFactory,
     juya_factory: ConnectorFactory,
+    huggingface_factory: ConnectorFactory | None = None,
+    zhihu_factory: ConnectorFactory | None = None,
     build_connectors_fn: BuildConnectorsFn,
     now_provider: Callable[[], datetime] | None = None,
     interface_name: str,
@@ -574,6 +599,8 @@ def build_interface_tool_router(
         github_factory=github_factory,
         bilibili_factory=bilibili_factory,
         juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=zhihu_factory,
         build_connectors_fn=build_connectors_fn,
         now_provider=now_provider,
         interface_name=interface_name,

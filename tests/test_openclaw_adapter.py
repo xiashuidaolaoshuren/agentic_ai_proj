@@ -106,6 +106,26 @@ def test_build_digest_request_from_hints_maps_defaults() -> None:
     assert req.topics == ["RAG", "agents"]
 
 
+def test_build_digest_request_from_hints_huggingface_topics_filtered() -> None:
+    from ai_news_agent.adapters.openclaw import build_digest_request_from_hints
+
+    req = build_digest_request_from_hints(
+        sources_hint="huggingface",
+        topics_hint="RAG, agents",
+    )
+    assert req.topics == ["RAG", "agents"]
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+
+
+def test_build_digest_request_from_hints_huggingface_topics_omitted_stay_global() -> None:
+    from ai_news_agent.adapters.openclaw import build_digest_request_from_hints
+
+    req = build_digest_request_from_hints(sources_hint="huggingface")
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None
+
+
 def test_resolve_openclaw_digest_request_hint_only_sets_primary_source() -> None:
     from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
 
@@ -116,6 +136,69 @@ def test_resolve_openclaw_digest_request_hint_only_sets_primary_source() -> None
     default = resolve_openclaw_digest_request()
     assert default.connector_names == ["juya"]
     assert default.primary_source == "juya"
+
+
+def test_resolve_openclaw_digest_request_huggingface_message() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="huggingface only")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+
+
+def test_resolve_openclaw_digest_request_huggingface_pipeline_message() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="huggingface models for text-generation")
+    assert req.connector_names == ["huggingface"]
+    assert req.primary_source == "huggingface"
+    assert req.huggingface_pipeline_tag == "text-generation"
+    assert req.huggingface_discovery_mode == "filtered"
+
+
+def test_resolve_openclaw_digest_request_huggingface_zhihu_hints() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(sources_hint="huggingface,zhihu")
+    assert req.connector_names == ["huggingface", "zhihu"]
+    assert req.primary_source == "huggingface"
+
+
+def test_resolve_openclaw_digest_request_huggingface_topics_filtered() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(
+        sources_hint="huggingface",
+        topics_hint="RAG",
+    )
+    assert req.topics == ["RAG"]
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+
+
+def test_resolve_openclaw_digest_request_huggingface_topics_omitted_stay_global() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(sources_hint="huggingface")
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None
+
+
+def test_resolve_openclaw_digest_request_zhihu_practitioner_message() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="zhihu practitioner insights")
+    assert req.connector_names == ["zhihu"]
+    assert req.primary_source == "zhihu"
+
+
+def test_resolve_openclaw_digest_request_zhihu_practitioner_message_extracts_topic() -> None:
+    from ai_news_agent.adapters.openclaw import resolve_openclaw_digest_request
+
+    req = resolve_openclaw_digest_request(message="zhihu practitioner insights on RAG")
+    assert req.connector_names == ["zhihu"]
+    assert req.primary_source == "zhihu"
+    assert req.topics == ["RAG"]
 
 
 def test_adapters_package_exports_public_surface() -> None:

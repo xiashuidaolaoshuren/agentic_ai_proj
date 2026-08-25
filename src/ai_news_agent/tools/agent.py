@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any, Protocol, runtime_checkable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from ai_news_agent.logging_setup import get_logger
+from ai_news_agent.progress import bind_progress_sink, emit_progress, reset_progress_sink
 from ai_news_agent.tools.registry import ToolRegistry
 from ai_news_agent.tools.schemas import (
     InterfaceAgentResult,
     InterfaceAgentResultKind,
     ToolObservation,
+    ToolObservationStatus,
     tool_observation_to_dict,
 )
 
@@ -26,6 +29,22 @@ _TERMINAL_TOOL_KINDS = {
     InterfaceAgentResultKind.DIGEST,
     InterfaceAgentResultKind.STRUCTURED,
 }
+
+
+def _emit_custom_progress(line: str) -> None:
+    try:
+        writer = get_stream_writer()
+        writer(line)
+    except Exception:
+        return
+
+
+def _bind_progress_sink():
+    return bind_progress_sink(_emit_custom_progress)
+
+
+def _reset_progress_sink(token) -> None:
+    reset_progress_sink(token)
 
 
 def _append_progress_lines(
@@ -71,14 +90,23 @@ class ToolAgentRunner:
     ) -> AsyncIterator[tuple[str, bool, InterfaceAgentResult | None]]:
         """Yield tool progress lines, then a final done event with the answer."""
         final_state: dict[str, Any] | None = None
+        yielded: set[str] = set()
         async for mode, chunk in self._graph.astream(
             self._initial_state(question),
-            stream_mode=["updates", "values"],
+            stream_mode=["updates", "values", "custom"],
         ):
+            if mode == "custom":
+                line = str(chunk)
+                if line not in yielded:
+                    yielded.add(line)
+                    yield line, False, None
+                continue
             if mode == "updates":
                 for update in chunk.values():
                     for line in update.get("progress_lines", []):
-                        yield line, False, None
+                        if line not in yielded:
+                            yielded.add(line)
+                            yield line, False, None
                 continue
             final_state = chunk
 
@@ -161,6 +189,8 @@ def _format_tool_call_done(name: str, observation: ToolObservation) -> str:
 
 
 def _format_terminal_tool_call_done(name: str, result: InterfaceAgentResult) -> str:
+    if result.kind is InterfaceAgentResultKind.DIGEST:
+        return f"Done {name}: Digest ready."
     return f"Done {name}: {result.text}"
 
 
@@ -201,7 +231,11 @@ def _build_tool_agent_graph(
             args = _tool_call_args(tool_call)
             tool_call_id = _tool_call_id(tool_call)
             logger.info("tool_call start name=%r", name)
-            progress_lines.append(_format_tool_call_start(name))
+            start_line = _format_tool_call_start(name)
+            progress_lines.append(start_line)
+            _emit_custom_progress(start_line)
+            progress_token = _bind_progress_sink()
+            payload: dict[str, object] = {}
             try:
                 tool = registry.get_tool(name)
                 result = await tool.ainvoke(args)
@@ -209,7 +243,9 @@ def _build_tool_agent_graph(
                     isinstance(result, InterfaceAgentResult)
                     and result.kind in _TERMINAL_TOOL_KINDS
                 ):
-                    progress_lines.append(_format_terminal_tool_call_done(name, result))
+                    done_line = _format_terminal_tool_call_done(name, result)
+                    progress_lines.append(done_line)
+                    _emit_custom_progress(done_line)
                     terminal_result = result
                     logger.info(
                         "tool_call end name=%r terminal_kind=%r",
@@ -223,7 +259,9 @@ def _build_tool_agent_graph(
                     )
                     logger.error("tool_call failed name=%r error=%r", name, violation)
                     payload = {"error": str(violation)}
-                    progress_lines.append(_format_tool_call_failed(name, violation))
+                    failed_line = _format_tool_call_failed(name, violation)
+                    progress_lines.append(failed_line)
+                    _emit_custom_progress(failed_line)
                     tool_messages.append(
                         ToolMessage(
                             content=json.dumps(payload, ensure_ascii=False),
@@ -233,8 +271,28 @@ def _build_tool_agent_graph(
                     continue
                 if not isinstance(result, ToolObservation):
                     raise TypeError(f"Tool {name!r} did not return ToolObservation")
+                formatted_text = result.data.get("formatted_text")
+                if (
+                    result.status is ToolObservationStatus.OK
+                    and isinstance(formatted_text, str)
+                    and formatted_text.strip()
+                ):
+                    terminal_result = InterfaceAgentResult(
+                        kind=InterfaceAgentResultKind.CONVERSATIONAL,
+                        text=formatted_text,
+                    )
+                    done_line = _format_terminal_tool_call_done(name, terminal_result)
+                    progress_lines.append(done_line)
+                    _emit_custom_progress(done_line)
+                    logger.info(
+                        "tool_call end name=%r formatted_text_short_circuit",
+                        name,
+                    )
+                    continue
                 payload = tool_observation_to_dict(result)
-                progress_lines.append(_format_tool_call_done(name, result))
+                done_line = _format_tool_call_done(name, result)
+                progress_lines.append(done_line)
+                _emit_custom_progress(done_line)
                 logger.info(
                     "tool_call end name=%r status=%r",
                     name,
@@ -243,7 +301,11 @@ def _build_tool_agent_graph(
             except Exception as exc:
                 logger.error("tool_call failed name=%r error=%r", name, exc)
                 payload = {"error": str(exc)}
-                progress_lines.append(_format_tool_call_failed(name, exc))
+                failed_line = _format_tool_call_failed(name, exc)
+                progress_lines.append(failed_line)
+                _emit_custom_progress(failed_line)
+            finally:
+                _reset_progress_sink(progress_token)
             tool_messages.append(
                 ToolMessage(
                     content=json.dumps(payload, ensure_ascii=False),
@@ -311,4 +373,8 @@ def build_tool_agent_runner(
     return ToolAgentRunner(graph=graph, fallback_text=fallback_text)
 
 
-__all__ = ["ToolAgentRunner", "ToolCallModel", "build_tool_agent_runner"]
+__all__ = [
+    "ToolAgentRunner",
+    "ToolCallModel",
+    "build_tool_agent_runner",
+]

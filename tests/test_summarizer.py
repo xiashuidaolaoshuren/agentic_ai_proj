@@ -287,6 +287,177 @@ def test_summarize_juya_entry_uses_juya_source_display_name() -> None:
     assert digest.entries[0].source_name == "Juya"
 
 
+def test_summarize_huggingface_skips_generate_entry_fields_but_persists_stub_entry() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-stub",
+        url="https://huggingface.co/hf-stub",
+        title="Stub model",
+        collected_at=_fixed_now(),
+        raw_snippet="Model card excerpt.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={"trending_score": 50.0, "downloads_30d": 500},
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+
+    assert fake.calls == []
+    assert len(digest.entries) == 1
+    entry = digest.entries[0]
+    assert entry.source_kind is SourceKind.HUGGINGFACE
+    assert entry.title == "Stub model"
+    assert entry.summary == "Model card excerpt."
+    assert entry.why_it_matters == ""
+    assert entry.background_knowledge == ""
+    assert entry.follow_up_action is FollowUpAction.TRY
+
+
+def test_summarize_huggingface_only_does_not_require_model() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-only",
+        url="https://huggingface.co/hf-only",
+        title="Only HF",
+        collected_at=_fixed_now(),
+        raw_snippet="Snippet.",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=None,
+    )
+    assert len(digest.entries) == 1
+
+
+def test_summarize_huggingface_entry_uses_brand_source_display_name() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-1",
+        url="https://huggingface.co/models/hf-1",
+        title="Trending model",
+        collected_at=_fixed_now(),
+        author="meta-llama",
+        raw_snippet="Model card excerpt.",
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    assert digest.entries[0].source_name == "Hugging Face"
+
+
+def test_summarize_zhihu_entry_uses_brand_source_display_name() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.ZHIHU,
+        source_id="zh-1",
+        url="https://www.zhihu.com/question/1",
+        title="Practitioner insight",
+        collected_at=_fixed_now(),
+        author="some-author",
+        raw_snippet="Trade-off discussion.",
+        content_confidence=ConfidenceLevel.MEDIUM,
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    assert digest.entries[0].source_name == "Zhihu"
+
+
+def test_summarize_huggingface_context_skips_llm_summarize() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-ctx",
+        url="https://huggingface.co/models/hf-ctx",
+        title="Context model",
+        collected_at=_fixed_now(),
+        raw_snippet="Model card excerpt.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={"trending_score": 42.0, "downloads_30d": 1000},
+    )
+    fake = FakeChatModel()
+    summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    assert fake.calls == []
+
+
+def test_summarize_huggingface_entry_adds_popularity_not_quality_caveat() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="hf-caveat",
+        url="https://huggingface.co/models/hf-caveat",
+        title="Popular model",
+        collected_at=_fixed_now(),
+        raw_snippet="Model card excerpt.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={"trending_score": 999.0},
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    caveat = digest.entries[0].confidence_caveat or ""
+    assert "popularity" in caveat.lower()
+    assert "quality" in caveat.lower()
+
+
+def test_summarize_zhihu_thin_evidence_adds_discovery_caveat() -> None:
+    from ai_news_agent.summarizer import summarize_ranked_items
+
+    ni = NewsItem(
+        source=SourceKind.ZHIHU,
+        source_id="zh-thin",
+        url="https://www.zhihu.com/question/thin",
+        title="Thin Zhihu post",
+        collected_at=_fixed_now(),
+        raw_snippet="Short.",
+        content_confidence=ConfidenceLevel.LOW,
+        source_evidence={"evidence_text_length": 30, "relevance": 0.5},
+    )
+    fake = FakeChatModel()
+    digest = summarize_ranked_items(
+        [RankedItem(item=ni, score_total=1.0, selected=True)],
+        generated_at=_fixed_now(),
+        topics=["AI"],
+        model=fake,
+    )
+    caveat = digest.entries[0].confidence_caveat or ""
+    assert "discovery" in caveat.lower() or "thin" in caveat.lower()
+
+
 def test_summarize_ranked_items_primary_source_bilibili_first() -> None:
     from ai_news_agent.summarizer import summarize_ranked_items
 

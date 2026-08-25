@@ -3,14 +3,55 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
-from ai_news_agent.connectors.base import ConnectorResult, SourceConnector
+from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult, SourceConnector
 from ai_news_agent.graph.state import DigestGraphState, WorkflowError
 from ai_news_agent.sources import resolve_connector_names
+from ai_news_agent.progress import emit_progress
 
 
-def make_collect_sources_node(connectors: Sequence[SourceConnector]):
+def _format_connector_call_start(name: str) -> str:
+    return f"Calling {name}…"
+
+
+def _format_connector_call_done(name: str, item_count: int) -> str:
+    suffix = "result" if item_count == 1 else "results"
+    return f"Done {name}: Found {item_count} {name} {suffix}."
+
+
+def _format_connector_call_failed(name: str, exc: BaseException) -> str:
+    return f"Tool failed {name}: {exc}"
+
+
+def make_collect_sources_node(
+    connectors: Sequence[SourceConnector],
+    *,
+    on_progress: Callable[[str], None] | None = None,
+):
+    def _report(line: str) -> None:
+        if on_progress is not None:
+            on_progress(line)
+        emit_progress(line)
+
+    async def _collect_connector(
+        connector: SourceConnector,
+        request: ConnectorRequest,
+    ) -> tuple[SourceConnector, ConnectorResult | None, Exception | None]:
+        name = connector.name()
+        try:
+            result = await connector.collect(request)
+            if isinstance(result, ConnectorResult):
+                _report(_format_connector_call_done(name, len(result.items)))
+                return connector, result, None
+            if isinstance(result, Exception):
+                _report(_format_connector_call_failed(name, result))
+                return connector, None, result
+            raise TypeError(f"{name} collect returned unexpected type")
+        except Exception as exc:
+            _report(_format_connector_call_failed(name, exc))
+            return connector, None, exc
+
     async def collect_sources_node(state: DigestGraphState) -> dict[str, object]:
         request = state.get("connector_request")
         if request is None:
@@ -40,23 +81,28 @@ def make_collect_sources_node(connectors: Sequence[SourceConnector]):
                 ]
             }
 
+        _report("Collecting from sources…")
+
+        for connector in selected:
+            _report(_format_connector_call_start(connector.name()))
+
         results = await asyncio.gather(
-            *[c.collect(request) for c in selected], return_exceptions=True
+            *[_collect_connector(connector, request) for connector in selected]
         )
         items = []
         warnings = []
         errors = []
-        for connector, result in zip(selected, results, strict=True):
-            if isinstance(result, ConnectorResult):
+        for connector, result, error in results:
+            if result is not None:
                 items.extend(result.items)
                 warnings.extend(result.warnings)
                 continue
-            if isinstance(result, Exception):
+            if error is not None:
                 errors.append(
                     WorkflowError(
                         stage="collect",
-                        message=f"{connector.name()} raised {type(result).__name__}",
-                        detail=str(result),
+                        message=f"{connector.name()} raised {type(error).__name__}",
+                        detail=str(error),
                     )
                 )
         out: dict[str, object] = {}

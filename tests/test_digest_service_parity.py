@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import threading
 import time
 from http.client import HTTPConnection
@@ -30,8 +31,11 @@ def _start_fake_service(tmp_path: Path) -> tuple[int, object]:
     return server.port, server
 
 
+_GENERATED_LINE = re.compile(r"^.*Generated:.*$")
+
+
 def _strip_generated_timestamp(text: str) -> str:
-    lines = [line for line in text.splitlines() if not line.startswith("Generated:")]
+    lines = [line for line in text.splitlines() if not _GENERATED_LINE.match(line)]
     return "\n".join(lines).strip()
 
 

@@ -14,15 +14,18 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import ValidationError
 
 from ai_news_agent.storage import DigestStore
+from ai_news_agent.progress import emit_progress
 from ai_news_agent.tools.registry import ToolRegistry, build_tool_registry
 from ai_news_agent.tools.schemas import (
     DigestItemRankArgs,
+    HuggingFaceSearchArgs,
     InterfaceAgentResult,
     InterfaceAgentResultKind,
     RankOrSourceArgs,
     SearchArgs,
     ToolObservation,
     ToolObservationStatus,
+    ZhihuSearchArgs,
 )
 from test_tools_followup import _seed_full_followup_store
 
@@ -202,6 +205,7 @@ def test_generate_ai_news_digest_invokes_run_digest_once(tmp_path: Path) -> None
         model=model,
         store=store,
         on_stage=None,
+        on_progress=emit_progress,
         now_provider=None,
     )
 
@@ -299,6 +303,7 @@ def test_generate_ai_news_digest_has_no_args_schema(tmp_path: Path) -> None:
         model=run_digest_mock.await_args.kwargs["model"],
         store=store,
         on_stage=None,
+        on_progress=emit_progress,
         now_provider=None,
     )
 
@@ -308,6 +313,7 @@ def test_generate_ai_news_digest_passes_on_stage_to_run_digest_instrumented(
 ) -> None:
     from ai_news_agent.graph.state import DigestResult
     from ai_news_agent.models import Digest
+    from ai_news_agent.progress import emit_progress
     from ai_news_agent.request import DigestRequest
 
     store = DigestStore(tmp_path / "digest-on-stage.db")
@@ -355,6 +361,7 @@ def test_generate_ai_news_digest_passes_on_stage_to_run_digest_instrumented(
         model=run_digest_mock.await_args.kwargs["model"],
         store=store,
         on_stage=on_stage,
+        on_progress=emit_progress,
         now_provider=None,
     )
 
@@ -558,6 +565,110 @@ class _CountingConnector:
         return ConnectorResult(items=[], warnings=[], raw_count=0)
 
 
+class _CapturingConnector:
+    def __init__(self, *, name: str) -> None:
+        from ai_news_agent.connectors.base import ConnectorResult
+        from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
+
+        self._name = name
+        self.last_max_items: int | None = None
+        self._NewsItem = NewsItem
+        self._SourceKind = SourceKind
+        self._ConfidenceLevel = ConfidenceLevel
+        self._ConnectorResult = ConnectorResult
+
+    def name(self) -> str:
+        return self._name
+
+    async def collect(self, request: Any) -> Any:
+        from datetime import UTC, datetime
+
+        self.last_max_items = request.max_items
+        source_kind = self._SourceKind(self._name)
+        items = [
+            self._NewsItem(
+                source=source_kind,
+                source_id=f"{self._name}-{index}",
+                url=f"https://example.com/{self._name}/{index}",
+                title=f"{self._name.title()} item {index}",
+                collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+                content_confidence=self._ConfidenceLevel.HIGH,
+            )
+            for index in range(request.max_items)
+        ]
+        return self._ConnectorResult(
+            items=items,
+            warnings=[],
+            raw_count=len(items),
+        )
+
+
+class _CapturingConnectorFactory:
+    def __init__(self, *, name: str) -> None:
+        self.name = name
+        self.last_connector: _CapturingConnector | None = None
+
+    def __call__(self) -> _CapturingConnector:
+        connector = _CapturingConnector(name=self.name)
+        self.last_connector = connector
+        return connector
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "invoke_args"),
+    [
+        ("search_github_ai_news", {"query": "AI agents", "max_results": 10}),
+        ("search_bilibili_ai_news", {"query": "multimodal AI", "max_results": 10}),
+        ("search_juya_ai_news", {"query": "AI bulletin", "max_results": 10}),
+        (
+            "search_huggingface_trending_models",
+            {"discovery_mode": "global", "max_results": 10},
+        ),
+        (
+            "search_zhihu_practitioner_insights",
+            {"topics": ["RAG"], "max_results": 10},
+        ),
+    ],
+)
+def test_build_tool_registry_clamps_search_max_results_to_cap(
+    tmp_path: Path,
+    tool_name: str,
+    invoke_args: dict[str, object],
+) -> None:
+    store = DigestStore(tmp_path / f"clamp-{tool_name}.db")
+    store.init_schema()
+    github_factory = _CapturingConnectorFactory(name="github")
+    bilibili_factory = _CapturingConnectorFactory(name="bilibili")
+    juya_factory = _CapturingConnectorFactory(name="juya")
+    huggingface_factory = _CapturingConnectorFactory(name="huggingface")
+    zhihu_factory = _CapturingConnectorFactory(name="zhihu")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=github_factory,
+        bilibili_factory=bilibili_factory,
+        juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=zhihu_factory,
+        max_results_cap=5,
+    )
+
+    tool = registry.get_tool(tool_name)
+    obs = asyncio.run(tool.ainvoke(invoke_args))
+
+    factory_by_tool = {
+        "search_github_ai_news": github_factory,
+        "search_bilibili_ai_news": bilibili_factory,
+        "search_juya_ai_news": juya_factory,
+        "search_huggingface_trending_models": huggingface_factory,
+        "search_zhihu_practitioner_insights": zhihu_factory,
+    }
+    factory = factory_by_tool[tool_name]
+    assert factory.last_connector is not None
+    assert factory.last_connector.last_max_items == 5
+    assert isinstance(obs, ToolObservation)
+    assert obs.data["item_count"] == 5
+
+
 def test_build_tool_registry_github_search_uses_search_args_and_factory_per_call(
     tmp_path: Path,
 ) -> None:
@@ -630,6 +741,94 @@ def test_build_tool_registry_juya_search_uses_search_args_and_factory_per_call(
     asyncio.run(tool.ainvoke({"query": "daily news"}))
 
     assert juya_factory.calls == 2
+
+
+def test_build_tool_registry_huggingface_and_zhihu_factories_register_tools(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "hf-zhihu-registry.db")
+    store.init_schema()
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=_CountingConnectorFactory(name="huggingface"),
+        zhihu_factory=_CountingConnectorFactory(name="zhihu"),
+    )
+
+    names = registry.tool_names()
+    for expected in EXPECTED_TOOL_NAMES:
+        assert expected in names
+    assert "search_huggingface_trending_models" in names
+    assert "search_zhihu_practitioner_insights" in names
+
+
+def test_build_tool_registry_huggingface_search_uses_args_schema_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "huggingface-factory.db")
+    store.init_schema()
+    huggingface_factory = _CountingConnectorFactory(name="huggingface")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=_CountingConnectorFactory(name="zhihu"),
+    )
+
+    tool = registry.get_tool("search_huggingface_trending_models")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is HuggingFaceSearchArgs
+    assert tool.args_schema is not SearchArgs
+
+    asyncio.run(tool.ainvoke({"discovery_mode": "filtered", "search": "RAG"}))
+    asyncio.run(tool.ainvoke({"discovery_mode": "global"}))
+
+    assert huggingface_factory.calls == 2
+
+
+def test_build_tool_registry_zhihu_search_uses_args_schema_and_factory_per_call(
+    tmp_path: Path,
+) -> None:
+    store = DigestStore(tmp_path / "zhihu-factory.db")
+    store.init_schema()
+    zhihu_factory = _CountingConnectorFactory(name="zhihu")
+    registry = build_tool_registry(
+        store=store,
+        github_factory=_CountingConnectorFactory(name="github"),
+        bilibili_factory=_CountingConnectorFactory(name="bilibili"),
+        juya_factory=_CountingConnectorFactory(name="juya"),
+        huggingface_factory=_CountingConnectorFactory(name="huggingface"),
+        zhihu_factory=zhihu_factory,
+    )
+
+    tool = registry.get_tool("search_zhihu_practitioner_insights")
+    assert isinstance(tool, BaseTool)
+    assert tool.args_schema is ZhihuSearchArgs
+    assert tool.args_schema is not SearchArgs
+
+    asyncio.run(tool.ainvoke({"topics": ["RAG"]}))
+    asyncio.run(tool.ainvoke({"topics": ["agents"]}))
+
+    assert zhihu_factory.calls == 2
+
+
+def test_tools_package_surface_exports_huggingface_and_zhihu_search() -> None:
+    import ai_news_agent.tools as tools_package
+
+    assert "search_huggingface_trending_models" in tools_package.__all__
+    assert "search_zhihu_practitioner_insights" in tools_package.__all__
+
+    from ai_news_agent.tools import (
+        search_huggingface_trending_models,
+        search_zhihu_practitioner_insights,
+    )
+
+    assert callable(search_huggingface_trending_models)
+    assert callable(search_zhihu_practitioner_insights)
 
 
 def test_registry_module_has_no_legacy_tool_definition_or_handwritten_schemas() -> None:

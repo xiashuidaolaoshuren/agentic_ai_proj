@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.intent import parse_connector_names_from_message
-from ai_news_agent.request import DigestRequest, primary_source_from_names
+from ai_news_agent.request import DigestRequest, huggingface_fields_from_structured_sources, primary_source_from_names
 from ai_news_agent.sources import (
     DEFAULT_SOURCE_NAMES,
     normalize_source_names,
@@ -138,6 +138,22 @@ def validate_source_selector_consistency(req: DigestRequest) -> None:
             "Source selection is 'juya only' but the request includes Bilibili "
             "video/channel selectors. Remove the conflicting source toggle or selector."
         )
+    if names == ["huggingface"] and (
+        has_github_selector or has_bilibili_selector or has_juya_selector
+    ):
+        raise ValueError(
+            "Source selection is 'huggingface only' but the request includes "
+            "GitHub/Bilibili/Juya selectors. Remove the conflicting source toggle "
+            "or selector."
+        )
+    if names == ["zhihu"] and (
+        has_github_selector or has_bilibili_selector or has_juya_selector
+    ):
+        raise ValueError(
+            "Source selection is 'zhihu only' but the request includes "
+            "GitHub/Bilibili/Juya selectors. Remove the conflicting source toggle "
+            "or selector."
+        )
 
 
 def resolve_openclaw_digest_request(
@@ -200,6 +216,13 @@ def resolve_openclaw_digest_request(
     topics = normalize_topic_hint(topics_hint)
     if topics is not None:
         kw["topics"] = topics
+    kw.update(
+        huggingface_fields_from_structured_sources(
+            connector_names=connector_names,
+            topics=topics,
+            topics_explicit=topics is not None,
+        )
+    )
     req = DigestRequest(**kw)
     validate_source_selector_consistency(req)
     return req
@@ -261,6 +284,13 @@ def build_digest_request_from_hints(
         kw["output_style"] = output_style
     if output_language is not None:
         kw["output_language"] = output_language
+    kw.update(
+        huggingface_fields_from_structured_sources(
+            connector_names=sources,
+            topics=topics,
+            topics_explicit=topics is not None,
+        )
+    )
     return DigestRequest(**kw)
 
 

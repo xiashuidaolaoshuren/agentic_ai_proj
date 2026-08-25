@@ -36,6 +36,10 @@ For **Juya daily** digests (`https://daily.juya.uk/` only), rank-targeted follow
 selected issue into structured sub-news using persisted website markdown evidence. Return that output
 unchanged instead of improvising sub-items from memory.
 
+Hugging Face and Zhihu items, when present in the latest digest, use the same structured follow-up
+phrases (`show sources`, rank follow-up, caveats). Do not invent Hub quality or Zhihu freshness
+claims beyond the saved digest text.
+
 Do **not** use this skill for:
 
 - New digest generation (use `ai-news-digest`)

@@ -5,6 +5,7 @@ Amended: 2026-05-19 (Bilibili connector library refactor)
 Amended: 2026-05-21 (Milestone 2 LLM tool usage layer)
 Amended: 2026-06-29 (Milestone 4 inserted: Pydantic + LangChain @tool migration; former M4 -> M5, former M5 -> M6)
 Amended: 2026-08-11 (Source role split per `docs/adr/0001-source-role-split.md`; Milestone 5 sourcing refactor inserted; former M5 -> M6, former M6 -> M7)
+Amended: 2026-08-16 (Milestone 6 reframed as Hugging Face model momentum + Zhihu practitioner insight; arXiv/RSS deferred)
 
 ## Summary
 
@@ -16,7 +17,7 @@ OpenClaw is included as a planned Milestone 3 interface adapter, not as the MVP 
 
 - Learn core agentic AI engineering patterns through a scoped, useful project.
 - Support an on-demand chatbot workflow: ask for a digest, receive ranked summaries, and ask follow-up questions.
-- Keep each source's product job distinct: Juya = curated bulletin (default), GitHub = trending-repo ecosystem signal (opt-in), Bilibili = video learning signal (opt-in).
+- Keep each source's product job distinct: Juya = curated bulletin (default), GitHub = trending-repo ecosystem signal, Hugging Face = model momentum, Zhihu = practitioner insight, and Bilibili = video learning (all except Juya opt-in).
 - Preserve source URLs, collected metadata, ranking decisions, and generated outputs for debugging.
 - Keep the architecture modular so later sources and interfaces can be added without rewriting the core agent.
 - Add explicit LLM tool usage after the local digest MVP is stable, using existing connector and storage boundaries rather than duplicating source logic.
@@ -90,26 +91,30 @@ Current / target connectors (distinct roles; see ADR-0001):
 - **GitHub** connector — opt-in ecosystem signal; atomic item is a trending repo (stars × recency heuristic)
 - **Bilibili**-oriented connector — opt-in video metadata discovery
 
-Future connectors (Milestone 6+; do not absorb Juya into generic RSS):
+Milestone 6 target connectors:
 
-- arXiv
-- Hugging Face
-- RSS/blog sources
+- **Hugging Face** — opt-in model-momentum signal; atomic item is a Hub-native trending model
+- **Zhihu** — opt-in Chinese-language practitioner signal; atomic item is a traceable search result with practical lessons, trade-offs, or pitfalls
+
+Later connectors:
+
+- arXiv or another primary academic source
+- generic or curated RSS/blog sources
 - general web search
 
 ### Ranking Layer
 
-Scores and filters candidate items before summarization. Ranking should use **kind-aware** features (bulletin issues, trending repos, and videos are not one naive “newsiness” score). Ranking should consider:
+Scores and filters candidate items before summarization. Ranking should use **kind-aware** features (bulletin issues, trending repos, trending models, practitioner insights, and videos are not one naive “newsiness” score). Ranking should consider:
 
 - freshness
 - relevance to AI topics
 - source quality
-- popularity or engagement signal where available (for GitHub: stars combined with recent activity as a transparent trendy heuristic, not claimed star-delta until that data exists)
+- source-native momentum or relevance where available (GitHub stars plus activity; Hugging Face native trending score; Zhihu search relevance plus practitioner-lens match)
 - learning value for the user
 - metadata completeness
 - duplication with other candidates
 
-When a digest intentionally mixes SourceKinds, present **segmented sections by source** rather than a single interleaved top-N. Section order is **intent-first** (primary kind from the ask leads); otherwise fixed fallback **Juya → GitHub → Bilibili**, omitting empty sections.
+When a digest intentionally mixes SourceKinds, present **segmented sections by source** rather than a single interleaved top-N. Keep one overall `top_n` cap with no source quotas. Section order is **intent-first** (primary kind from the ask leads); otherwise fixed fallback **Juya → Hugging Face → GitHub → Zhihu → Bilibili**, omitting empty sections.
 
 Ranking should prefer verifiable items with clear source links and useful metadata.
 
@@ -175,7 +180,7 @@ After Milestone 5 source role split, add:
 
 - `search_juya_ai_news` (or equivalent): call the Juya connector through the shared connector request boundary.
 
-Future connector tools should be added when the corresponding connectors exist, for example `search_arxiv_ai_news`, `search_huggingface_ai_news`, and generic RSS/blog search tools after Milestone 6 source expansion.
+Milestone 6 adds `search_huggingface_trending_models` and `search_zhihu_practitioner_insights` through the same connector-tool boundary. arXiv and generic RSS/blog tools remain deferred.
 
 The Milestone 2 agent should use a bounded tool-calling loop: the model decides when to call a registered tool, a tool execution node runs the call, and the model then answers from the returned observations. Tool calls must have typed input schemas, stable tool names, concise descriptions, and outputs that can be serialized to JSON or markdown for the final answer.
 
@@ -185,7 +190,7 @@ Reliability constraints:
 - Tool failures should become user-facing caveats or partial-result warnings, not crashes.
 - Connector tools must preserve source URLs and confidence/caveat metadata.
 - Follow-up answers must stay grounded in tool results and saved digest traces.
-- The tool layer must not require OpenClaw, arXiv, Hugging Face, RSS, scheduling, vector search, or deployment.
+- The Milestone 2 tool layer must not require OpenClaw, future source connectors, scheduling, vector search, or deployment; Milestone 6 extends the same registry without changing that isolation.
 
 ## OpenClaw Integration
 
@@ -200,7 +205,7 @@ OpenClaw channel message
   -> OpenClaw Gateway
   -> registered tool: generate_ai_news_digest
   -> local or hosted Python agent API/CLI
-  -> selected connectors (default: Juya; else GitHub and/or Bilibili per cues)
+  -> selected connectors (default: Juya; opt-in source kinds selected from trusted cues)
   -> kind-aware ranked / segmented digest
   -> OpenClaw reply
 ```
@@ -221,21 +226,23 @@ Fallback adapter boundary:
 Source selection for CLI, Gradio, and OpenClaw maps to `DigestRequest.connector_names` via the shared registry in `ai_news_agent.sources`, with these product rules (ADR-0001):
 
 - **Bare digest** (no platform cue): run **Juya only**.
-- **Opt-in platforms**: add GitHub and/or Bilibili via explicit `--sources` / UI lists, clear intent phrases, or platform-specific targets (URLs, handles, “trending … repos”).
-- **Replace, don’t stack**: a clear GitHub/Bilibili cue **replaces** the Juya default unless Juya is also named or targeted.
+- **Opt-in platforms**: add GitHub, Hugging Face, Zhihu, and/or Bilibili via explicit `--sources` / UI lists, clear intent phrases, or supported platform-specific targets.
+- **Replace, don’t stack**: a clear opt-in source cue **replaces** the Juya default unless Juya is also named or targeted.
 - **Juya targets**: website URLs only (`https://daily.juya.uk/…`). The legacy `https://github.com/jujuyaya/juya-ai-daily` URL is **not** a Juya alias — reject with guidance to the website.
-- Allowed connector names include at least `juya`, `github`, and `bilibili`.
+- **Hugging Face intent**: distinguish global model trending from topic/task-filtered model trending.
+- **Zhihu intent**: target practitioner lessons, trade-offs, and pitfalls rather than generic Chinese web search.
+- Allowed connector names include `juya`, `huggingface`, `github`, `zhihu`, and `bilibili`.
 
 OpenClaw should not be required for MVP success.
 
 ## Data Flow
 
 1. User asks the chatbot for an AI digest.
-2. Agent interprets the request into topic, timeframe, source selection, language preferences, and optional source-targeting inputs (for example, Juya website URLs, Bilibili uploader handles/UIDs, manual video links, or GitHub topic/trending intent).
+2. Agent interprets the request into topic, timeframe, source selection, language preferences, and optional source-targeting inputs (for example, Juya website URLs, GitHub repo intent, Hugging Face global/topic model-trending intent, Zhihu practitioner intent, or Bilibili uploader/video targets).
 3. Selected connectors collect candidate items (default: Juya; otherwise the implied/named set).
-4. Candidates are normalized into a shared `NewsItem` format with the correct `SourceKind` (`juya` / `github` / `bilibili`).
+4. Candidates are normalized into a shared `NewsItem` format with the correct `SourceKind` and JSON-safe source-native evidence.
 5. Ranking layer applies kind-aware scoring, filters duplicates and weak items, and selects top candidates; mixed digests are segmented by source.
-6. Summarization layer creates source-language summaries, significance notes, and learning suggestions (including Juya editorial / issue deep-dive behavior where applicable).
+6. Summarization layer creates source-language summaries, significance notes, learning suggestions, and source-specific caveats.
 7. Storage layer saves source metadata, ranking decisions, and final digest.
 8. Follow-up chat uses the saved digest and source traces to answer questions.
 
@@ -243,7 +250,7 @@ OpenClaw should not be required for MVP success.
 
 ### Juya (default bulletin)
 
-Juya is a **first-class** curated daily AI bulletin, not a GitHub special case and not the Phase-6 generic RSS connector.
+Juya is a **first-class** curated daily AI bulletin, not a GitHub special case and not a generic RSS connector.
 
 - Canonical target: `https://daily.juya.uk/` (RSS + per-issue markdown enrichment when available).
 - `SourceKind.JUYA` / connector name `"juya"`.
@@ -362,13 +369,26 @@ Environment variables (see `.env.example`):
 - Wiring `get_subtitle` / `get_ai_conclusion` into summarization (deferred).
 - Replacing GitHub connector or adding new source types.
 
+### Hugging Face Model Momentum (Milestone 6)
+
+Hugging Face is an opt-in model-momentum source whose atomic item is a **trending model**. It supports global trending and user-topic/task-filtered trending, ranked primarily by the Hub's native `trending_score`; 30-day downloads, likes, activity, and relevance are supporting evidence rather than model-quality claims.
+
+Use the official `huggingface_hub` client. Preserve native model metrics as separately named source evidence rather than overloading GitHub stars or Bilibili views. Models only are in scope; datasets, Spaces, benchmarks, and adoption-velocity history are deferred.
+
+### Zhihu Practitioner Insight (Milestone 6)
+
+Zhihu is an opt-in Chinese-language practitioner source whose atomic item is one traceable **practitioner insight** returned by the official search API. Topic searches use bounded deterministic lenses for 实战/踩坑, 部署/成本, and 评测/对比, then deduplicate and rank by API relevance, lens/topic match, and returned-text completeness.
+
+Use only returned search evidence. Do not crawl linked pages, infer popularity or freshness, or turn thin snippets into unsupported takeaways. Timeframe requests receive an explicit caveat because this search contract is relevance-based.
+
+Detailed Milestone 6 behavior is specified in `docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md`.
+
 ### Future Sources
 
-After the **source role split** (Milestone 5) lands, expand connectors for:
+After Milestone 6, possible source expansion includes:
 
-- arXiv
-- Hugging Face
-- AI blogs and **generic** RSS feeds (Juya stays a dedicated bulletin connector; do not collapse it into generic RSS on day one)
+- arXiv or another primary academic source
+- AI blogs and generic/curated RSS feeds (Juya remains a dedicated bulletin)
 - general news or web search
 - Bilibili transcript enrichment via `Video.get_subtitle` / `get_ai_conclusion` (library already integrated at connector layer)
 - Optional GitHub enrichments: true star-velocity, release metadata on trending repos
@@ -388,7 +408,7 @@ NewsItem
 - published_at
 - fetched_at
 - language
-- raw_metadata
+- source_evidence (JSON-safe, source-native metrics and relevance evidence)
 - content_excerpt
 - transcript_available
 - confidence
@@ -422,10 +442,12 @@ Digest
 
 - Every digest item must include a source URL.
 - Connector failures should produce partial-results warnings instead of silent failure.
+- An explicitly selected failed source must not be silently replaced with Juya.
 - Missing transcript or content should be marked clearly.
 - Low-confidence summaries should state the reason for lower confidence.
 - Duplicate, stale, weakly sourced, or metadata-poor items should be penalized in ranking.
 - The agent should avoid claiming facts that are not present in collected data.
+- Source-native relevance or popularity must not be mislabeled as quality, freshness, or velocity.
 - Logs should preserve enough context to debug failed or low-quality runs.
 
 ## Testing And Evaluation
@@ -444,6 +466,14 @@ Milestone 2 tool-usage testing should include:
 - follow-up chat tests where the model chooses digest-inspection tools and answers from tool observations
 - failure-path tests where tool errors become caveats or partial-result warnings
 - smoke tests that keep the deterministic digest workflow passing unchanged
+
+Milestone 6 source-expansion testing should include:
+
+- mocked Hugging Face global/topic discovery, native-trend evidence, malformed responses, and failure warnings
+- mocked Zhihu deterministic lens expansion, bounded call count, dedupe, thin evidence, unsupported-timeframe caveat, and proof that linked pages are not fetched
+- source-evidence persistence compatibility and kind-aware mixed ranking/rendering
+- connector-tool, registry, CLI, Gradio, OpenClaw, and deterministic fake-mode parity
+- full regression coverage for existing source and follow-up behavior
 
 Manual quality evaluation should score early digests on:
 
@@ -506,12 +536,15 @@ Prerequisite for Milestone 6. Implements ADR-0001 / `CONTEXT.md` source language
 
 Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-velocity, release-as-primary.
 
-### Milestone 6: Broader Research Sources
+### Milestone 6: AI Ecosystem And Practitioner Signals
 
-- Add arXiv connector
-- Add Hugging Face connector
-- Add generic RSS/blog sources (without collapsing Juya into them)
-- Further improve ranking across additional source types
+- Add a Hugging Face connector for global or topic/task-filtered **trending models**
+- Add an official-API-only Zhihu connector for Chinese-language **practitioner insights**
+- Preserve source-native evidence for transparent kind-aware ranking and caveats
+- Expose both sources through the registry, workflow, tools, CLI, Gradio, and OpenClaw
+- Keep Juya-only defaults, one overall mixed `top_n`, and sectional presentation
+- Defer arXiv, generic RSS/blog sources, Hugging Face datasets/Spaces, and Zhihu crawling/direct-answer/hotlist capabilities
+- See ADR-0002 / `docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md`
 
 ### Milestone 7: Memory, Scheduling, And Deployment
 
@@ -525,11 +558,13 @@ Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-veloci
 - Local chatbot UI: Gradio.
 - Model access: use an OpenAI-compatible client abstraction configured by environment variables, so the first implementation can work with the user's available API provider.
 - Initial topic taxonomy: AI agents, model releases, RAG, multimodal AI, AI developer tools, and notable open-source repos.
-- Default source set: **Juya only** for bare digests; GitHub/Bilibili require explicit sources, clear intent, or platform-specific targets.
+- Default source set: **Juya only** for bare digests; Hugging Face, GitHub, Zhihu, and Bilibili require explicit sources, clear intent, or supported platform targets.
 - Juya strategy: website RSS + per-issue markdown enrichment from `daily.juya.uk`; no GitHub-repo alias.
 - GitHub query strategy: topic-scoped repository search scored as trending via stars × recency (transparent heuristic); README excerpt as evidence, not the story; releases optional later enrichment.
+- Hugging Face strategy: models only; native Hub `trending_score` first, with global and topic/task-filtered modes and transparent supporting metrics.
+- Zhihu strategy: official search API only; bounded deterministic practitioner lenses, relevance/lens/completeness ranking, no page fetch, no trend/freshness claim.
 - Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
-- Mixed-digest presentation: kind-aware scores + sectional output (intent-first; fallback Juya → GitHub → Bilibili).
-- Initial LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; follow-up inspection tools plus connector wrappers for Juya/GitHub/Bilibili as those connectors exist.
-- Default digest length: 5 ranked items per run (per section or overall as implemented for segmented digests), with the option to request a shorter or longer digest in chat.
+- Mixed-digest presentation: one overall `top_n`, kind-aware scores, no source quotas, and sectional output (intent-first; fallback Juya → Hugging Face → GitHub → Zhihu → Bilibili).
+- LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; connector wrappers follow each source's distinct product job.
+- Default digest length: 5 ranked items overall per run, with the option to request a shorter or longer digest in chat.
 

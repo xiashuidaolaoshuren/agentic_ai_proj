@@ -7,6 +7,7 @@ from dataclasses import replace
 from ai_news_agent.intent import parse_connector_names_from_message, parse_digest_intent
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.sources import normalize_source_names, resolve_connector_names
+from ai_news_agent.topics import DEFAULT_TOPICS
 
 _BILIBILI_CHANNEL_DEFAULT_TIMEFRAME = "last_7_days"
 
@@ -23,9 +24,10 @@ def _apply_bilibili_channel_timeframe_default(req: DigestRequest) -> DigestReque
 def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | None:
     """Infer connector scope from explicit URL/channel selectors (no DEFAULT fallback).
 
-    Returns names in canonical discovery order (github, bilibili, juya) or ``None``
-    when no platform selector is present. Mixed selectors produce a union, never
-    :data:`~ai_news_agent.sources.DEFAULT_SOURCE_NAMES`.
+    Returns names in canonical discovery order (github, bilibili, juya, huggingface)
+    or ``None`` when no platform selector is present. Mixed selectors produce a union,
+    never :data:`~ai_news_agent.sources.DEFAULT_SOURCE_NAMES`. Hugging Face discovery
+    fields (mode, search, or pipeline tag) count as a platform cue.
     """
     implied: list[str] = []
     if req.github_manual_urls or req.github_target_channels:
@@ -39,7 +41,24 @@ def _infer_connector_names_from_selectors(req: DigestRequest) -> list[str] | Non
         implied.append("bilibili")
     if req.juya_manual_urls:
         implied.append("juya")
+    if (
+        req.huggingface_discovery_mode is not None
+        or req.huggingface_search is not None
+        or req.huggingface_pipeline_tag is not None
+    ):
+        implied.append("huggingface")
     return implied if implied else None
+
+
+def _parsed_has_digest_fields(parsed: DigestRequest) -> bool:
+    return (
+        parsed.has_explicit_selectors()
+        or parsed.timeframe is not None
+        or parsed.huggingface_discovery_mode is not None
+        or parsed.huggingface_search is not None
+        or parsed.huggingface_pipeline_tag is not None
+        or list(parsed.topics) != list(DEFAULT_TOPICS)
+    )
 
 
 def resolve_digest_request(
@@ -59,7 +78,7 @@ def resolve_digest_request(
     ranking/rendering (T5).
     """
     parsed = parse_digest_intent(message)
-    if parsed.has_explicit_selectors() or parsed.timeframe is not None:
+    if _parsed_has_digest_fields(parsed):
         base = parsed
     else:
         base = DigestRequest()

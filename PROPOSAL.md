@@ -1,7 +1,7 @@
 # Project Proposal: AI News Research Agent
 
 ## 1. Introduction
-In the rapidly evolving field of Artificial Intelligence, staying updated with the latest model publications, applications, and development trends is a significant challenge. Information is scattered across various platforms such as GitHub, Bilibili, arXiv, and Hugging Face. This project proposes an agentic AI solution to automate the discovery, ranking, and summarization of AI news for personal learning and professional development.
+In the rapidly evolving field of Artificial Intelligence, staying updated with curated news, open-source projects, trending models, practitioner experience, and learning resources is a significant challenge. These signals are scattered across platforms such as Juya, GitHub, Hugging Face, Zhihu, and Bilibili. This project proposes an agentic AI solution to automate their discovery, kind-aware ranking, and summarization for personal learning and professional development.
 
 ## 2. Problem Statement
 Manual tracking of AI news is time-consuming and often leads to information overload. Users need a centralized, intelligent system that can:
@@ -15,7 +15,7 @@ The AI News Research Agent is a local-first, on-demand chatbot designed to be a 
 
 ### Key Features
 - **On-Demand Digest**: Generate a ranked AI news digest upon request.
-- **Multi-Source Discovery**: Distinct roles for Juya (default bulletin), GitHub (opt-in trending repos), and Bilibili (opt-in video), with modular expansion (arXiv, Hugging Face, generic RSS, etc.).
+- **Multi-Source Discovery**: Distinct roles for Juya (default bulletin), Hugging Face (opt-in trending models), GitHub (opt-in trending repos), Zhihu (opt-in practitioner insights), and Bilibili (opt-in video).
 - **Intelligent Ranking**: Kind-aware scores and segmented mixed digests; freshness, relevance, and learning value within each source kind.
 - **Contextual Summarization**: Summaries in the source's original language, including "why it matters" and background knowledge requirements.
 - **Interactive Follow-up**: A chatbot interface that allows users to ask questions about the generated digest.
@@ -25,7 +25,7 @@ The AI News Research Agent is a local-first, on-demand chatbot designed to be a 
 The system follows a modular architecture to ensure flexibility and maintainability:
 - **Chat Interface**: A Gradio-based local UI for user interaction.
 - **Agent Orchestrator**: Powered by **LangGraph** to manage stateful, multi-step workflows.
-- **Source Connectors**: Dedicated modules for Juya, GitHub, and Bilibili (distinct product jobs).
+- **Source Connectors**: Dedicated modules for Juya, Hugging Face, GitHub, Zhihu, and Bilibili, each with a distinct product job.
 - **Ranking & Summarization Layers**: Logic for filtering and generating content using LLMs.
 - **Storage Layer**: SQLite for local persistence of digests and metadata.
 - **Interface Adapters**: Designed to support future integrations like **OpenClaw**.
@@ -44,7 +44,7 @@ The system follows a modular architecture to ensure flexibility and maintainabil
 - **Milestone 3: OpenClaw Adapter**: Exposing the agent as a tool within the OpenClaw assistant gateway.
 - **Milestone 4: Pydantic Schema + LangChain `@tool` Registry Migration**: Migrate domain models and tool schemas to Pydantic v2 and the tool registry to LangChain's `@tool` workflow.
 - **Milestone 5: Source Role Split**: First-class Juya connector, GitHub trending-repo re-purpose, Juya-only default, kind-aware segmented ranking (see `docs/adr/0001-source-role-split.md`).
-- **Milestone 6: Source Expansion**: Adding connectors for arXiv, Hugging Face, and generic RSS feeds.
+- **Milestone 6: AI Ecosystem & Practitioner Signals**: Add Hugging Face model-momentum and Zhihu practitioner-insight connectors, with source-native ranking and full interface parity; defer arXiv and generic RSS (see `docs/adr/0002-milestone-6-ecosystem-and-practitioner-signals.md`).
 - **Milestone 7: Advanced Features**: Scheduled digests, long-term memory, and automated quality evaluation.
 
 ## 7. Expected Outcomes

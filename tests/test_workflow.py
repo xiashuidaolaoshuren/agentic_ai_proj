@@ -110,6 +110,60 @@ def test_digest_request_defaults_and_validation() -> None:
     assert empty.topics == []
 
 
+def test_digest_request_huggingface_fields_round_trip() -> None:
+    req = DigestRequest(
+        huggingface_discovery_mode="filtered",
+        huggingface_search="RAG",
+        huggingface_pipeline_tag="text-generation",
+    )
+    assert req.huggingface_discovery_mode == "filtered"
+    assert req.huggingface_search == "RAG"
+    assert req.huggingface_pipeline_tag == "text-generation"
+
+
+def test_digest_request_huggingface_fields_default_none() -> None:
+    req = DigestRequest()
+    assert req.huggingface_discovery_mode is None
+    assert req.huggingface_search is None
+    assert req.huggingface_pipeline_tag is None
+
+
+def test_digest_request_items_per_source_round_trip_and_validation() -> None:
+    req = DigestRequest(items_per_source=3)
+    assert req.items_per_source == 3
+    assert DigestRequest().items_per_source is None
+
+    with pytest.raises(ValueError, match="items_per_source"):
+        DigestRequest(items_per_source=0)
+
+
+def test_rank_items_node_forwards_items_per_source(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _spy_rank_items(items, **kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        from ai_news_agent.ranking import rank_items
+
+        return rank_items(items, **kwargs)
+
+    monkeypatch.setattr("ai_news_agent.graph.nodes.rank.rank_items", _spy_rank_items)
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], top_n=5, items_per_source=3)
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="gh-1",
+        url="https://github.com/o/r1",
+        title="Repo",
+        collected_at=now,
+        metadata_completeness=0.8,
+    )
+    node = make_rank_items_node(now_provider=lambda: now)
+    node({"request": req, "started_at": now, "collected_items": [item]})
+
+    assert captured.get("items_per_source") == 3
+
+
 def test_initial_state_shape() -> None:
     now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
     req = DigestRequest(topics=["RAG"])
@@ -283,6 +337,20 @@ def test_parse_request_node_maps_juya_manual_urls() -> None:
     assert cr.juya_manual_urls == req.juya_manual_urls
 
 
+def test_parse_request_node_maps_huggingface_fields() -> None:
+    req = DigestRequest(
+        topics=["RAG"],
+        huggingface_discovery_mode="filtered",
+        huggingface_search="RAG",
+        huggingface_pipeline_tag="text-generation",
+    )
+    out = parse_request_node({"request": req})
+    cr = out["connector_request"]
+    assert cr.huggingface_discovery_mode == "filtered"
+    assert cr.huggingface_search == "RAG"
+    assert cr.huggingface_pipeline_tag == "text-generation"
+
+
 def test_parse_request_node_missing_request_emits_error() -> None:
     out = parse_request_node({})
     assert "connector_request" not in out
@@ -312,6 +380,37 @@ def test_collect_sources_node_accumulates_items_and_warnings() -> None:
     assert len(out["warnings"]) == 1
 
 
+def test_collect_sources_node_emits_per_source_progress_lines() -> None:
+    conn_juya = _FakeConnector(
+        name="juya",
+        items=[_news_item("j1"), _news_item("j2")],
+    )
+    conn_hf = _FakeConnector(
+        name="huggingface",
+        items=[_news_item("hf1")],
+    )
+    progress: list[str] = []
+    req = DigestRequest(topics=["RAG"], connector_names=["juya", "huggingface"])
+    state: DigestGraphState = {
+        "request": req,
+        "connector_request": parse_request_node({"request": req})["connector_request"],
+    }
+    node = make_collect_sources_node(
+        [conn_juya, conn_hf],
+        on_progress=progress.append,
+    )
+
+    asyncio.run(node(state))
+
+    assert progress == [
+        "Collecting from sources…",
+        "Calling juya…",
+        "Calling huggingface…",
+        "Done juya: Found 2 juya results.",
+        "Done huggingface: Found 1 huggingface result.",
+    ]
+
+
 def test_collect_sources_node_filters_by_connector_names() -> None:
     conn_a = _FakeConnector(
         name="a",
@@ -333,6 +432,31 @@ def test_collect_sources_node_filters_by_connector_names() -> None:
     assert len(out["collected_items"]) == 2
     assert conn_a.calls == 0
     assert conn_b.calls == 1
+
+
+def test_collect_sources_node_filters_huggingface_and_zhihu_only() -> None:
+    conn_juya = _FakeConnector(name="juya", items=[_news_item("juya1")])
+    conn_github = _FakeConnector(name="github", items=[_news_item("gh1")])
+    conn_bilibili = _FakeConnector(name="bilibili", items=[_news_item("bili1")])
+    conn_huggingface = _FakeConnector(name="huggingface", items=[_news_item("hf1")])
+    conn_zhihu = _FakeConnector(name="zhihu", items=[_news_item("zh1")])
+    req = DigestRequest(topics=["RAG"], connector_names=["huggingface", "zhihu"])
+    state: DigestGraphState = {
+        "request": req,
+        "connector_request": parse_request_node({"request": req})["connector_request"],
+    }
+    node = make_collect_sources_node(
+        [conn_juya, conn_github, conn_bilibili, conn_huggingface, conn_zhihu]
+    )
+
+    out = asyncio.run(node(state))
+
+    assert len(out["collected_items"]) == 2
+    assert conn_juya.calls == 0
+    assert conn_github.calls == 0
+    assert conn_bilibili.calls == 0
+    assert conn_huggingface.calls == 1
+    assert conn_zhihu.calls == 1
 
 
 def test_collect_sources_node_catches_connector_exceptions() -> None:
@@ -1133,3 +1257,79 @@ def test_run_digest_streaming_emits_stage_labels_and_final_result(tmp_path) -> N
         )
     )
     assert finals[0].text == expected.text
+
+
+def test_run_digest_streaming_emits_per_source_collect_progress(tmp_path) -> None:
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], connector_names=["juya", "huggingface"])
+    store = DigestStore(tmp_path / "stream-per-source.db")
+    store.init_schema()
+    connectors = [
+        _FakeConnector(name="juya", items=[_news_item("j1"), _news_item("j2")]),
+        _FakeConnector(name="huggingface", items=[_news_item("hf1")]),
+    ]
+
+    async def collect():
+        events: list[tuple[str, bool, object | None]] = []
+        async for event in run_digest_streaming(
+            req,
+            connectors=connectors,
+            model=_FakeDigestModel(),
+            store=store,
+            now_provider=lambda: now,
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(collect())
+    progress = [text for text, done, _ in events if not done]
+
+    assert "Parsing request…" in progress
+    assert "Collecting from sources…" in progress
+    assert "Calling juya…" in progress
+    assert "Done juya: Found 2 juya results." in progress
+    assert "Calling huggingface…" in progress
+    assert "Done huggingface: Found 1 huggingface result." in progress
+    assert "Ranking candidates…" in progress
+
+
+def test_run_digest_streaming_raises_when_workflow_node_raises(tmp_path) -> None:
+    from unittest.mock import MagicMock, patch
+
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+    store = DigestStore(tmp_path / "stream-error.db")
+    store.init_schema()
+    connectors = [
+        _FakeConnector(name="github", items=[_news_item("r1")]),
+    ]
+
+    async def failing_astream(*_args, **_kwargs):
+        raise RuntimeError("stream failed")
+        yield  # pragma: no cover - makes this an async generator
+
+    mock_graph = MagicMock()
+    mock_graph.astream = failing_astream
+
+    async def collect() -> list[tuple[str, bool, object | None]]:
+        events: list[tuple[str, bool, object | None]] = []
+        with patch(
+            "ai_news_agent.graph.workflow.build_digest_graph",
+            return_value=mock_graph,
+        ):
+            async for event in run_digest_streaming(
+                req,
+                connectors=connectors,
+                model=_FakeDigestModel(),
+                store=store,
+                now_provider=lambda: now,
+            ):
+                events.append(event)
+        return events
+
+    with pytest.raises(RuntimeError, match="stream failed"):
+        asyncio.run(asyncio.wait_for(collect(), timeout=5))

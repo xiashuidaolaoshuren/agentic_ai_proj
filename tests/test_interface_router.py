@@ -298,6 +298,95 @@ def test_interface_router_forwards_juya_factory(tmp_path: Path) -> None:
     assert registry_calls[0]["juya_factory"] is juya_factory
 
 
+def test_interface_router_forwards_huggingface_and_zhihu_factories(tmp_path: Path) -> None:
+    from ai_news_agent.tools.interface_router import build_interface_tool_router
+
+    trusted_request = DigestRequest(topics=["AI agents"])
+    registry_calls: list[dict[str, object]] = []
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI agents"],
+    )
+    digest_result = DigestResult(
+        request=trusted_request,
+        digest=digest,
+        run_id=7,
+        markdown="# Digest",
+        text="Digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+
+    def spy_build_tool_registry(**kwargs: object):
+        registry_calls.append(kwargs)
+        return build_tool_registry(**kwargs)
+
+    gh, bh, juya_factory = _noop_factories()
+
+    def huggingface_factory() -> Any:
+        raise AssertionError("huggingface factory should not run")
+
+    def zhihu_factory() -> Any:
+        raise AssertionError("zhihu factory should not run")
+
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "generate_ai_news_digest",
+                        "args": {},
+                        "id": "call-digest",
+                    }
+                ],
+            ),
+            AIMessage(content="unused"),
+        ]
+    )
+
+    async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
+        raise AssertionError("workflow must not run")
+
+    router = build_interface_tool_router(
+        store=DigestStore(tmp_path / "hf-zhihu-factory-router.db"),
+        workflow_runner=_workflow,
+        streaming_workflow_runner=None,
+        tool_model=model,
+        digest_model=object(),
+        github_factory=gh,
+        bilibili_factory=bh,
+        juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=zhihu_factory,
+        build_connectors_fn=lambda _req: [],
+        interface_name="test",
+    )
+    router._store.init_schema()
+
+    with patch(
+        "ai_news_agent.tools.interface_router.build_tool_registry",
+        spy_build_tool_registry,
+    ), patch(
+        "ai_news_agent.tools.registry.run_digest_instrumented",
+        AsyncMock(return_value=digest_result),
+    ):
+        asyncio.run(
+            router.route(
+                message="Generate digest.",
+                digest_request=trusted_request,
+            )
+        )
+
+    assert len(registry_calls) == 1
+    assert registry_calls[0]["huggingface_factory"] is huggingface_factory
+    assert registry_calls[0]["zhihu_factory"] is zhihu_factory
+
+
 def test_intent_precedence_structured_wins_over_digest_keyword(tmp_path: Path) -> None:
     store, _run_id = _seed_full_followup_store(tmp_path)
     model = _FakeToolCallModel(
@@ -381,6 +470,139 @@ def test_digest_agent_fallback_runs_deterministic_workflow(tmp_path: Path) -> No
     assert result.run_id == 9
     assert len(workflow_calls) == 1
     assert workflow_calls[0] is trusted_request
+
+
+def test_interface_router_applies_session_items_per_source_on_digest_fallback(
+    tmp_path: Path,
+) -> None:
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI"],
+    )
+    digest_result = DigestResult(
+        request=DigestRequest(topics=["AI"]),
+        digest=digest,
+        run_id=9,
+        markdown="# Digest",
+        text="Fallback digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+    model = _FakeToolCallModel([AIMessage(content="Direct answer without tools.")])
+    workflow_calls: list[DigestRequest] = []
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        workflow_calls.append(req)
+        return digest_result
+
+    router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
+
+    asyncio.run(
+        router.route(
+            message="Give me today's AI digest",
+            session_connector_names=["juya", "huggingface"],
+            session_items_per_source=5,
+        )
+    )
+
+    assert len(workflow_calls) == 1
+    req = workflow_calls[0]
+    assert req.connector_names == ["juya", "huggingface"]
+    assert req.items_per_source == 5
+    assert req.max_items_per_source >= 5
+
+
+def test_interface_router_passes_max_results_cap_for_open_ended_search(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.tools.interface_router import build_interface_tool_router
+
+    registry_calls: list[dict[str, object]] = []
+
+    def spy_build_tool_registry(**kwargs: object) -> ToolRegistry:
+        registry_calls.append(dict(kwargs))
+        return build_tool_registry(**kwargs)
+
+    gh, bh, juya_factory = _noop_factories()
+    huggingface_factory_calls: list[int | None] = []
+
+    class _CapturingHFConnector:
+        def name(self) -> str:
+            return "huggingface"
+
+        async def collect(self, request: Any) -> Any:
+            from ai_news_agent.connectors.base import ConnectorResult
+            from ai_news_agent.models import ConfidenceLevel, NewsItem, SourceKind
+            from datetime import UTC, datetime
+
+            huggingface_factory_calls.append(request.max_items)
+            items = [
+                NewsItem(
+                    source=SourceKind.HUGGINGFACE,
+                    source_id=f"org/model-{index}",
+                    url=f"https://huggingface.co/org/model-{index}",
+                    title=f"Model {index}",
+                    collected_at=datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+                    content_confidence=ConfidenceLevel.HIGH,
+                )
+                for index in range(request.max_items)
+            ]
+            return ConnectorResult(items=items, warnings=[], raw_count=len(items))
+
+    def huggingface_factory() -> _CapturingHFConnector:
+        return _CapturingHFConnector()
+
+    model = _FakeToolCallModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_huggingface_trending_models",
+                        "args": {"discovery_mode": "global", "max_results": 10},
+                        "id": "call-hf-search",
+                    }
+                ],
+            ),
+        ]
+    )
+
+    store, _run_id = _seed_full_followup_store(tmp_path)
+
+    router = build_interface_tool_router(
+        store=store,
+        workflow_runner=AsyncMock(),
+        streaming_workflow_runner=None,
+        tool_model=model,
+        digest_model=object(),
+        github_factory=gh,
+        bilibili_factory=bh,
+        juya_factory=juya_factory,
+        huggingface_factory=huggingface_factory,
+        zhihu_factory=_noop_factories()[0],
+        build_connectors_fn=lambda _req: [],
+        interface_name="test",
+    )
+    router._store.init_schema()
+
+    with patch(
+        "ai_news_agent.tools.interface_router.build_tool_registry",
+        spy_build_tool_registry,
+    ):
+        result = asyncio.run(
+            router.route(
+                message="Show Hugging Face trending models",
+                session_items_per_source=5,
+            )
+        )
+
+    assert any(call.get("max_results_cap") == 5 for call in registry_calls)
+    assert huggingface_factory_calls
+    assert all(call == 5 for call in huggingface_factory_calls)
 
 
 def test_digest_agent_fallback_with_run_id_does_not_rerun_workflow(
@@ -891,11 +1113,29 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
     async def _workflow(_req: DigestRequest, _on_stage=None) -> DigestResult:
         raise AssertionError("workflow must not run")
 
+    async def _instrumented(
+        _req: DigestRequest,
+        *,
+        connectors,
+        model,
+        store,
+        on_stage=None,
+        on_progress=None,
+        now_provider=None,
+    ) -> DigestResult:
+        del connectors, model, store, on_stage, now_provider
+        if on_progress is not None:
+            on_progress("Parsing request…")
+            on_progress("Collecting from sources…")
+            on_progress("Calling juya…")
+            on_progress("Done juya: Found 2 juya results.")
+        return digest_result
+
     router = _build_router(tmp_path, workflow_runner=_workflow, tool_model=model)
 
     with patch(
         "ai_news_agent.tools.registry.run_digest_instrumented",
-        AsyncMock(return_value=digest_result),
+        AsyncMock(side_effect=_instrumented),
     ):
         events = asyncio.run(
             _collect_stream(
@@ -909,7 +1149,11 @@ def test_route_streaming_yields_progress_then_final_result(tmp_path: Path) -> No
     progress = [text for text, done, _payload in events if not done and text]
     assert progress == [
         "Calling generate_ai_news_digest…",
-        "Done generate_ai_news_digest: Digest text",
+        "Parsing request…",
+        "Collecting from sources…",
+        "Calling juya…",
+        "Done juya: Found 2 juya results.",
+        "Done generate_ai_news_digest: Digest ready.",
     ]
     done_result = events[-1][2]
     assert events[-1][0] == ""

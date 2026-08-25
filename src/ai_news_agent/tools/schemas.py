@@ -111,6 +111,42 @@ class SearchArgs(BaseModel):
     timeframe: str | None = None
 
 
+class HuggingFaceSearchArgs(BaseModel):
+    """LLM-facing args for Hugging Face trending-model search."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    discovery_mode: str = "global"
+    search: str | None = None
+    pipeline_tag: str | None = None
+    max_results: int = Field(default=5, ge=1)
+
+    @field_validator("discovery_mode")
+    @classmethod
+    def _discovery_mode_must_be_known(cls, value: str) -> str:
+        if value not in {"global", "filtered"}:
+            raise ValueError("discovery_mode must be 'global' or 'filtered'")
+        return value
+
+
+class ZhihuSearchArgs(BaseModel):
+    """LLM-facing args for Zhihu practitioner-insight search."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    topics: list[str]
+    max_results: int = Field(default=5, ge=1)
+
+    @field_validator("topics")
+    @classmethod
+    def _topics_must_include_non_blank(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("topics must not be empty")
+        if not any(topic.strip() for topic in value):
+            raise ValueError("topics must contain at least one non-blank topic")
+        return value
+
+
 class DigestItemRankArgs(BaseModel):
     """LLM-facing args for structured digest item-detail by rank (Milestone 4 T9)."""
 

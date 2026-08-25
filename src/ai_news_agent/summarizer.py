@@ -47,13 +47,17 @@ def summarize_ranked_items(
             timeframe=timeframe,
         )
 
-    if model is None:
+    needs_llm = any(row.item.source is not SourceKind.HUGGINGFACE for row in selected)
+    if needs_llm and model is None:
         raise ValueError("model is required when there are selected ranked_items to summarize")
 
     entries: list[DigestEntry] = []
     global_topics_payload = topics_list
 
     for r in selected:
+        if r.item.source is SourceKind.HUGGINGFACE:
+            entries.append(_build_huggingface_stub_entry(r.item))
+            continue
         ctx = _context_payload(
             r,
             global_topics_payload,
@@ -98,6 +102,7 @@ def _context_payload(
         "topic_matches": list(it.topic_matches),
         "content_confidence": it.content_confidence.value if it.content_confidence else "",
         "tags": list(it.tags),
+        "source_evidence": dict(it.source_evidence),
     }
     return payload
 
@@ -105,6 +110,10 @@ def _context_payload(
 def _source_display_name(item: NewsItem) -> str:
     if item.source is SourceKind.JUYA:
         return "Juya"
+    if item.source is SourceKind.HUGGINGFACE:
+        return "Hugging Face"
+    if item.source is SourceKind.ZHIHU:
+        return "Zhihu"
     if item.author:
         return str(item.author)
     if item.source is SourceKind.GITHUB:
@@ -134,6 +143,23 @@ def _normalize_text_field(val: Any, fallback: str) -> str:
     return s if s else fallback
 
 
+def _build_huggingface_stub_entry(item: NewsItem) -> DigestEntry:
+    summary = (
+        item.raw_snippet.strip()
+        if item.raw_snippet and item.raw_snippet.strip()
+        else item.title
+    )
+    return _build_digest_entry(
+        item,
+        {
+            "summary": summary,
+            "why_it_matters": "",
+            "background_knowledge": "",
+            "follow_up_action": "try",
+        },
+    )
+
+
 def _build_digest_entry(item: NewsItem, raw: dict[str, Any]) -> DigestEntry:
     fu = _normalize_follow_action(raw.get("follow_up_action"))
     caveat: str | None = None
@@ -155,6 +181,21 @@ def _build_digest_entry(item: NewsItem, raw: dict[str, Any]) -> DigestEntry:
     snippet = item.raw_snippet
     if snippet is None or not str(snippet).strip():
         caveat = _append_caveat(caveat, "No excerpt/snippet available; summary is metadata-only.")
+
+    if item.source is SourceKind.HUGGINGFACE:
+        caveat = _append_caveat(
+            caveat,
+            "Hub trending reflects popularity, not model quality or fitness for your use case.",
+        )
+
+    if item.source is SourceKind.ZHIHU:
+        ev = item.source_evidence or {}
+        text_len = int(ev.get("evidence_text_length") or 0)
+        if item.content_confidence is ConfidenceLevel.LOW or text_len < 80:
+            caveat = _append_caveat(
+                caveat,
+                "Zhihu result is discovery-only; thin evidence may limit summary depth.",
+            )
 
     return DigestEntry(
         source_kind=item.source,

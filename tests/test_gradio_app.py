@@ -117,7 +117,13 @@ def test_gradio_build_service_digest_stream_ephemeral_final(tmp_path) -> None:
 
 
 def test_gradio_source_toggle_choices_include_all_allowed_sources() -> None:
-    assert list(_SOURCE_TOGGLE_CHOICES) == ["juya", "github", "bilibili"]
+    assert list(_SOURCE_TOGGLE_CHOICES) == [
+        "juya",
+        "huggingface",
+        "github",
+        "zhihu",
+        "bilibili",
+    ]
 
 
 def test_gradio_default_source_toggle_value_is_juya_only() -> None:
@@ -128,10 +134,41 @@ def test_gradio_empty_sources_message_mentions_juya() -> None:
     assert "Juya" in _EMPTY_SOURCES_MESSAGE
     assert "GitHub" in _EMPTY_SOURCES_MESSAGE
     assert "Bilibili" in _EMPTY_SOURCES_MESSAGE
+    assert "Hugging Face" in _EMPTY_SOURCES_MESSAGE
+    assert "Zhihu" in _EMPTY_SOURCES_MESSAGE
 
 
 def test_gradio_examples_include_daily_juya_url() -> None:
     assert any("daily.juya.uk" in row[0] for row in _EXAMPLE_ROWS)
+
+
+def test_gradio_examples_include_huggingface_trending_prompt() -> None:
+    assert any(
+        "hugging face" in row[0].lower() and "trending" in row[0].lower()
+        for row in _EXAMPLE_ROWS
+    )
+
+
+def test_gradio_examples_include_zhihu_practitioner_prompt() -> None:
+    assert any(
+        "zhihu" in row[0].lower() and "practitioner" in row[0].lower()
+        for row in _EXAMPLE_ROWS
+    )
+
+
+def test_gradio_examples_map_prompts_to_matching_source_toggles() -> None:
+    by_prompt = {row[0]: list(row[1]) for row in _EXAMPLE_ROWS}
+
+    assert by_prompt["Give me today's AI digest"] == ["juya"]
+    assert by_prompt["Digest https://daily.juya.uk/"] == ["juya"]
+    assert by_prompt["Give me today's AI digest from github only"] == ["github"]
+    assert by_prompt["Digest https://github.com/langchain-ai/langgraph"] == ["github"]
+    assert by_prompt["Digest bilibili channel 285286947"] == ["bilibili"]
+    assert by_prompt["Show Hugging Face trending models"] == ["huggingface"]
+    assert by_prompt["Find Zhihu practitioner insights on RAG"] == ["zhihu"]
+    assert by_prompt["show sources"] == ["juya"]
+
+    assert not any("/issues/" in row[0] for row in _EXAMPLE_ROWS)
 
 
 def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path) -> None:
@@ -179,7 +216,7 @@ def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path
     demo = create_app(svc)
 
     assert demo is not None
-    assert len(_EXAMPLE_ROWS) == 6
+    assert len(_EXAMPLE_ROWS) == 8
 
     reply = asyncio.run(
         svc.handle_message_async(
@@ -290,6 +327,8 @@ def test_build_service_live_mode_wires_interface_tool_router(
     assert callable(router_calls[0]["workflow_runner"])
     assert callable(router_calls[0]["streaming_workflow_runner"])
     assert "juya_factory" in router_calls[0]
+    assert "huggingface_factory" in router_calls[0]
+    assert "zhihu_factory" in router_calls[0]
     assert getattr(service, "_interface_router", None) is fake_router
     assert not registry_called
     assert not agent_called
@@ -330,8 +369,12 @@ def test_build_service_live_mode_passes_juya_factory(tmp_path, monkeypatch: pyte
     _build_service(fake=False, db_path=tmp_path / "live-juya-factory.db")
 
     assert any(call.get("name") == "juya" for call in factory_calls)
+    assert any(call.get("name") == "huggingface" for call in factory_calls)
+    assert any(call.get("name") == "zhihu" for call in factory_calls)
     assert len(router_calls) == 1
     assert router_calls[0]["juya_factory"] is not None
+    assert router_calls[0]["huggingface_factory"] is not None
+    assert router_calls[0]["zhihu_factory"] is not None
 
 
 def test_build_service_live_closures_respect_connector_names(
@@ -464,3 +507,85 @@ def test_build_service_fake_mode_injects_tool_agent_runner(tmp_path) -> None:
     service = _build_service(fake=True, db_path=tmp_path / "fake-tool-agent.db")
 
     assert getattr(service, "_tool_agent_runner", None) is not None
+
+
+def test_create_app_exposes_items_per_source_number_control(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    original_number = gradio_app.gr.Number
+    original_chat_interface = gradio_app.gr.ChatInterface
+
+    def spy_number(**kwargs):
+        captured["number"] = dict(kwargs)
+        return original_number(**kwargs)
+
+    def spy_chat_interface(**kwargs):
+        captured["chat_interface"] = dict(kwargs)
+        return original_chat_interface(**kwargs)
+
+    monkeypatch.setattr(gradio_app.gr, "Number", spy_number)
+    monkeypatch.setattr(gradio_app.gr, "ChatInterface", spy_chat_interface)
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("unused")
+
+    store = DigestStore(tmp_path / "gradio-items-per-source.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+    create_app(svc)
+
+    number_kwargs = captured["number"]
+    assert number_kwargs["value"] == 5
+    assert number_kwargs["minimum"] == 1
+    assert number_kwargs["maximum"] == 20
+
+    additional_inputs = captured["chat_interface"]["additional_inputs"]
+    assert len(additional_inputs) == 2
+
+
+def test_respond_stream_passes_session_items_per_source(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream_kwargs: list[dict[str, object]] = []
+    captured_fn: dict[str, object] = {}
+    original_chat_interface = gradio_app.gr.ChatInterface
+
+    def spy_chat_interface(**kwargs):
+        captured_fn["fn"] = kwargs["fn"]
+        return original_chat_interface(**kwargs)
+
+    monkeypatch.setattr(gradio_app.gr, "ChatInterface", spy_chat_interface)
+
+    async def fake_runner(_req: DigestRequest) -> DigestResult:
+        raise AssertionError("unused")
+
+    store = DigestStore(tmp_path / "gradio-respond-stream-n.db")
+    store.init_schema()
+    svc = ChatService(store=store, workflow_runner=fake_runner)
+
+    async def recording_stream(message: str, **kwargs):  # noqa: ANN003
+        stream_kwargs.append({"message": message, **kwargs})
+        yield "ok\n"
+
+    svc.handle_message_streaming_async = recording_stream  # type: ignore[method-assign]
+
+    create_app(svc)
+    respond_stream = captured_fn["fn"]
+
+    async def collect() -> list[str]:
+        chunks: list[str] = []
+        async for chunk in respond_stream(
+            "Give me today's AI digest",
+            [],
+            ["juya", "huggingface"],
+            5,
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(collect())
+    assert chunks == ["ok\n"]
+    assert len(stream_kwargs) == 1
+    assert stream_kwargs[0]["session_items_per_source"] == 5
+    assert stream_kwargs[0]["session_connector_names"] == ["juya", "huggingface"]
