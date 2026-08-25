@@ -286,14 +286,15 @@ def test_search_huggingface_trending_models_includes_formatted_text_with_source_
     )
 
     formatted = obs.data["formatted_text"]
-    assert formatted.startswith("1. Trending Model")
-    assert "Source:" in formatted
-    assert "Link:" in formatted
-    assert "Hugging Face" in formatted
+    assert "| 🏆 Rank | 🤖 Model | 🔗 Link |" in formatted
+    assert "| 1 | Trending Model |" in formatted
+    assert "88" in formatted
+    assert "1200" in formatted
+    assert "42" in formatted
     assert "https://example.com/org/model" in formatted
-    assert "trending_score" in formatted
-    assert "downloads" in formatted
-    assert "likes" in formatted
+    assert not formatted.startswith("1. Trending Model")
+    assert "Source:" not in formatted
+    assert "Hub:" not in formatted
 
 
 def test_search_huggingface_trending_models_ok_is_json_safe() -> None:

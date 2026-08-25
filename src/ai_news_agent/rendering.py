@@ -15,6 +15,48 @@ _SECTION_LABELS: dict[SourceKind, str] = {
     SourceKind.BILIBILI: "Bilibili",
 }
 
+_SECTION_EMOJI: dict[SourceKind, str] = {
+    SourceKind.JUYA: "🗞️",
+    SourceKind.HUGGINGFACE: "🤗",
+    SourceKind.GITHUB: "🐙",
+    SourceKind.ZHIHU: "💬",
+    SourceKind.BILIBILI: "📺",
+}
+
+_DIGEST_TITLE = "📰 AI News Digest"
+
+_META_LABELS_MD: dict[str, str] = {
+    "generated": "🕒 Generated",
+    "timeframe": "📅 Timeframe",
+    "topics": "🏷️ Topics",
+}
+
+_META_LABELS_TEXT: dict[str, str] = {
+    "generated": "🕒 Generated",
+    "timeframe": "📅 Timeframe",
+    "topics": "🏷️ Topics",
+}
+
+_FIELD_LABELS_MD: dict[str, str] = {
+    "source": "📡 Source",
+    "link": "🔗 Link",
+    "summary": "📝 Summary",
+    "why_it_matters": "💡 Why it matters",
+    "background": "📚 Background",
+    "follow_up": "➡️ Follow-up",
+    "confidence": "⚠️ Confidence",
+}
+
+_FIELD_LABELS_TEXT: dict[str, str] = {
+    "source": "📡 Source",
+    "link": "🔗 Link",
+    "summary": "📝 Summary",
+    "why_it_matters": "💡 Why it matters",
+    "background": "📚 Background",
+    "follow_up": "➡️ Follow-up",
+    "confidence": "⚠️ Confidence",
+}
+
 _EDITORIAL_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("模型发布", ("model", "glm", "qwen", "llm", "开源", "release", "模型")),
     ("产品与应用", ("product", "app", "application", "产品", "应用", "邀测", "beta")),
@@ -56,6 +98,14 @@ def _is_mixed_digest(entries: list[DigestEntry]) -> bool:
     return len({entry.source_kind for entry in entries}) > 1
 
 
+def _section_display_label(kind: SourceKind) -> str:
+    base = _SECTION_LABELS.get(kind, str(kind.value).title())
+    emoji = _SECTION_EMOJI.get(kind)
+    if emoji:
+        return f"{emoji} {base}"
+    return base
+
+
 def _group_entries_by_section(
     entries: list[DigestEntry],
 ) -> list[tuple[str, list[DigestEntry]]]:
@@ -64,7 +114,7 @@ def _group_entries_by_section(
     for entry in entries:
         kind = entry.source_kind
         if kind not in kind_to_index:
-            label = _SECTION_LABELS.get(kind, str(kind.value).title())
+            label = _section_display_label(kind)
             kind_to_index[kind] = len(sections)
             sections.append((label, [entry]))
             continue
@@ -91,12 +141,14 @@ def _escape_markdown_inline(text: str) -> str:
 
 
 def _render_header_markdown(digest: Digest) -> str:
-    lines = ["# AI News Digest", ""]
-    meta: list[str] = [f"- **Generated:** {digest.generated_at.isoformat()}"]
+    lines = [f"# {_DIGEST_TITLE}", ""]
+    meta: list[str] = [
+        f"- **{_META_LABELS_MD['generated']}:** {digest.generated_at.isoformat()}"
+    ]
     if digest.timeframe is not None:
-        meta.append(f"- **Timeframe:** {digest.timeframe}")
+        meta.append(f"- **{_META_LABELS_MD['timeframe']}:** {digest.timeframe}")
     if digest.topics:
-        meta.append(f"- **Topics:** {', '.join(digest.topics)}")
+        meta.append(f"- **{_META_LABELS_MD['topics']}:** {', '.join(digest.topics)}")
     lines.append("\n".join(meta))
     return "\n".join(lines)
 
@@ -150,6 +202,68 @@ def _also_column(item: NewsItem | None) -> str:
     return ", ".join(titles)
 
 
+def _hf_table_header_lines() -> tuple[str, str]:
+    header = (
+        "| 🏆 Rank | 🤖 Model | 🔗 Link | 🔥 Trending | ⬇️ Downloads | "
+        "👍 Likes | 🧩 Pipeline | ➕ Also |"
+    )
+    separator = "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    return header, separator
+
+
+def _hf_table_row_line(
+    *,
+    rank: int,
+    title: str,
+    url: str,
+    evidence: dict[str, object],
+    also: str,
+    escape_markdown: bool,
+) -> str:
+    model_name = _escape_markdown_inline(title) if escape_markdown else title
+    if escape_markdown:
+        also = _escape_markdown_inline(also)
+    link = f"<{url}>" if escape_markdown else url
+    return (
+        "| "
+        + " | ".join(
+            [
+                str(rank),
+                model_name,
+                link,
+                _format_table_cell(evidence.get("trending_score")),
+                _format_table_cell(evidence.get("downloads_30d")),
+                _format_table_cell(evidence.get("likes")),
+                _format_table_cell(evidence.get("pipeline_tag")),
+                also,
+            ]
+        )
+        + " |"
+    )
+
+
+def _render_huggingface_comparison_table_from_items(
+    items: list[NewsItem],
+    *,
+    escape_markdown: bool,
+) -> str:
+    header, separator = _hf_table_header_lines()
+    rows: list[str] = [header, separator]
+    for rank, item in enumerate(items, start=1):
+        rows.append(
+            _hf_table_row_line(
+                rank=rank,
+                title=item.title,
+                url=item.url,
+                evidence=item.source_evidence,
+                also=_also_column(item),
+                escape_markdown=escape_markdown,
+            )
+        )
+    rows.extend(["", f"Note: {_HF_POPULARITY_CAVEAT}"])
+    return "\n".join(rows)
+
+
 def _render_huggingface_comparison_table(
     entries: list[DigestEntry],
     *,
@@ -158,35 +272,21 @@ def _render_huggingface_comparison_table(
     escape_markdown: bool,
 ) -> str:
     lookup = _news_items_by_key(news_items)
-    header = "| Rank | Model | Link | Trending | Downloads | Likes | Pipeline | Also |"
-    separator = "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    header, separator = _hf_table_header_lines()
     rows: list[str] = [header, separator]
     for entry in entries:
         item = lookup.get((entry.source_kind, entry.source_id))
         evidence = item.source_evidence if item is not None else {}
         rank = ranks[(entry.source_kind, entry.source_id)]
-        model_name = (
-            _escape_markdown_inline(entry.title) if escape_markdown else entry.title
-        )
-        also = _also_column(item)
-        if escape_markdown:
-            also = _escape_markdown_inline(also)
-        link = f"<{entry.source_url}>" if escape_markdown else entry.source_url
         rows.append(
-            "| "
-            + " | ".join(
-                [
-                    str(rank),
-                    model_name,
-                    link,
-                    _format_table_cell(evidence.get("trending_score")),
-                    _format_table_cell(evidence.get("downloads_30d")),
-                    _format_table_cell(evidence.get("likes")),
-                    _format_table_cell(evidence.get("pipeline_tag")),
-                    also,
-                ]
+            _hf_table_row_line(
+                rank=rank,
+                title=entry.title,
+                url=entry.source_url,
+                evidence=evidence,
+                also=_also_column(item),
+                escape_markdown=escape_markdown,
             )
-            + " |"
         )
     rows.extend(["", f"Note: {_HF_POPULARITY_CAVEAT}"])
     return "\n".join(rows)
@@ -203,15 +303,18 @@ def _render_entry_markdown(
     parts = [
         f"{hashes} {title}",
         "",
-        f"- **Source:** {entry.source_name} (`{entry.source_kind.value}`)",
-        f"- **Link:** <{entry.source_url}>",
-        f"- **Summary:** {_escape_markdown_inline(entry.summary)}",
-        f"- **Why it matters:** {_escape_markdown_inline(entry.why_it_matters)}",
-        f"- **Background:** {_escape_markdown_inline(entry.background_knowledge)}",
-        f"- **Follow-up:** {entry.follow_up_action.value}",
+        f"- **{_FIELD_LABELS_MD['source']}:** {entry.source_name} (`{entry.source_kind.value}`)",
+        f"- **{_FIELD_LABELS_MD['link']}:** <{entry.source_url}>",
+        f"- **{_FIELD_LABELS_MD['summary']}:** {_escape_markdown_inline(entry.summary)}",
+        f"- **{_FIELD_LABELS_MD['why_it_matters']}:** {_escape_markdown_inline(entry.why_it_matters)}",
+        f"- **{_FIELD_LABELS_MD['background']}:** {_escape_markdown_inline(entry.background_knowledge)}",
+        f"- **{_FIELD_LABELS_MD['follow_up']}:** {entry.follow_up_action.value}",
     ]
     if entry.confidence_caveat:
-        parts.append(f"- **Confidence:** {_escape_markdown_inline(entry.confidence_caveat)}")
+        parts.append(
+            f"- **{_FIELD_LABELS_MD['confidence']}:** "
+            f"{_escape_markdown_inline(entry.confidence_caveat)}"
+        )
     return "\n".join(parts)
 
 
@@ -285,12 +388,14 @@ def render_digest_markdown(
 
 
 def _render_header_text(digest: Digest) -> str:
-    lines = ["AI News Digest", ""]
-    lines.append(f"Generated: {digest.generated_at.isoformat()}")
+    lines = [_DIGEST_TITLE, ""]
+    lines.append(
+        f"{_META_LABELS_TEXT['generated']}: {digest.generated_at.isoformat()}"
+    )
     if digest.timeframe is not None:
-        lines.append(f"Timeframe: {digest.timeframe}")
+        lines.append(f"{_META_LABELS_TEXT['timeframe']}: {digest.timeframe}")
     if digest.topics:
-        lines.append(f"Topics: {', '.join(digest.topics)}")
+        lines.append(f"{_META_LABELS_TEXT['topics']}: {', '.join(digest.topics)}")
     return "\n".join(lines)
 
 
@@ -298,15 +403,15 @@ def _render_entry_text(entry: DigestEntry, *, display_rank: int | None = None) -
     lines = [
         f"{_format_display_rank_prefix(display_rank)}{entry.title}",
         "",
-        f"Source: {entry.source_name} ({entry.source_kind.value})",
-        f"Link: {entry.source_url}",
-        f"Summary: {entry.summary}",
-        f"Why it matters: {entry.why_it_matters}",
-        f"Background: {entry.background_knowledge}",
-        f"Follow-up: {entry.follow_up_action.value}",
+        f"{_FIELD_LABELS_TEXT['source']}: {entry.source_name} ({entry.source_kind.value})",
+        f"{_FIELD_LABELS_TEXT['link']}: {entry.source_url}",
+        f"{_FIELD_LABELS_TEXT['summary']}: {entry.summary}",
+        f"{_FIELD_LABELS_TEXT['why_it_matters']}: {entry.why_it_matters}",
+        f"{_FIELD_LABELS_TEXT['background']}: {entry.background_knowledge}",
+        f"{_FIELD_LABELS_TEXT['follow_up']}: {entry.follow_up_action.value}",
     ]
     if entry.confidence_caveat:
-        lines.append(f"Confidence: {entry.confidence_caveat}")
+        lines.append(f"{_FIELD_LABELS_TEXT['confidence']}: {entry.confidence_caveat}")
     return "\n".join(lines)
 
 
@@ -316,7 +421,10 @@ _HF_POPULARITY_CAVEAT = (
 
 
 def render_search_items_text(items: list[NewsItem]) -> str:
-    """Render connector search hits as a deterministic plain-text list."""
+    """Render connector search hits as a deterministic plain-text list or HF table."""
+    if items and all(item.source is SourceKind.HUGGINGFACE for item in items):
+        return _render_huggingface_comparison_table_from_items(items, escape_markdown=False)
+
     blocks: list[str] = []
     for rank, item in enumerate(items, start=1):
         source_name = _SECTION_LABELS.get(item.source, item.source.value)

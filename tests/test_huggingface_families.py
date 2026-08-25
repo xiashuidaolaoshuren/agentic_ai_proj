@@ -122,5 +122,6 @@ def test_render_search_items_text_includes_also_line_for_family_variants() -> No
 
     out = render_search_items_text([item])
 
-    assert "Also:" in out
+    assert "| 🏆 Rank | 🤖 Model | 🔗 Link |" in out
     assert "Qwen3.8-27B-GGUF" in out
+    assert "Also:" not in out

@@ -19,12 +19,16 @@ A source whose digest items are open-source momentum signals (trending repos), n
 _Avoid_: Primary news feed, Juya host, generic RSS, default always-on platform feed
 
 **Hugging Face (model momentum signal)**:
-A source for currently notable model repositories, using Hub-native momentum evidence such as trending score, recent downloads, likes, and activity rather than treating models as article-like news. In the **digest**, Hugging Face is presented as a **comparison table** of model families for quick Hub stat scanning; **search** keeps the numbered Source/Link list.
-_Avoid_: Primary news feed, calling popularity model quality, claiming precise adoption velocity from cumulative counters, article-like HF entry blocks in the digest, LLM paraphrase of Hub stats in the digest table
+A source for currently notable model repositories, using Hub-native momentum evidence such as trending score, recent downloads, likes, and activity rather than treating models as article-like news. **Search and digest** both present Hugging Face as a **comparison table** of model families for quick Hub stat scanning; other search tools keep the numbered Source/Link list.
+_Avoid_: Primary news feed, calling popularity model quality, claiming precise adoption velocity from cumulative counters, article-like HF entry blocks, LLM paraphrase of Hub stats in the HF table
 
 **Hugging Face comparison table**:
-The digest presentation for Hugging Face — one GFM table row per **model family** with Rank, Model, Link, Trending, Downloads (30d), Likes, Pipeline, and Also columns. Hub stats come from collected `NewsItem` evidence; no per-item LLM summarize. Mixed digests keep entry blocks for other sources; only the Hugging Face section is a table. **Display rank** in the Rank column is the global digest index.
-_Avoid_: `###` summary blocks for Hugging Face in the digest, treating each table row as a raw Hub repo rather than a family, restarting rank at 1 inside the Hugging Face section in mixed digests
+The Hugging Face presentation for **search and digest** — one GFM table row per **model family** with Rank, Model, Link, Trending, Downloads (30d), Likes, Pipeline, and Also columns (emoji-prefixed labels in the default renderer). Hub stats come from collected `NewsItem` evidence; digest HF skips per-item LLM summarize. Mixed digests keep entry blocks for other sources; only the Hugging Face section is a table. **Display rank** in the Rank column is the global digest index in mixed digests; search ranks are 1-based family order.
+_Avoid_: `###` summary blocks for Hugging Face, treating each table row as a raw Hub repo rather than a family, restarting rank at 1 inside the Hugging Face section in mixed digests
+
+**Digest presentation chrome**:
+Optional emoji prefixes on the default digest title, metadata lines, mixed-section labels, entry field labels, and HF table column headers — presentation only, not domain entities. Applies to default `render_digest_*` and HF search table output; the Chinese editorial Juya bulletin style is unchanged.
+_Avoid_: Emoji in editorial digest output, emoji on non-HF search lists, treating emoji labels as follow-up vocabulary
 
 **Zhihu (practitioner insight signal)**:
 A source for Chinese-language practitioner lessons, trade-offs, and pitfalls about AI topics, distinct from primary academic evidence.
