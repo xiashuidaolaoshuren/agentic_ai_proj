@@ -131,26 +131,28 @@ async def run_digest_streaming(
 
     async def pump_graph() -> None:
         nonlocal final_state
-        async for mode, chunk in graph.astream(
-            initial_state(request, now=start_ts),
-            stream_mode=["updates", "values"],
-        ):
-            if mode == "values":
-                final_state = chunk
-                continue
-            for node_name in chunk:
-                if (
-                    node_name not in _STAGE_LABELS
-                    or node_name in seen_nodes
-                    or node_name in _NODES_WITH_INLINE_COLLECT_PROGRESS
-                ):
+        try:
+            async for mode, chunk in graph.astream(
+                initial_state(request, now=start_ts),
+                stream_mode=["updates", "values"],
+            ):
+                if mode == "values":
+                    final_state = chunk
                     continue
-                seen_nodes.add(node_name)
-                label = _STAGE_LABELS[node_name]
-                if label not in yielded:
-                    yielded.add(label)
-                    progress_queue.put_nowait(label)
-        progress_queue.put_nowait(None)
+                for node_name in chunk:
+                    if (
+                        node_name not in _STAGE_LABELS
+                        or node_name in seen_nodes
+                        or node_name in _NODES_WITH_INLINE_COLLECT_PROGRESS
+                    ):
+                        continue
+                    seen_nodes.add(node_name)
+                    label = _STAGE_LABELS[node_name]
+                    if label not in yielded:
+                        yielded.add(label)
+                        progress_queue.put_nowait(label)
+        finally:
+            progress_queue.put_nowait(None)
 
     pump_task = asyncio.create_task(pump_graph())
     try:

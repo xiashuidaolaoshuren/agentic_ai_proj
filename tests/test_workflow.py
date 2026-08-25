@@ -1293,3 +1293,43 @@ def test_run_digest_streaming_emits_per_source_collect_progress(tmp_path) -> Non
     assert "Calling huggingface…" in progress
     assert "Done huggingface: Found 1 huggingface result." in progress
     assert "Ranking candidates…" in progress
+
+
+def test_run_digest_streaming_raises_when_workflow_node_raises(tmp_path) -> None:
+    from unittest.mock import MagicMock, patch
+
+    from ai_news_agent.graph.workflow import run_digest_streaming
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+    store = DigestStore(tmp_path / "stream-error.db")
+    store.init_schema()
+    connectors = [
+        _FakeConnector(name="github", items=[_news_item("r1")]),
+    ]
+
+    async def failing_astream(*_args, **_kwargs):
+        raise RuntimeError("stream failed")
+        yield  # pragma: no cover - makes this an async generator
+
+    mock_graph = MagicMock()
+    mock_graph.astream = failing_astream
+
+    async def collect() -> list[tuple[str, bool, object | None]]:
+        events: list[tuple[str, bool, object | None]] = []
+        with patch(
+            "ai_news_agent.graph.workflow.build_digest_graph",
+            return_value=mock_graph,
+        ):
+            async for event in run_digest_streaming(
+                req,
+                connectors=connectors,
+                model=_FakeDigestModel(),
+                store=store,
+                now_provider=lambda: now,
+            ):
+                events.append(event)
+        return events
+
+    with pytest.raises(RuntimeError, match="stream failed"):
+        asyncio.run(asyncio.wait_for(collect(), timeout=5))
