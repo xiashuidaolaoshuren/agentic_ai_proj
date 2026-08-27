@@ -118,7 +118,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 — Document family card and insight card on existing phrases
 
-- [ ] **Do:** Update the OpenClaw follow-up skill and README structured-follow-up section so rank follow-up on Hugging Face / Zhihu is described as persist-only family / insight cards using the same phrases. Keep Juya deep-dive examples. Do not add live-fetch instructions or new CLI flags.
+- [x] **Do:** Update the OpenClaw follow-up skill and README structured-follow-up section so rank follow-up on Hugging Face / Zhihu is described as persist-only family / insight cards using the same phrases. Keep Juya deep-dive examples. Do not add live-fetch instructions or new CLI flags.
 
 - **Blocked by:** T3
 - **Plan mode:** skip

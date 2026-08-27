@@ -32,13 +32,19 @@ through `ai-news-digest`, including:
 **Prerequisite:** a digest must already exist in the service database. Run
 `ai-news-digest` first if the user has not generated a digest in this session.
 
-For **Juya daily** digests (`https://daily.juya.uk/` only), rank-targeted follow-up expands the
-selected issue into structured sub-news using persisted website markdown evidence. Return that output
-unchanged instead of improvising sub-items from memory.
+Rank-targeted follow-up uses the **same phrases** (`follow up on item 1`, `#2`, `the second one`,
+`Digest the first news`) and the digest's global display rank. Return stdout unchanged. Kind-specific
+cards are **persist-only** (no Hub re-fetch, no Zhihu page crawl, no new tools):
 
-Hugging Face and Zhihu items, when present in the latest digest, use the same structured follow-up
-phrases (`show sources`, rank follow-up, caveats). Do not invent Hub quality or Zhihu freshness
-claims beyond the saved digest text.
+- **Juya daily** (`https://daily.juya.uk/` only): **issue deep-dive** — sub-news from persisted
+  website markdown. Do not improvise sub-items from memory.
+- **Hugging Face**: **family card** — representative title, Hub stats, Also variants, publisher,
+  snippet, and the popularity-not-quality caveat from saved evidence. Do not invent Hub quality.
+- **Zhihu**: **practitioner-insight card** — evidence-first snippet, lens, author/source label,
+  搜索相关性 as official-search relevance (never 热度). Do not invent freshness or stitch other hits.
+- Other kinds (GitHub, Bilibili): generic digest-item reprint.
+
+Show sources, study-first, and caveats wording stay unchanged.
 
 Do **not** use this skill for:
 
