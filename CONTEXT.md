@@ -62,6 +62,32 @@ _Avoid_: Raw Hub list index as the user-facing number, per-section rank that dis
 A later optional enrichment on a GitHub item (what shipped), not the primary digest row.
 _Avoid_: Using releases as the only way a repo can appear in the digest
 
+### Follow-up
+
+**Follow-up action**:
+The suggested next learning move stored on a digest row (read, watch, try, or build). It is not chat follow-up.
+_Avoid_: Structured follow-up, rank deep-dive, “follow-up section”
+
+**Structured follow-up**:
+Deterministic inspection of the latest saved digest via fixed phrases: show sources, study first, caveats, and rank. OpenClaw supports only this; Gradio also allows open-ended Q&A.
+_Avoid_: New OpenClaw path strings, treating open-ended chat as structured follow-up, inventing Hub quality or Zhihu freshness beyond saved evidence
+
+**Rank deep-dive**:
+The structured reply for one 1-based **display rank**. Kind-specific cards use only evidence already saved with that digest row: Juya **issue deep-dive**, Hugging Face **family card**, Zhihu **practitioner-insight card**; other kinds stay a generic entry reprint.
+_Avoid_: Live re-fetch on rank follow-up, a digest-renderer “follow-up section”, giving Also variants their own ranks, synthesizing multiple Zhihu results, changing show-sources / study-first / caveats in the same change
+
+**Issue deep-dive**:
+The Juya rank deep-dive — one daily issue expanded into sub-news from persisted website markdown. Chinese chrome.
+_Avoid_: Inventing sub-items not in persisted evidence, using this shape for Hugging Face families or Zhihu search snippets
+
+**Hugging Face family card**:
+The Hugging Face rank deep-dive — the **model family** at that display rank: representative, comparison-table Hub stats, Also variants, publisher, card snippet, and the popularity-not-quality caveat. English chrome matching the comparison table.
+_Avoid_: Repeating only the table with no snippet, dumping every Hub key, live Hub re-fetch, treating the row as a raw repo rather than a family
+
+**Zhihu practitioner-insight card**:
+The Zhihu rank deep-dive — that rank’s single **practitioner insight**: Chinese chrome, evidence-first snippet/lens/author, 搜索相关性 labeled as search relevance not 热度, optional labeled LLM 摘要 / 为什么值得看, thin-evidence and no-freshness caveats.
+_Avoid_: Related-insight synthesis, parsing a snippet as Juya sub-news, fetching the linked page, treating relevance as 热度 or trending
+
 ### Shared
 
 **NewsItem**:

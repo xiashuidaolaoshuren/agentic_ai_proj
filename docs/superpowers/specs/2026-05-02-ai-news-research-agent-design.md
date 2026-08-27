@@ -6,6 +6,7 @@ Amended: 2026-05-21 (Milestone 2 LLM tool usage layer)
 Amended: 2026-06-29 (Milestone 4 inserted: Pydantic + LangChain @tool migration; former M4 -> M5, former M5 -> M6)
 Amended: 2026-08-11 (Source role split per `docs/adr/0001-source-role-split.md`; Milestone 5 sourcing refactor inserted; former M5 -> M6, former M6 -> M7)
 Amended: 2026-08-16 (Milestone 6 reframed as Hugging Face model momentum + Zhihu practitioner insight; arXiv/RSS deferred)
+Amended: 2026-08-27 (Milestone 6.5: persist-only Hugging Face family card and Zhihu practitioner-insight card on rank follow-up)
 
 ## Summary
 
@@ -546,6 +547,14 @@ Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-veloci
 - Defer arXiv, generic RSS/blog sources, Hugging Face datasets/Spaces, and Zhihu crawling/direct-answer/hotlist capabilities
 - See ADR-0002 / `docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md`
 
+### Milestone 6.5: Hugging Face And Zhihu Rank Deep-Dive
+
+- Specialize structured **rank** follow-up for Hugging Face and Zhihu using persisted evidence only (Juya pattern, not Bilibili live enrich)
+- Hugging Face: **family card** at the same **display rank** as the comparison-table row
+- Zhihu: one **practitioner-insight card**, evidence-first, no page fetch, no multi-result synthesis
+- Keep existing phrases and OpenClaw `/followup` path taxonomy; do not reshape tool JSON or sources/study-first/caveats
+- See ADR-0005 / Milestone 6.5 section of `docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md`
+
 ### Milestone 7: Memory, Scheduling, And Deployment
 
 - Add scheduled daily or weekly digest generation
@@ -561,8 +570,8 @@ Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-veloci
 - Default source set: **Juya only** for bare digests; Hugging Face, GitHub, Zhihu, and Bilibili require explicit sources, clear intent, or supported platform targets.
 - Juya strategy: website RSS + per-issue markdown enrichment from `daily.juya.uk`; no GitHub-repo alias.
 - GitHub query strategy: topic-scoped repository search scored as trending via stars × recency (transparent heuristic); README excerpt as evidence, not the story; releases optional later enrichment.
-- Hugging Face strategy: models only; native Hub `trending_score` first, with global and topic/task-filtered modes and transparent supporting metrics.
-- Zhihu strategy: official search API only; bounded deterministic practitioner lenses, relevance/lens/completeness ranking, no page fetch, no trend/freshness claim.
+- Hugging Face strategy: models only; native Hub `trending_score` first, with global and topic/task-filtered modes and transparent supporting metrics. Rank follow-up is a persist-only **family card** (Milestone 6.5), not live Hub re-fetch.
+- Zhihu strategy: official search API only; bounded deterministic practitioner lenses, relevance/lens/completeness ranking, no page fetch, no trend/freshness claim. Rank follow-up is a persist-only **practitioner-insight card** (Milestone 6.5).
 - Bilibili strategy: `bilibili-api-python` for keyword search (with optional timeframe and TECH/KNOWLEDGE zone filters), uploader feeds, and manual BV/URL resolution; metadata-first, no transcript in digest MVP; optional `BILIBILI_*` credentials for anti-bot resilience.
 - Mixed-digest presentation: one overall `top_n`, kind-aware scores, no source quotas, and sectional output (intent-first; fallback Juya → Hugging Face → GitHub → Zhihu → Bilibili).
 - LLM tool strategy: use structured tool schemas with stable names and a bounded LangGraph tool-calling loop; connector wrappers follow each source's distinct product job.
