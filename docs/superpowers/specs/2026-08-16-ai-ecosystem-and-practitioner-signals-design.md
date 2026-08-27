@@ -1,7 +1,7 @@
 # Milestone 6: AI Ecosystem And Practitioner Signals
 
 Date: 2026-08-16  
-Amended: 2026-08-27 (Milestone 6.5: Hugging Face and Zhihu rank deep-dive)  
+Amended: 2026-08-27 (Milestone 6.5: Hugging Face and Zhihu rank deep-dive; HF collect-time card excerpt for family-card Snippet)  
 Status: approved design
 
 ## Summary
@@ -53,7 +53,7 @@ Alternatives rejected:
 
 ### Collection
 
-Use the official `huggingface_hub` client and `HfApi.list_models`. The Hub supports `trending_score` sorting and exposes model metadata including 30-day downloads, all-time downloads, likes, creation and modification times, pipeline tag, tags, library name, gated status, and native trending score.
+Use the official `huggingface_hub` client and `HfApi.list_models`. Collection requests `cardData=True` on the existing collect window so model-card summary or description can be saved to `NewsItem.raw_snippet` for family-card rank follow-up (persist-only at rank time; ADR-0005 unchanged). The Hub supports `trending_score` sorting and exposes model metadata including 30-day downloads, all-time downloads, likes, creation and modification times, pipeline tag, tags, library name, gated status, and native trending score.
 
 The connector has two deterministic discovery modes:
 
@@ -68,7 +68,7 @@ Each model becomes one `NewsItem` with:
 
 - `source=SourceKind.HUGGINGFACE`
 - model id, canonical Hub URL, author, task/library tags, and last-modified time
-- model-card excerpt when returned through the supported API
+- model-card excerpt in `raw_snippet` when Hub returns card summary or description via `cardData=True` at collect time (no README fetch)
 - `source_evidence` values for `trending_score`, `downloads_30d`, `downloads_all_time`, `likes`, `pipeline_tag`, `library_name`, `gated`, and discovery mode
 
 Missing optional fields do not reject a model. Missing native trending score lowers ranking confidence and is exposed as a caveat.
@@ -214,7 +214,7 @@ English chrome matching the comparison table. Fields:
 - Trending, Downloads (30d), Likes, Pipeline
 - Also variants when `family_variants` was persisted
 - publisher when present
-- card snippet when present
+- card snippet from saved `raw_snippet` when Hub returned summary/description at digest collection (no live Hub fetch on rank follow-up)
 - always-on popularity-not-quality caveat
 
 Omit empty why/background, gated, library, all-time downloads, discovery mode, and `follow_up_action`. Empty Also is omitted, not printed as “Also: none”.

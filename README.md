@@ -334,7 +334,7 @@ uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 Rank-targeted follow-up uses those same phrases and the latest digest **display rank** (global list order). It is persist-only: no Hub re-fetch and no Zhihu page crawl. Kind-specific cards:
 
 - **Juya** daily issues: **issue deep-dive** with sub-news from persisted website markdown
-- **Hugging Face**: **family card** from saved Hub stats / Also variants / snippet (Hub trending is popularity, not quality)
+- **Hugging Face**: **family card** from saved Hub stats / Also variants / snippet (Hub card text saved at digest collection, not fetched live on follow-up; Hub trending is popularity, not quality)
 - **Zhihu**: **practitioner-insight card** from saved search evidence (搜索相关性 is official-search relevance, not 热度)
 - **GitHub / Bilibili**: generic digest-item reprint
 

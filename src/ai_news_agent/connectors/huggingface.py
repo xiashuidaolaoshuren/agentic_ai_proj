@@ -46,6 +46,7 @@ class HuggingFaceConnector:
             list_kwargs: dict[str, Any] = {
                 "sort": "trending_score",
                 "limit": collect_limit,
+                "cardData": True,
             }
             if request.huggingface_search:
                 list_kwargs["search"] = request.huggingface_search
@@ -56,6 +57,7 @@ class HuggingFaceConnector:
             list_kwargs = {
                 "sort": "trending_score",
                 "limit": collect_limit,
+                "cardData": True,
             }
 
         api = self._get_api()

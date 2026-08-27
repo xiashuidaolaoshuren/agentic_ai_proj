@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from ai_news_agent.connectors.base import ConnectorRequest
@@ -101,7 +102,9 @@ def test_collect_global_trending_maps_models_to_news_items() -> None:
         assert out.raw_count == 2
         assert len(out.items) == 2
         assert all(i.source is SourceKind.HUGGINGFACE for i in out.items)
-        assert api.list_models_calls == [{"sort": "trending_score", "limit": 40}]
+        assert api.list_models_calls == [
+            {"sort": "trending_score", "limit": 40, "cardData": True}
+        ]
         assert api.list_datasets_called is False
         assert api.list_spaces_called is False
 
@@ -148,7 +151,7 @@ def test_collect_filtered_search_passes_search_and_records_discovery_mode() -> N
         assert len(out.items) == 1
         assert out.items[0].source_evidence["discovery_mode"] == "filtered"
         assert api.list_models_calls == [
-            {"sort": "trending_score", "limit": 20, "search": "RAG"}
+            {"sort": "trending_score", "limit": 20, "search": "RAG", "cardData": True}
         ]
 
     asyncio.run(main())
@@ -176,8 +179,40 @@ def test_collect_filtered_pipeline_tag_passes_pipeline_tag() -> None:
                 "sort": "trending_score",
                 "limit": 20,
                 "pipeline_tag": "text-generation",
+                "cardData": True,
             }
         ]
+
+    asyncio.run(main())
+
+
+def test_collect_maps_card_summary_to_raw_snippet() -> None:
+    model = _model_info_from_dict(
+        {
+            "id": "org/demo-model",
+            "author": "org",
+            "downloads": 1000,
+            "likes": 10,
+            "trending_score": 50,
+            "pipeline_tag": "text-generation",
+            "card_data": SimpleNamespace(
+                summary="  A compact instruction-tuned model for demos.  "
+            ),
+        }
+    )
+    api = FakeHfApi(models=[model])
+
+    async def main() -> None:
+        conn = HuggingFaceConnector(api=api)
+        out = await conn.collect(
+            ConnectorRequest(
+                topics=["model releases"],
+                max_items=5,
+                huggingface_discovery_mode="global",
+            )
+        )
+        assert len(out.items) == 1
+        assert out.items[0].raw_snippet == "A compact instruction-tuned model for demos."
 
     asyncio.run(main())
 
