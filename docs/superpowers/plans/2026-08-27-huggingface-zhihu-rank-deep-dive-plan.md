@@ -107,7 +107,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 — Dispatch rank follow-up and lock mixed-digest ranks
 
-- [ ] **Do:** Wire `format_rank_item` to Juya heuristic first, else Hugging Face / Zhihu on `entry.source_kind` (including missing `NewsItem`), else generic. Prove mixed-digest **display rank** identity (rank N is the global entry index). Prove GitHub generic reprint, Juya issue deep-dive, sources/study-first/caveats wording, and OpenClaw `path=structured` for HF/Zhihu rank phrases. No connector/HTTP calls on this path.
+- [x] **Do:** Wire `format_rank_item` to Juya heuristic first, else Hugging Face / Zhihu on `entry.source_kind` (including missing `NewsItem`), else generic. Prove mixed-digest **display rank** identity (rank N is the global entry index). Prove GitHub generic reprint, Juya issue deep-dive, sources/study-first/caveats wording, and OpenClaw `path=structured` for HF/Zhihu rank phrases. No connector/HTTP calls on this path.
 
 - **Blocked by:** T1, T2
 - **Plan mode:** high
