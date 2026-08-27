@@ -130,7 +130,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 — Milestone-level regression
 
-- [ ] **Do:** Run the full automated suite after behavior and docs land. Update this plan’s changelog if verification exposes a missing file, a changed OpenClaw contract, or a required extra subtask.
+- [x] **Do:** Run the full automated suite after behavior and docs land. Update this plan’s changelog if verification exposes a missing file, a changed OpenClaw contract, or a required extra subtask.
 
 - **Blocked by:** T1, T2, T3, T4
 - **Plan mode:** medium
@@ -150,5 +150,6 @@ Per subtask, obey `TDD suitable`: `yes` means strict **test-driven-development**
 | Date       | Change                                                             |
 | ---------- | ------------------------------------------------------------------ |
 | 2026-08-27 | Created from the accepted Milestone 6.5 spec section and ADR-0005. |
+| 2026-08-27 | T5: `uv run pytest -q` — 685 passed, 2 skipped. GitHub `test_public_format_helpers_preserve_wording` still exact-matches. OpenClaw `path` remains `no_digest` / `structured` / `guidance`. No missing files, contract change, or extra subtask. |
 
 
