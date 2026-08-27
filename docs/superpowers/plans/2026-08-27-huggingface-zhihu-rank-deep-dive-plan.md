@@ -96,7 +96,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 — Zhihu practitioner-insight card formatter
 
-- [ ] **Do:** Add `zhihu_followup.py` that formats one **practitioner-insight card** for a single rank: 第 N 条, title, URL, 镜头, author/source_label, 搜索相关性 labeled as official-search relevance (never 热度), 原文摘录, then 摘要 / 为什么值得看 only when those `DigestEntry` fields are non-empty, plus thin-evidence and no-freshness caveats. Do not show `evidence_text_length` as a user-facing metric. Honest degraded card when `NewsItem` or snippet is missing. First GREEN is the public function stub only.
+- [x] **Do:** Add `zhihu_followup.py` that formats one **practitioner-insight card** for a single rank: 第 N 条, title, URL, 镜头, author/source_label, 搜索相关性 labeled as official-search relevance (never 热度), 原文摘录, then 摘要 / 为什么值得看 only when those `DigestEntry` fields are non-empty, plus thin-evidence and no-freshness caveats. Do not show `evidence_text_length` as a user-facing metric. Honest degraded card when `NewsItem` or snippet is missing. First GREEN is the public function stub only.
 
 - **Blocked by:** —
 - **Plan mode:** high
