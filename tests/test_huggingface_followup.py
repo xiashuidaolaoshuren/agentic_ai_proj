@@ -90,13 +90,13 @@ def test_family_card_hub_stats_present() -> None:
         },
     )
     out = format_huggingface_family_card(entry, item, rank=1)
-    assert "Trending:" in out
+    assert "Trending —" in out
     assert "88" in out
-    assert "Downloads (30d):" in out
+    assert "Downloads (30d) —" in out
     assert "1200" in out
-    assert "Likes:" in out
+    assert "Likes —" in out
     assert "42" in out
-    assert "Pipeline:" in out
+    assert "Pipeline —" in out
     assert "text-generation" in out
 
 
@@ -104,10 +104,10 @@ def test_family_card_hub_stats_omitted_when_empty() -> None:
     entry = _hf_entry()
     item = _hf_news_item(source_evidence={})
     out = format_huggingface_family_card(entry, item, rank=1)
-    assert "Trending:" not in out
-    assert "Downloads (30d):" not in out
-    assert "Likes:" not in out
-    assert "Pipeline:" not in out
+    assert "Trending —" not in out
+    assert "Downloads (30d) —" not in out
+    assert "Likes —" not in out
+    assert "Pipeline —" not in out
 
 
 def test_family_card_also_variants() -> None:
@@ -129,17 +129,17 @@ def test_family_card_also_omitted_when_empty() -> None:
     entry = _hf_entry()
     item = _hf_news_item(source_evidence={})
     out = format_huggingface_family_card(entry, item, rank=1)
-    assert "Also:" not in out
-    assert "Also: none" not in out
+    assert "Also —" not in out
+    assert "Also — none" not in out
 
 
 def test_family_card_publisher_and_snippet_present() -> None:
     entry = _hf_entry()
     item = _hf_news_item(author="Qwen", raw_snippet="Small and fast.")
     out = format_huggingface_family_card(entry, item, rank=1)
-    assert "Publisher:" in out
+    assert "Publisher —" in out
     assert "Qwen" in out
-    assert "Snippet:" in out
+    assert "Snippet —" in out
     assert "Small and fast." in out
 
 
@@ -147,8 +147,8 @@ def test_family_card_publisher_and_snippet_omitted() -> None:
     entry = _hf_entry()
     item = _hf_news_item(author=None, raw_snippet=None)
     out = format_huggingface_family_card(entry, item, rank=1)
-    assert "Publisher:" not in out
-    assert "Snippet:" not in out
+    assert "Publisher —" not in out
+    assert "Snippet —" not in out
 
 
 def test_family_card_popularity_caveat() -> None:
@@ -230,7 +230,7 @@ def test_family_card_unavailable_caveat_when_enrich_failed() -> None:
         rank=1,
         model_card_unavailable=True,
     )
-    assert "Trending:" in out
+    assert "Trending —" in out
     assert "unavailable" in out.lower()
 
 
@@ -240,11 +240,11 @@ def test_family_card_degraded_missing_news_item() -> None:
     assert "Rank 1" in out
     assert "Qwen3.8-27B" in out
     assert "https://huggingface.co/Qwen/Qwen3.8-27B" in out
-    assert "Trending:" not in out
-    assert "Downloads (30d):" not in out
-    assert "Likes:" not in out
-    assert "Pipeline:" not in out
-    assert "Snippet:" not in out
+    assert "Trending —" not in out
+    assert "Downloads (30d) —" not in out
+    assert "Likes —" not in out
+    assert "Pipeline —" not in out
+    assert "Snippet —" not in out
     assert "not available" in out
     assert "1200" not in out
     assert "88" not in out
@@ -256,12 +256,63 @@ def test_family_card_degraded_empty_evidence() -> None:
     out = format_huggingface_family_card(entry, item, rank=1)
     assert "Qwen3.8-27B" in out
     assert "https://huggingface.co/Qwen/Qwen3.8-27B" in out
-    assert "Trending:" not in out
-    assert "Downloads (30d):" not in out
-    assert "Likes:" not in out
-    assert "Pipeline:" not in out
-    assert "Snippet:" not in out
+    assert "Trending —" not in out
+    assert "Downloads (30d) —" not in out
+    assert "Likes —" not in out
+    assert "Pipeline —" not in out
+    assert "Snippet —" not in out
     assert "not available" in out
     assert "popularity, not" not in out
     assert "1200" not in out
     assert "88" not in out
+
+
+def test_family_card_strips_yaml_frontmatter_from_snippet() -> None:
+    entry = _hf_entry()
+    snippet = (
+        "---\n"
+        "library_name: transformers\n"
+        "license: other\n"
+        "---\n\n"
+        "Model overview text."
+    )
+    item = _hf_news_item(
+        source_evidence={"trending_score": 88.0},
+        raw_snippet=snippet,
+    )
+    out = format_huggingface_family_card(entry, item, rank=1)
+    assert "Model overview text." in out
+    assert "library_name:" not in out
+    assert "license:" not in out
+
+
+def test_family_card_uses_em_dash_field_separators() -> None:
+    entry = _hf_entry()
+    item = _hf_news_item(
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "likes": 42,
+            "pipeline_tag": "text-generation",
+        },
+        raw_snippet="Small and fast.",
+    )
+    out = format_huggingface_family_card(entry, item, rank=1)
+    assert "Rank 1 —" in out
+    assert "Link —" in out
+    assert "Trending —" in out
+    assert "Rank 1:" not in out
+    assert "Link:" not in out
+    assert "Trending:" not in out
+
+
+def test_family_card_wraps_snippet_in_fenced_code_block() -> None:
+    entry = _hf_entry()
+    item = _hf_news_item(
+        source_evidence={"trending_score": 88.0},
+        raw_snippet="Small and fast.",
+    )
+    out = format_huggingface_family_card(entry, item, rank=1)
+    assert "Snippet —" in out
+    assert "```text" in out
+    assert "Small and fast." in out

@@ -108,7 +108,7 @@ def test_rank_deep_dive_hf_dispatches_family_card(tmp_path: Path) -> None:
     assert "Rank 1" in out
     assert "Qwen3.8-27B" in out
     assert "https://huggingface.co/Qwen/Qwen3.8-27B" in out
-    assert "Trending:" in out
+    assert "Trending —" in out
     assert "Digest item 1:" not in out
 
 

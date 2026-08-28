@@ -62,7 +62,7 @@ _EXAMPLE_ROWS: list[list] = [
     ["Digest bilibili channel 285286947", ["bilibili"]],
     ["Show Hugging Face trending models", ["huggingface"]],
     ["Find Zhihu practitioner insights on RAG", ["zhihu"]],
-    ["show sources", ["juya"]],
+    ["follow up on item 1", ["juya"]],
 ]
 
 logger = get_logger("gradio")
