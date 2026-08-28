@@ -909,12 +909,18 @@ def test_structured_agent_fallback_uses_answer_structured_followup(
     model = _FakeToolCallModel([AIMessage(content="No tool calls.")])
     calls: list[tuple[str, Any]] = []
 
-    def _spy(message: str, ctx: Any) -> str:
+    async def _spy(
+        message: str,
+        ctx: Any,
+        store: Any,
+        *,
+        huggingface_connector: Any = None,
+    ) -> str:
         calls.append((message, ctx))
         return format_sources(ctx)
 
     monkeypatch.setattr(
-        "ai_news_agent.tools.interface_router.answer_structured_followup",
+        "ai_news_agent.tools.interface_router.answer_structured_followup_live",
         _spy,
     )
     router = _build_router(tmp_path, store=store, tool_model=model)

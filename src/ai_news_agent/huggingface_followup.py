@@ -14,6 +14,13 @@ _POPULARITY_CAVEAT = (
 _MISSING_EVIDENCE_CAVEAT = (
     "Hub stats and card snippet are not available for this saved item."
 )
+_LIVE_SNIPPET_CAVEAT = (
+    "Snippet is from a live Hub model card fetched after digest time; "
+    "Trending, Downloads, and Likes remain digest-time values."
+)
+_MODEL_CARD_UNAVAILABLE_CAVEAT = (
+    "Live Hub model card was unavailable; showing digest-time evidence only."
+)
 
 
 def format_huggingface_family_card(
@@ -21,6 +28,7 @@ def format_huggingface_family_card(
     news_item: NewsItem | None,
     *,
     rank: int,
+    model_card_unavailable: bool = False,
 ) -> str:
     """Render an English family card from persisted digest evidence."""
     lines = [
@@ -56,6 +64,10 @@ def format_huggingface_family_card(
         lines.append(f"Publisher: {news_item.author}")
     if news_item.raw_snippet:
         lines.append(f"Snippet: {news_item.raw_snippet}")
+    if evidence.get("model_card_live_fetched"):
+        lines.append(_LIVE_SNIPPET_CAVEAT)
+    if model_card_unavailable:
+        lines.append(_MODEL_CARD_UNAVAILABLE_CAVEAT)
     if _has_hub_stats_or_snippet(news_item, evidence):
         lines.append(_POPULARITY_CAVEAT)
     return "\n".join(lines).rstrip()

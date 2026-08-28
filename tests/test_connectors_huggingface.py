@@ -12,7 +12,7 @@ from typing import Any
 
 from ai_news_agent.connectors.base import ConnectorRequest
 from ai_news_agent.connectors.huggingface import HuggingFaceConnector
-from ai_news_agent.models import SourceKind
+from ai_news_agent.models import ConfidenceLevel, SourceKind
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -310,5 +310,84 @@ def test_collect_rate_limited_emits_warning() -> None:
         )
         assert out.items == []
         assert any(w.code == "rate_limited" for w in out.warnings)
+
+    asyncio.run(main())
+
+
+def _hf_enrich_item(
+    *,
+    raw_snippet: str | None = None,
+    source_evidence: dict[str, object] | None = None,
+) -> NewsItem:
+    from ai_news_agent.models import NewsItem
+
+    return NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="org/demo-model",
+        url="https://huggingface.co/org/demo-model",
+        title="demo-model",
+        collected_at=datetime(2026, 5, 10, 8, 0, tzinfo=UTC),
+        raw_snippet=raw_snippet,
+        content_confidence=ConfidenceLevel.LOW,
+        source_evidence=source_evidence or {},
+    )
+
+
+def test_enrich_skips_hub_when_model_card_already_fetched() -> None:
+    load_calls: list[str] = []
+
+    def fake_load(repo_id: str) -> SimpleNamespace:
+        load_calls.append(repo_id)
+        return SimpleNamespace(content="README body")
+
+    item = _hf_enrich_item(
+        raw_snippet="saved readme",
+        source_evidence={"model_card_live_fetched": True},
+    )
+    conn = HuggingFaceConnector(api=FakeHfApi(), load_model_card=fake_load)
+
+    async def main() -> None:
+        enriched, warnings = await conn.enrich_news_item(item)
+        assert load_calls == []
+        assert enriched.raw_snippet == "saved readme"
+        assert warnings == []
+
+    asyncio.run(main())
+
+
+def test_enrich_maps_readme_to_raw_snippet_and_marks_fetched() -> None:
+    long_text = "x" * 5000
+
+    def fake_load(repo_id: str) -> SimpleNamespace:
+        assert repo_id == "org/demo-model"
+        return SimpleNamespace(content=f"  {long_text}  ")
+
+    item = _hf_enrich_item(raw_snippet=None, source_evidence={"trending_score": 1})
+    conn = HuggingFaceConnector(api=FakeHfApi(), load_model_card=fake_load)
+
+    async def main() -> None:
+        enriched, warnings = await conn.enrich_news_item(item)
+        assert warnings == []
+        assert enriched.raw_snippet == ("x" * 4000)
+        assert enriched.source_evidence.get("model_card_live_fetched") is True
+
+    asyncio.run(main())
+
+
+def test_enrich_fail_closed_leaves_item_unchanged() -> None:
+    def fake_load(_repo_id: str) -> SimpleNamespace:
+        raise RuntimeError("hub unavailable")
+
+    item = _hf_enrich_item(
+        raw_snippet="collect snippet",
+        source_evidence={"trending_score": 1},
+    )
+    conn = HuggingFaceConnector(api=FakeHfApi(), load_model_card=fake_load)
+
+    async def main() -> None:
+        enriched, warnings = await conn.enrich_news_item(item)
+        assert enriched.raw_snippet == "collect snippet"
+        assert enriched.source_evidence.get("model_card_live_fetched") is not True
+        assert any(w.code == "model_card_unavailable" for w in warnings)
 
     asyncio.run(main())

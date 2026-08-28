@@ -201,6 +201,39 @@ def test_family_card_forbidden_fields_omitted() -> None:
     assert "global" not in out
 
 
+def test_family_card_live_snippet_caveat_when_model_card_live_fetched() -> None:
+    entry = _hf_entry()
+    item = _hf_news_item(
+        raw_snippet="Live README excerpt.",
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "model_card_live_fetched": True,
+        },
+    )
+    out = format_huggingface_family_card(entry, item, rank=1)
+    assert "digest-time" in out.lower() or "after digest" in out.lower()
+
+
+def test_family_card_unavailable_caveat_when_enrich_failed() -> None:
+    entry = _hf_entry()
+    item = _hf_news_item(
+        raw_snippet="Small and fast.",
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+        },
+    )
+    out = format_huggingface_family_card(
+        entry,
+        item,
+        rank=1,
+        model_card_unavailable=True,
+    )
+    assert "Trending:" in out
+    assert "unavailable" in out.lower()
+
+
 def test_family_card_degraded_missing_news_item() -> None:
     entry = _hf_entry(title="Qwen3.8-27B", source_id="Qwen/Qwen3.8-27B")
     out = format_huggingface_family_card(entry, None, rank=1)

@@ -1,7 +1,7 @@
 # Milestone 6: AI Ecosystem And Practitioner Signals
 
 Date: 2026-08-16  
-Amended: 2026-08-27 (Milestone 6.5: Hugging Face and Zhihu rank deep-dive; HF collect-time card excerpt for family-card Snippet)  
+Amended: 2026-08-28 (Hugging Face live model-card README on rank follow-up; ADR-0006)  
 Status: approved design
 
 ## Summary
@@ -191,7 +191,7 @@ Status: approved design
 
 Milestone 6 left Hugging Face and Zhihu on the generic rank reprint (`Digest item N` from `DigestEntry` fields). That is a poor fit: Hugging Face digest rows are **stubs** (comparison table at digest time, skip LLM summarize), so generic follow-up hides Hub stats and **Also** variants that already live on `NewsItem.source_evidence`. Zhihu still gets an LLM entry, but the practitioner job is the official-search result (snippet, lens, relevance), not the paraphrase.
 
-Juya already has a persist-only **issue deep-dive** on the same rank phrases. Milestone 6.5 gives Hugging Face and Zhihu the same job: a kind-specific **rank deep-dive** built only from the latest saved digest. Bilibili-style live enrichment, new structured phrases, digest-renderer “follow-up sections,” tool-JSON reshapes, open-ended prompt special-cases, and Milestone 7 memory/scheduling are out of scope.
+Juya already has a persist-only **issue deep-dive** on the same rank phrases. Milestone 6.5 gives Hugging Face and Zhihu kind-specific **rank deep-dives** from the latest saved digest. Hugging Face may live-fetch the family representative's model-card README once on rank follow-up or `get_source_trace` (ADR-0006); Zhihu stays persist-only. Bilibili-style transcript enrich, new structured phrases, digest-renderer “follow-up sections,” tool-JSON reshapes, open-ended prompt special-cases, and Milestone 7 memory/scheduling are out of scope.
 
 ### Product job
 
@@ -204,7 +204,7 @@ On existing rank phrases (`follow up on item 1`, `#2`, `the second one`, `Digest
 
 Show sources, study-first, and caveats stay generic. OpenClaw `/followup` paths remain `no_digest` / `structured` / `guidance`. `get_digest_item` / `get_source_trace` / ranking-explanation JSON stay as they are.
 
-No live Hub re-list, no model-card re-fetch, no Zhihu page crawl. Also variants do not get their own ranks. Zhihu cards do not stitch other digest insights or parse a snippet as Juya sub-news.
+No live Hub re-list, no Zhihu page crawl. Hugging Face rank follow-up may fetch the representative model-card README once (bounded text, upserted); digest comparison-table stats stay digest-time. Also variants do not get their own ranks. Zhihu cards do not stitch other digest insights or parse a snippet as Juya sub-news.
 
 ### Hugging Face family card
 
@@ -214,7 +214,7 @@ English chrome matching the comparison table. Fields:
 - Trending, Downloads (30d), Likes, Pipeline
 - Also variants when `family_variants` was persisted
 - publisher when present
-- card snippet from saved `raw_snippet` when Hub returned summary/description at digest collection (no live Hub fetch on rank follow-up)
+- card snippet from saved `raw_snippet` (collect-time card summary or once-fetched live model-card README; Trending/Downloads/Likes remain digest-time)
 - always-on popularity-not-quality caveat
 
 Omit empty why/background, gated, library, all-time downloads, discovery mode, and `follow_up_action`. Empty Also is omitted, not printed as “Also: none”.
@@ -239,7 +239,7 @@ If the `NewsItem` is missing or Hub stats / snippet are empty, still return a ki
 
 ### Architecture
 
-Sibling modules next to `juya_followup.py` (`huggingface_followup.py`, `zhihu_followup.py`) own formatting from persisted `DigestEntry` + `NewsItem`. `format_rank_item` dispatches: Juya heuristic first, else Hugging Face / Zhihu on `entry.source_kind`, else generic. No formatter registry, no live connector calls, no new tools.
+Sibling modules next to `juya_followup.py` (`huggingface_followup.py`, `zhihu_followup.py`) own formatting from persisted `DigestEntry` + `NewsItem`. `format_rank_item` dispatches: Juya heuristic first, else Hugging Face / Zhihu on `entry.source_kind`, else generic. Hugging Face rank follow-up and `get_source_trace` may call `HuggingFaceConnector.enrich_news_item` before formatting; the formatter itself stays free of HTTP. No formatter registry, no new tools.
 
 Update the OpenClaw follow-up skill and README examples so rank follow-up on Hugging Face / Zhihu is documented as family card / insight card, still via the same phrases. Do not invent Hub quality or Zhihu freshness claims.
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
+from ai_news_agent.followup_enrich import enrich_huggingface_for_rank
 from ai_news_agent.huggingface_followup import format_huggingface_family_card
 from ai_news_agent.juya_followup import (
     format_juya_issue_deep_dive,
@@ -13,6 +15,9 @@ from ai_news_agent.juya_followup import (
 from ai_news_agent.models import DigestEntry, RankedItem, SourceKind
 from ai_news_agent.storage import DigestStore, FollowupContext
 from ai_news_agent.zhihu_followup import format_zhihu_practitioner_insight_card
+
+if TYPE_CHECKING:
+    from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 
 NO_SAVED_DIGEST = (
     "No saved digest yet. Ask for a digest first "
@@ -105,6 +110,48 @@ def answer_structured_followup(message: str, ctx: FollowupContext) -> str | None
 
     rank = parse_rank_from_message(message)
     if rank is not None:
+        return format_rank_item(ctx, rank)
+
+    if _mentions_caveats(low):
+        return format_caveats(ctx)
+
+    return None
+
+
+async def answer_structured_followup_live(
+    message: str,
+    ctx: FollowupContext,
+    store: DigestStore,
+    *,
+    huggingface_connector: HuggingFaceConnector | None = None,
+) -> str | None:
+    """Structured follow-up with optional live Hugging Face model-card enrichment."""
+    low = message.strip().lower()
+
+    if _mentions_sources(low):
+        return format_sources(ctx)
+
+    if _mentions_ranking(low):
+        return format_ranking_pick(ctx)
+
+    rank = parse_rank_from_message(message)
+    if rank is not None:
+        ctx, model_card_unavailable = await enrich_huggingface_for_rank(
+            ctx,
+            store,
+            rank,
+            huggingface_connector=huggingface_connector,
+        )
+        if ctx.digest is not None and 1 <= rank <= len(ctx.digest.entries):
+            entry = ctx.digest.entries[rank - 1]
+            if entry.source_kind is SourceKind.HUGGINGFACE:
+                news_item = match_news_item_for_digest_entry(entry, ctx.news_items)
+                return format_huggingface_family_card(
+                    entry,
+                    news_item,
+                    rank=rank,
+                    model_card_unavailable=model_card_unavailable,
+                )
         return format_rank_item(ctx, rank)
 
     if _mentions_caveats(low):
@@ -266,6 +313,7 @@ __all__ = [
     "NO_SAVED_DIGEST",
     "OPENCLAW_GUIDANCE_FALLBACK",
     "answer_structured_followup",
+    "answer_structured_followup_live",
     "format_caveats",
     "format_rank_item",
     "format_ranking_pick",

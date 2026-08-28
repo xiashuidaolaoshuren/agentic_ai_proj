@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 from ai_news_agent.connectors.base import ConnectorResult
-from ai_news_agent.followup_structured import format_rank_item
+from ai_news_agent.followup_structured import (
+    answer_structured_followup_live,
+    format_rank_item,
+)
 from ai_news_agent.models import (
     ConfidenceLevel,
     Digest,
@@ -105,6 +110,52 @@ def test_rank_deep_dive_hf_dispatches_family_card(tmp_path: Path) -> None:
     assert "https://huggingface.co/Qwen/Qwen3.8-27B" in out
     assert "Trending:" in out
     assert "Digest item 1:" not in out
+
+
+def test_rank_followup_live_enriches_huggingface_once(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "hf-live-rank.db")
+    store.init_schema()
+    _seed_hf_digest_store(store)
+    enriched = _hf_news_item(
+        raw_snippet="Live model-card README.",
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "likes": 42,
+            "pipeline_tag": "text-generation",
+            "model_card_live_fetched": True,
+        },
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(enriched, []))
+
+    async def first_call() -> str | None:
+        ctx = store.get_latest_followup_context()
+        return await answer_structured_followup_live(
+            "follow up on item 1",
+            ctx,
+            store,
+            huggingface_connector=mock_connector,
+        )
+
+    text = asyncio.run(first_call())
+    assert text is not None
+    assert "Live model-card README." in text
+    mock_connector.enrich_news_item.assert_awaited_once()
+
+    async def second_call() -> str | None:
+        ctx = store.get_latest_followup_context()
+        return await answer_structured_followup_live(
+            "follow up on item 1",
+            ctx,
+            store,
+            huggingface_connector=mock_connector,
+        )
+
+    text2 = asyncio.run(second_call())
+    assert text2 is not None
+    assert "Live model-card README." in text2
+    assert mock_connector.enrich_news_item.await_count == 2
 
 
 def test_rank_deep_dive_hf_degraded_missing_news_item(tmp_path: Path) -> None:

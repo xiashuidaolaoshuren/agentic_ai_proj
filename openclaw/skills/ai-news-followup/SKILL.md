@@ -34,12 +34,12 @@ through `ai-news-digest`, including:
 
 Rank-targeted follow-up uses the **same phrases** (`follow up on item 1`, `#2`, `the second one`,
 `Digest the first news`) and the digest's global display rank. Return stdout unchanged. Kind-specific
-cards are **persist-only** (no Hub re-fetch, no Zhihu page crawl, no new tools):
+cards are **persist-only** except Hugging Face may live-fetch the representative model-card README once on the first rank follow-up (later follow-ups reuse saved text). No Zhihu page crawl, no new tools):
 
 - **Juya daily** (`https://daily.juya.uk/` only): **issue deep-dive** — sub-news from persisted
   website markdown. Do not improvise sub-items from memory.
 - **Hugging Face**: **family card** — representative title, Hub stats, Also variants, publisher,
-  snippet, and the popularity-not-quality caveat from saved evidence. Do not invent Hub quality.
+  snippet, and the popularity-not-quality caveat. First rank follow-up may fetch the live model-card README once; repeats use saved text. Do not invent Hub quality.
 - **Zhihu**: **practitioner-insight card** — evidence-first snippet, lens, author/source label,
   搜索相关性 as official-search relevance (never 热度). Do not invent freshness or stitch other hits.
 - Other kinds (GitHub, Bilibili): generic digest-item reprint.

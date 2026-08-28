@@ -1,6 +1,6 @@
 # Persist-only rank deep-dive for Hugging Face and Zhihu
 
-Status: accepted
+Status: accepted (Hugging Face live model-card on rank follow-up superseded for Hugging Face only — see ADR-0006; Zhihu persist-only unchanged)
 
 Milestone 6 shipped Hugging Face and Zhihu through the digest pipeline but left rank follow-up on the generic `DigestEntry` reprint. Juya already expands a rank from persisted evidence; Bilibili can live-enrich transcripts on `get_source_trace`. We decided Hugging Face and Zhihu follow Juya, not Bilibili: **rank deep-dive** is a kind-specific card built only from the latest saved `DigestEntry` + `NewsItem` — Hugging Face as a **family card** (same display rank as the comparison-table row), Zhihu as one **practitioner-insight card** (evidence-first, no related-result synthesis). Same structured phrases; show-sources / study-first / caveats unchanged; no new OpenClaw paths; no Hub re-fetch; no Zhihu page fetch (already forbidden by ADR-0002). Milestone 7 memory/scheduling/deployment stays separate.
 

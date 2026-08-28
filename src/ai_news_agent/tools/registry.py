@@ -16,6 +16,7 @@ from ai_news_agent.followup_structured import (
     format_rank_item,
     format_ranking_pick,
     format_sources,
+    answer_structured_followup_live,
 )
 from ai_news_agent.graph.workflow import run_digest_instrumented
 from ai_news_agent.progress import emit_progress
@@ -134,16 +135,23 @@ def build_tool_registry(
     ) -> ToolObservation:
         """Show source metadata and connector warnings for a digest item."""
         from ai_news_agent.connectors.bilibili import BilibiliConnector
+        from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 
         load_local_env(force_reload=True)
         configure_bilibili_network_from_env()
         connector = bilibili_factory()
         bilibili = connector if isinstance(connector, BilibiliConnector) else None
+        huggingface: HuggingFaceConnector | None = None
+        if huggingface_factory is not None:
+            hf_connector = huggingface_factory()
+            if isinstance(hf_connector, HuggingFaceConnector):
+                huggingface = hf_connector
         return await _get_source_trace_pure(
             store=store,
             rank=rank,
             source_id=source_id,
             bilibili_connector=bilibili,
+            huggingface_connector=huggingface,
         )
 
     @tool(args_schema=RankOrSourceArgs)
@@ -320,7 +328,22 @@ def build_tool_registry(
             ctx = store.get_latest_followup_context()
             if ctx.run_id is None and ctx.digest is None:
                 return _empty_structured_result()
-            return _structured_terminal_result(store, format_rank_item(ctx, rank))
+            from ai_news_agent.connectors.huggingface import HuggingFaceConnector
+
+            huggingface: HuggingFaceConnector | None = None
+            if huggingface_factory is not None:
+                hf_connector = huggingface_factory()
+                if isinstance(hf_connector, HuggingFaceConnector):
+                    huggingface = hf_connector
+            text = await answer_structured_followup_live(
+                f"follow up on item {rank}",
+                ctx,
+                store,
+                huggingface_connector=huggingface,
+            )
+            if text is None:
+                return _empty_structured_result()
+            return _structured_terminal_result(store, text)
 
         tools.extend(
             [
