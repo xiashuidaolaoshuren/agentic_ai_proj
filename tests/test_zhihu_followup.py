@@ -191,6 +191,29 @@ def test_insight_card_thin_evidence_caveat() -> None:
     assert "不是时效" not in out
 
 
+def test_insight_card_thin_evidence_still_shows_lens_and_author() -> None:
+    entry = _zh_entry(summary="", why_it_matters="")
+    item = _zh_news_item(
+        author="实践者A",
+        raw_snippet=None,
+        source_evidence={
+            "query_lens": "实战 / 踩坑",
+            "source_label": "回答",
+        },
+    )
+    out = format_zhihu_practitioner_insight_card(entry, item, rank=1)
+    assert "镜头" in out
+    assert "实战" in out
+    assert "踩坑" in out
+    assert "实践者A" in out
+    assert "回答" in out
+    assert "证据" in out or "摘要深度" in out
+    assert "搜索相关性" not in out
+    assert "原文摘录" not in out
+    assert "不是热度" not in out
+    assert "不是时效" not in out
+
+
 def test_insight_card_forbidden_fields_omitted() -> None:
     entry = _zh_entry(
         summary="这是摘要。",

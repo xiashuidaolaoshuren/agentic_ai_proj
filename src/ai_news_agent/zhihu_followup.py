@@ -32,6 +32,12 @@ def format_zhihu_practitioner_insight_card(
         return "\n".join(lines).rstrip()
     evidence = news_item.source_evidence
     if not _has_substantive_evidence(news_item, evidence):
+        query_lens = evidence.get("query_lens")
+        if query_lens:
+            lines.append(f"镜头：{query_lens}")
+        author_source = _author_source_line(news_item)
+        if author_source:
+            lines.append(author_source)
         lines.append(_THIN_EVIDENCE_CAVEAT)
         return "\n".join(lines).rstrip()
     query_lens = evidence.get("query_lens")
