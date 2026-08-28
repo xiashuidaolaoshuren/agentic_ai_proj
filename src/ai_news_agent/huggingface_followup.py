@@ -85,9 +85,7 @@ def _append_snippet_lines(lines: list[str], raw_snippet: str) -> None:
     if not body:
         return
     lines.append(f"Snippet{_FIELD_SEP}")
-    lines.append("```text")
     lines.append(body)
-    lines.append("```")
 
 
 def _display_snippet(raw: str) -> str:

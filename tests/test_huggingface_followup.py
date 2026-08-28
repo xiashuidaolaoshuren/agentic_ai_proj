@@ -306,13 +306,35 @@ def test_family_card_uses_em_dash_field_separators() -> None:
     assert "Trending:" not in out
 
 
-def test_family_card_wraps_snippet_in_fenced_code_block() -> None:
+def test_family_card_renders_snippet_as_markdown() -> None:
     entry = _hf_entry()
     item = _hf_news_item(
         source_evidence={"trending_score": 88.0},
-        raw_snippet="Small and fast.",
+        raw_snippet="# Qwen\n\nOverview paragraph.",
     )
     out = format_huggingface_family_card(entry, item, rank=1)
     assert "Snippet —" in out
-    assert "```text" in out
-    assert "Small and fast." in out
+    assert "```text" not in out
+    assert "```" not in out
+    assert "# Qwen" in out
+    assert "Overview paragraph." in out
+
+
+def test_family_card_renders_markdown_after_stripped_frontmatter() -> None:
+    entry = _hf_entry()
+    snippet = (
+        "---\n"
+        "library_name: transformers\n"
+        "license: other\n"
+        "---\n\n"
+        "# Title\n\n"
+        "Body text."
+    )
+    item = _hf_news_item(
+        source_evidence={"trending_score": 88.0},
+        raw_snippet=snippet,
+    )
+    out = format_huggingface_family_card(entry, item, rank=1)
+    assert "# Title" in out
+    assert "Body text." in out
+    assert "library_name:" not in out
