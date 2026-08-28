@@ -733,6 +733,21 @@ def test_chat_digest_single_github_repo_url_stays_focused(tmp_path) -> None:
     assert captured[0].github_target_channels == []
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Show Hugging Face trending models",
+        "huggingface trending models",
+        "trending repos",
+        "Find Zhihu practitioner insights on RAG",
+    ],
+)
+def test_message_requests_digest_true_for_source_browse_phrases(message: str) -> None:
+    from ai_news_agent.chat import _message_requests_digest
+
+    assert _message_requests_digest(message) is True
+
+
 def test_chat_message_digest_keyword_triggers_workflow(tmp_path) -> None:
     seen: list[DigestRequest] = []
 
