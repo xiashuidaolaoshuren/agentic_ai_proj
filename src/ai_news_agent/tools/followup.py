@@ -16,6 +16,7 @@ from ai_news_agent.tools.schemas import ToolObservation, ToolObservationStatus
 
 if TYPE_CHECKING:
     from ai_news_agent.connectors.bilibili import BilibiliConnector
+    from ai_news_agent.connectors.huggingface import HuggingFaceConnector
 
 
 def load_latest_digest(*, store: DigestStore) -> ToolObservation:
@@ -87,6 +88,7 @@ async def get_source_trace(
     rank: int | None = None,
     source_id: str | None = None,
     bilibili_connector: BilibiliConnector | None = None,
+    huggingface_connector: HuggingFaceConnector | None = None,
 ) -> ToolObservation:
     ctx = store.get_latest_followup_context()
     if ctx.run_id is None and ctx.digest is None:
@@ -115,6 +117,20 @@ async def get_source_trace(
             news_item,
             topics,
         )
+        enrich_caveats = _warning_caveats(enrich_ws)
+        if enrich_caveats:
+            enrich_caveats.append(
+                "Ranking confidence adjustments (e.g. confidence_adj in score breakdown) "
+                "reflect digest-time metadata only; follow-up enrichment does not re-rank items."
+            )
+        if ctx.run_id is not None:
+            store.upsert_news_item(ctx.run_id, news_item)
+
+    if (
+        entry.source_kind is SourceKind.HUGGINGFACE
+        and huggingface_connector is not None
+    ):
+        news_item, enrich_ws = await huggingface_connector.enrich_news_item(news_item)
         enrich_caveats = _warning_caveats(enrich_ws)
         if enrich_caveats:
             enrich_caveats.append(
@@ -288,6 +304,11 @@ def _format_warning_caveat(warning: ConnectorWarning) -> str:
         return (
             "Bilibili transcript unavailable: subtitle tracks were listed but download "
             f"or parsing failed. {warning.message} {ranking_note}"
+        )
+    if warning.code == "model_card_unavailable":
+        return (
+            "Hugging Face model card README unavailable: follow-up shows digest-time "
+            f"evidence only. {warning.message} {ranking_note}"
         )
     if warning.code == "cookies_not_loaded":
         return f"{warning.connector}:{warning.code} — {warning.message}"

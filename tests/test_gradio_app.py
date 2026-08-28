@@ -166,7 +166,7 @@ def test_gradio_examples_map_prompts_to_matching_source_toggles() -> None:
     assert by_prompt["Digest bilibili channel 285286947"] == ["bilibili"]
     assert by_prompt["Show Hugging Face trending models"] == ["huggingface"]
     assert by_prompt["Find Zhihu practitioner insights on RAG"] == ["zhihu"]
-    assert by_prompt["show sources"] == ["juya"]
+    assert by_prompt["follow up on item 1"] == ["juya"]
 
     assert not any("/issues/" in row[0] for row in _EXAMPLE_ROWS)
 

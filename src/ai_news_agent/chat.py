@@ -450,7 +450,11 @@ def _message_requests_digest(message: str) -> bool:
         "ai digest",
         "news digest",
     )
-    return any(t in low for t in triggers)
+    if any(t in low for t in triggers):
+        return True
+    from ai_news_agent.intent import parse_connector_names_from_message
+
+    return parse_connector_names_from_message(message) is not None
 
 
 def _try_llm_followup(model: Any | None, question: str, ctx: FollowupContext) -> str | None:

@@ -313,6 +313,96 @@ def test_get_source_trace_lazy_enriches_bilibili_item(tmp_path: Path) -> None:
     ctx = store.get_latest_followup_context()
     stored = next(i for i in ctx.news_items if i.source_id == "BV1demo00001")
     assert "Tags:" in (stored.raw_snippet or "")
+    assert "Tags:" in (stored.raw_snippet or "")
+    assert run_id == ctx.run_id
+
+
+def _seed_huggingface_followup_store(tmp_path: Path) -> tuple[DigestStore, int]:
+    store = DigestStore(tmp_path / "hf-followup.db")
+    store.init_schema()
+    collected = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="Qwen/Qwen3.8-27B",
+        url="https://huggingface.co/Qwen/Qwen3.8-27B",
+        title="Qwen3.8-27B",
+        collected_at=collected,
+        raw_snippet="collect snippet",
+        content_confidence=ConfidenceLevel.LOW,
+        source_evidence={"trending_score": 88.0},
+    )
+    run_id = store.save_run(
+        requested_at=collected,
+        timeframe="last_7_days",
+        topics=["AI"],
+        connector_names=["huggingface"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(
+        run_id,
+        [
+            RankedItem(
+                item=item,
+                score_total=3.0,
+                score_breakdown={"freshness": 1.0},
+                selected=True,
+                selection_reason="rank #1",
+            )
+        ],
+    )
+    store.save_digest(
+        run_id,
+        Digest(
+            generated_at=collected,
+            entries=[
+                DigestEntry(
+                    source_kind=SourceKind.HUGGINGFACE,
+                    source_id="Qwen/Qwen3.8-27B",
+                    title="Qwen3.8-27B",
+                    source_name="Hugging Face",
+                    source_url=item.url,
+                    summary="S",
+                    why_it_matters="W",
+                    background_knowledge="B",
+                    follow_up_action=FollowUpAction.READ,
+                )
+            ],
+            topics=["AI"],
+            timeframe="last_7_days",
+        ),
+    )
+    return store, run_id
+
+
+def test_get_source_trace_lazy_enriches_huggingface_item(tmp_path: Path) -> None:
+    store, run_id = _seed_huggingface_followup_store(tmp_path)
+    enriched = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="Qwen/Qwen3.8-27B",
+        url="https://huggingface.co/Qwen/Qwen3.8-27B",
+        title="Qwen3.8-27B",
+        collected_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
+        raw_snippet="Live model-card README.",
+        content_confidence=ConfidenceLevel.MEDIUM,
+        source_evidence={"trending_score": 88.0, "model_card_live_fetched": True},
+    )
+    mock_connector = MagicMock()
+    mock_connector.enrich_news_item = AsyncMock(return_value=(enriched, []))
+
+    obs = asyncio.run(
+        get_source_trace(
+            store=store,
+            source_id="Qwen/Qwen3.8-27B",
+            huggingface_connector=mock_connector,
+        )
+    )
+
+    mock_connector.enrich_news_item.assert_awaited_once()
+    assert obs.status is ToolObservationStatus.OK
+    assert obs.data["news_item"]["raw_snippet"] == "Live model-card README."
+    ctx = store.get_latest_followup_context()
+    stored = next(i for i in ctx.news_items if i.source_id == "Qwen/Qwen3.8-27B")
+    assert stored.raw_snippet == "Live model-card README."
     assert run_id == ctx.run_id
 
 

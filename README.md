@@ -331,7 +331,12 @@ uv run ai-news-agent openclaw-followup --message "show sources"
 uv run ai-news-agent openclaw-followup --message "follow up on item 1"
 ```
 
-Rank-targeted follow-up returns deterministic item details from the latest digest list order. For Juya daily issues, it also extracts sub-news from persisted website markdown evidence.
+Rank-targeted follow-up uses those same phrases and the latest digest **display rank** (global list order). It is persist-only: no Hub re-fetch and no Zhihu page crawl. Kind-specific cards:
+
+- **Juya** daily issues: **issue deep-dive** with sub-news from persisted website markdown
+- **Hugging Face**: **family card** from saved Hub stats / Also variants / snippet (first rank follow-up may live-fetch the representative model-card README once; later follow-ups reuse saved text; Hub trending is popularity, not quality)
+- **Zhihu**: **practitioner-insight card** from saved search evidence (搜索相关性 is official-search relevance, not 热度)
+- **GitHub / Bilibili**: generic digest-item reprint
 
 Open-ended follow-up Q&A is still **not** supported in OpenClaw; use Gradio for tool-agent follow-ups.
 

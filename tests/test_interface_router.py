@@ -516,6 +516,143 @@ def test_interface_router_applies_session_items_per_source_on_digest_fallback(
     assert req.max_items_per_source >= 5
 
 
+def test_interface_router_routes_hf_trending_browse_as_digest_when_digest_exists(
+    tmp_path: Path,
+) -> None:
+    digest = Digest(
+        generated_at=datetime(2026, 5, 7, 11, 0, 0, tzinfo=UTC),
+        entries=[],
+        topics=["AI"],
+    )
+    digest_result = DigestResult(
+        request=DigestRequest(topics=["AI"], connector_names=["huggingface"]),
+        digest=digest,
+        run_id=9,
+        markdown="# Digest",
+        text="HF digest text",
+        ranked_items=[],
+        warnings=[],
+        errors=[],
+        started_at=datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=UTC),
+    )
+    model = _FakeToolCallModel([AIMessage(content="Direct answer without tools.")])
+    workflow_calls: list[DigestRequest] = []
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        workflow_calls.append(req)
+        return digest_result
+
+    store, _run_id = _seed_full_followup_store(tmp_path)
+    router = _build_router(tmp_path, store=store, workflow_runner=_workflow, tool_model=model)
+
+    result = asyncio.run(
+        router.route(
+            message="Show Hugging Face trending models",
+            session_connector_names=["juya"],
+            session_items_per_source=5,
+        )
+    )
+
+    assert result.kind == InterfaceAgentResultKind.DIGEST
+    assert result.text == "HF digest text"
+    assert len(workflow_calls) == 1
+    assert workflow_calls[0].connector_names == ["huggingface"]
+    assert workflow_calls[0].items_per_source == 5
+
+
+def test_hf_trending_browse_digest_replaces_juya_for_rank_followup(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.connectors.base import ConnectorResult
+    from ai_news_agent.models import ConfidenceLevel, DigestEntry, FollowUpAction, NewsItem, RankedItem, SourceKind
+    from test_juya_followup import _seed_juya_digest_store
+
+    store = DigestStore(tmp_path / "hf-browse-followup.db")
+    store.init_schema()
+    _seed_juya_digest_store(store)
+
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    hf_item = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="Qwen/Qwen3.8-27B",
+        url="https://huggingface.co/Qwen/Qwen3.8-27B",
+        title="Qwen3.8-27B",
+        collected_at=now,
+        raw_snippet="Small and fast.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "likes": 42,
+            "pipeline_tag": "text-generation",
+        },
+    )
+    hf_digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.HUGGINGFACE,
+                source_id="Qwen/Qwen3.8-27B",
+                title="Qwen3.8-27B",
+                source_name="Hugging Face",
+                source_url=hf_item.url,
+                summary="HF summary.",
+                why_it_matters="Why HF.",
+                background_knowledge="BG HF.",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["AI"],
+        timeframe="today",
+    )
+
+    async def _workflow(req: DigestRequest, _on_stage=None) -> DigestResult:
+        run_id = store.save_run(
+            requested_at=now,
+            timeframe="today",
+            topics=["AI"],
+            connector_names=list(req.connector_names or []),
+        )
+        store.save_connector_result(run_id, ConnectorResult(items=[hf_item], warnings=[]))
+        store.save_ranked_items(
+            run_id,
+            [RankedItem(item=hf_item, score_total=0.9, selected=True)],
+        )
+        store.save_digest(run_id, hf_digest)
+        return DigestResult(
+            request=req,
+            digest=hf_digest,
+            run_id=run_id,
+            markdown="# HF",
+            text="HF digest table",
+            ranked_items=[],
+            warnings=[],
+            errors=[],
+            started_at=now,
+            finished_at=now,
+        )
+
+    model = _FakeToolCallModel([AIMessage(content="Direct answer without tools.")])
+    router = _build_router(tmp_path, store=store, workflow_runner=_workflow, tool_model=model)
+
+    browse = asyncio.run(
+        router.route(
+            message="Show Hugging Face trending models",
+            session_connector_names=["juya"],
+        )
+    )
+    assert browse.kind == InterfaceAgentResultKind.DIGEST
+
+    follow = asyncio.run(router.route(message="follow up on item 1"))
+    assert follow.kind == InterfaceAgentResultKind.STRUCTURED
+    assert follow.text is not None
+    assert "Rank 1" in follow.text
+    assert "Qwen3.8-27B" in follow.text
+    assert "子新闻" not in follow.text
+    assert "Digest item 1:" not in follow.text
+
+
 def test_interface_router_passes_max_results_cap_for_open_ended_search(
     tmp_path: Path,
 ) -> None:
@@ -595,7 +732,7 @@ def test_interface_router_passes_max_results_cap_for_open_ended_search(
     ):
         result = asyncio.run(
             router.route(
-                message="Show Hugging Face trending models",
+                message="What are the latest transformer architecture releases?",
                 session_items_per_source=5,
             )
         )
@@ -909,12 +1046,18 @@ def test_structured_agent_fallback_uses_answer_structured_followup(
     model = _FakeToolCallModel([AIMessage(content="No tool calls.")])
     calls: list[tuple[str, Any]] = []
 
-    def _spy(message: str, ctx: Any) -> str:
+    async def _spy(
+        message: str,
+        ctx: Any,
+        store: Any,
+        *,
+        huggingface_connector: Any = None,
+    ) -> str:
         calls.append((message, ctx))
         return format_sources(ctx)
 
     monkeypatch.setattr(
-        "ai_news_agent.tools.interface_router.answer_structured_followup",
+        "ai_news_agent.tools.interface_router.answer_structured_followup_live",
         _spy,
     )
     router = _build_router(tmp_path, store=store, tool_model=model)

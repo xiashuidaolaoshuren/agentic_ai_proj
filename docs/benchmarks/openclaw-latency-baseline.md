@@ -89,6 +89,6 @@ Prerequisite: digest service running and a digest already generated in the same 
 2. Follow up: `uv run ai-news-agent openclaw-followup --message "show sources"`
 3. Expect numbered source links from the latest digest (not a new digest run).
 4. Try `openclaw-followup --message "show caveats"` and `openclaw-followup --message "which item should I study first"`.
-5. Try `openclaw-followup --message "follow up on item 1"` and expect item-level details (title, URL, summary).
+5. Try `openclaw-followup --message "follow up on item 1"` and expect a rank deep-dive for that display rank (Juya issue deep-dive, Hugging Face family card, Zhihu practitioner-insight card, or generic digest-item reprint). First Hugging Face rank follow-up may pay Hub latency for the model-card README; Zhihu stays persist-only.
 6. For Juya daily digests, try `openclaw-followup --message "Digest the first news"` and expect sub-news extraction for the selected issue.
 7. Unsupported phrase (e.g. open-ended why-question) should return structured-mode guidance, not `web_fetch`.

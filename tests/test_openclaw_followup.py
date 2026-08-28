@@ -28,6 +28,7 @@ from ai_news_agent.followup_structured import (
     parse_rank_from_message,
 )
 from ai_news_agent.models import (
+    ConfidenceLevel,
     Digest,
     DigestEntry,
     FollowUpAction,
@@ -726,6 +727,136 @@ def test_followup_endpoint_rank_item_after_digest(service_server: DigestServiceS
     assert data["path"] == "structured"
     assert data["correlation_id"] == "rank-1"
     assert "Digest item 1:" in data["text"]
+
+
+def _seed_hf_openclaw_store(store: DigestStore) -> int:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.HUGGINGFACE,
+        source_id="Qwen/Qwen3.8-27B",
+        url="https://huggingface.co/Qwen/Qwen3.8-27B",
+        title="Qwen3.8-27B",
+        collected_at=now,
+        raw_snippet="Small and fast.",
+        content_confidence=ConfidenceLevel.HIGH,
+        source_evidence={
+            "trending_score": 88.0,
+            "downloads_30d": 1200,
+            "likes": 42,
+            "pipeline_tag": "text-generation",
+        },
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.HUGGINGFACE,
+                source_id="Qwen/Qwen3.8-27B",
+                title="Qwen3.8-27B",
+                source_name="Hugging Face",
+                source_url=item.url,
+                summary="HF summary.",
+                why_it_matters="Why HF.",
+                background_knowledge="BG HF.",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["AI"],
+        timeframe="today",
+    )
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe="today",
+        topics=["AI"],
+        connector_names=["huggingface"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(
+        run_id,
+        [RankedItem(item=item, score_total=0.9, selected=True)],
+    )
+    store.save_digest(run_id, digest)
+    return run_id
+
+
+def _seed_zhihu_openclaw_store(store: DigestStore) -> int:
+    now = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
+    item = NewsItem(
+        source=SourceKind.ZHIHU,
+        source_id="zh-openclaw-1",
+        url="https://www.zhihu.com/question/zh-openclaw-1",
+        title="RAG 部署踩坑",
+        collected_at=now,
+        author="实践者A",
+        raw_snippet="部署时要小心显存。",
+        content_confidence=ConfidenceLevel.MEDIUM,
+        source_evidence={
+            "relevance": 0.92,
+            "query_lens": "实战 / 踩坑",
+            "source_label": "回答",
+        },
+    )
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.ZHIHU,
+                source_id="zh-openclaw-1",
+                title="RAG 部署踩坑",
+                source_name="Zhihu",
+                source_url=item.url,
+                summary="Zhihu summary.",
+                why_it_matters="Why Zhihu.",
+                background_knowledge="BG Zhihu.",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["AI"],
+        timeframe="today",
+    )
+    run_id = store.save_run(
+        requested_at=now,
+        timeframe="today",
+        topics=["AI"],
+        connector_names=["zhihu"],
+    )
+    store.save_connector_result(run_id, ConnectorResult(items=[item], warnings=[]))
+    store.save_ranked_items(
+        run_id,
+        [RankedItem(item=item, score_total=0.8, selected=True)],
+    )
+    store.save_digest(run_id, digest)
+    return run_id
+
+
+def test_handle_openclaw_structured_followup_hf_rank_item(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "hf-openclaw.db")
+    store.init_schema()
+    _seed_hf_openclaw_store(store)
+    outcome = handle_openclaw_structured_followup(
+        message="follow up on item 1",
+        store=store,
+    )
+    assert outcome["path"] == "structured"
+    text = str(outcome["text"])
+    assert "Rank 1" in text
+    assert "Qwen3.8-27B" in text
+    assert "Digest item 1:" not in text
+
+
+def test_handle_openclaw_structured_followup_zhihu_rank_item(tmp_path: Path) -> None:
+    store = DigestStore(tmp_path / "zh-openclaw.db")
+    store.init_schema()
+    _seed_zhihu_openclaw_store(store)
+    outcome = handle_openclaw_structured_followup(
+        message="follow up on item 1",
+        store=store,
+    )
+    assert outcome["path"] == "structured"
+    text = str(outcome["text"])
+    assert "第 1 条" in text
+    assert "RAG 部署踩坑" in text
+    assert "Digest item 1:" not in text
 
 
 def test_followup_main_cli(service_server: DigestServiceServer) -> None:

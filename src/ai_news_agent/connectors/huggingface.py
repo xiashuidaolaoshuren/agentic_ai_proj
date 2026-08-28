@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,8 @@ from ai_news_agent.models import ConfidenceLevel, ConnectorWarning, NewsItem, So
 if TYPE_CHECKING:
     from huggingface_hub import HfApi
 
+MODEL_CARD_LIVE_SNIPPET_MAX = 4000
+
 
 class HuggingFaceConnector:
     """Collects trending Hugging Face models via ``HfApi.list_models``."""
@@ -23,9 +26,11 @@ class HuggingFaceConnector:
         *,
         api: HfApi | None = None,
         token: str | None = None,
+        load_model_card: Callable[[str], Any] | None = None,
     ) -> None:
         self._token = token if token is not None else os.environ.get("HUGGINGFACE_TOKEN") or None
         self._api = api
+        self._load_model_card = load_model_card
 
     def name(self) -> str:
         return "huggingface"
@@ -46,6 +51,7 @@ class HuggingFaceConnector:
             list_kwargs: dict[str, Any] = {
                 "sort": "trending_score",
                 "limit": collect_limit,
+                "cardData": True,
             }
             if request.huggingface_search:
                 list_kwargs["search"] = request.huggingface_search
@@ -56,6 +62,7 @@ class HuggingFaceConnector:
             list_kwargs = {
                 "sort": "trending_score",
                 "limit": collect_limit,
+                "cardData": True,
             }
 
         api = self._get_api()
@@ -99,6 +106,65 @@ class HuggingFaceConnector:
 
         grouped_items = group_huggingface_families(items, limit=display_limit)
         return ConnectorResult(items=grouped_items, warnings=warnings, raw_count=len(models))
+
+    async def enrich_news_item(
+        self,
+        item: NewsItem,
+        request_topics: list[str] | None = None,
+    ) -> tuple[NewsItem, list[ConnectorWarning]]:
+        """Load the family representative model-card README for rank follow-up."""
+        _ = request_topics
+        if item.source is not SourceKind.HUGGINGFACE:
+            return item, []
+        evidence = dict(item.source_evidence or {})
+        if evidence.get("model_card_live_fetched"):
+            return item, []
+
+        repo_id = item.source_id
+
+        def _load() -> Any:
+            loader = self._load_model_card
+            if loader is None:
+                from huggingface_hub import ModelCard
+
+                loader = ModelCard.load
+            return loader(repo_id)
+
+        try:
+            card = await asyncio.to_thread(_load)
+            text = _extract_model_card_text(card)
+            if not text:
+                return item, [_model_card_unavailable_warning(repo_id, "empty model card")]
+            new_evidence = {**evidence, "model_card_live_fetched": True}
+            enriched = item.model_copy(
+                update={
+                    "raw_snippet": text[:MODEL_CARD_LIVE_SNIPPET_MAX],
+                    "source_evidence": new_evidence,
+                    "content_confidence": ConfidenceLevel.MEDIUM,
+                }
+            )
+            return enriched, []
+        except Exception as exc:
+            return item, [_model_card_unavailable_warning(repo_id, str(exc))]
+
+
+def _extract_model_card_text(card: Any) -> str | None:
+    for attr in ("content", "text"):
+        value = getattr(card, attr, None)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    return None
+
+
+def _model_card_unavailable_warning(repo_id: str, detail: str) -> ConnectorWarning:
+    return ConnectorWarning(
+        connector="huggingface",
+        code="model_card_unavailable",
+        message="Hugging Face model card README unavailable for follow-up enrichment",
+        detail=f"{repo_id}: {detail}"[:300],
+    )
 
 
 def _missing_required_model_fields(model: Any) -> bool:

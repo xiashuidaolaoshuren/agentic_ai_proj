@@ -20,3 +20,4 @@ Milestone 6 was specified as “Broader Research Sources”: arXiv, Hugging Face
 - `NewsItem` gains JSON-safe `source_evidence`; no SQLite migration; historical rows, including GitHub-tagged Juya items, still load.
 - Zhihu never claims trending, freshness, or popularity from search relevance; Hugging Face never claims model quality from Hub popularity.
 - Implementation details live in `docs/superpowers/specs/2026-08-16-ai-ecosystem-and-practitioner-signals-design.md`.
+- Milestone 6 does not specialize rank follow-up for these kinds; that is Milestone 6.5 / ADR-0005.

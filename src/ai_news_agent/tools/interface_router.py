@@ -13,6 +13,7 @@ from ai_news_agent.followup_structured import (
     NO_SAVED_DIGEST,
     OPENCLAW_GUIDANCE_FALLBACK,
     answer_structured_followup,
+    answer_structured_followup_live,
     is_structured_followup,
 )
 from ai_news_agent.graph.state import DigestResult
@@ -445,7 +446,19 @@ class InterfaceToolRouter:
 
         if intent is _RouteIntent.STRUCTURED_FOLLOWUP:
             ctx = self._store.get_latest_followup_context()
-            structured = answer_structured_followup(message, ctx)
+            from ai_news_agent.connectors.huggingface import HuggingFaceConnector
+
+            huggingface: HuggingFaceConnector | None = None
+            if self._huggingface_factory is not None:
+                hf_connector = self._huggingface_factory()
+                if isinstance(hf_connector, HuggingFaceConnector):
+                    huggingface = hf_connector
+            structured = await answer_structured_followup_live(
+                message,
+                ctx,
+                self._store,
+                huggingface_connector=huggingface,
+            )
             if structured is not None:
                 return InterfaceAgentResult(
                     kind=InterfaceAgentResultKind.STRUCTURED,
