@@ -126,7 +126,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 — History search service
 
-- [ ] **Do:** Add `search_digest_history` that loads bounded rows, applies topic AND-match and lexical scoring, returns matches with tokens, scanned count, archive-truncated flag, and caveats (empty archive, no matches with filters named, malformed rows skipped, cap hit). Same URL in two digests → two rows. Default cap `HISTORY_CANDIDATE_CAP = 10_000`; tests inject a small cap.
+- [x] **Do:** Add `search_digest_history` that loads bounded rows, applies topic AND-match and lexical scoring, returns matches with tokens, scanned count, archive-truncated flag, and caveats (empty archive, no matches with filters named, malformed rows skipped, cap hit). Same URL in two digests → two rows. Default cap `HISTORY_CANDIDATE_CAP = 10_000`; tests inject a small cap.
 
 - **Blocked by:** T2, T3
 - **Plan mode:** high

@@ -287,6 +287,12 @@ def _extract_excerpt_from_field(field: str, phrase: str, terms: list[str]) -> st
     return field_nfc[match_start:end]
 
 
+def digest_topics_match_query(*, query_topics: list[str], digest_topics: list[str]) -> bool:
+    """True when every requested topic NFC+case-folds to a digest topic string."""
+    normalized_digest = {_normalize_history_text(str(topic)) for topic in digest_topics}
+    return all(_normalize_history_text(str(topic)) in normalized_digest for topic in query_topics)
+
+
 def extract_historical_excerpt(*, query: HistorySearchQuery, candidate: dict[str, Any]) -> str | None:
     if query.text is None:
         return None
@@ -311,6 +317,7 @@ __all__ = [
     "HistorySearchMatch",
     "HistorySearchQuery",
     "HistorySearchResult",
+    "digest_topics_match_query",
     "format_historical_item_ref",
     "extract_historical_excerpt",
     "historical_sort_key",
