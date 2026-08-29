@@ -30,41 +30,53 @@ One history-search subsystem. Candidate load, scoring, show, CLI, and Gradio int
 - Constraints: Gradio grammar is explicit (`search history` / `open history`); do not overload `intent.py` digest parsing. Fake and live modes share the intercept (no LLM / fake tool agent).
 - Anti-goals: FTS5 / embeddings / new tables / schema bump; history tools in `tools/registry.py`; OpenClaw history; switching latest context; live enrich on show; ranking or result chrome inside `storage.py`; drive-by ChatService / CLI refactors.
 
+
+
 ## File map
+
+
 
 ### Subsystem: Historical digest search
 
-| Path | Create/Modify | Single responsibility | Public surface |
-|------|---------------|----------------------|----------------|
-| `src/ai_news_agent/history.py` | create | History types, `dN:rN` token parse/format, query validation, lexical score / excerpt / total order (no SQLite) | `HistorySearchQuery`, `HistoricalItemRef`, `HistorySearchMatch`, `HistorySearchResult`, `HISTORY_CANDIDATE_CAP`, `parse_historical_item_ref`, `format_historical_item_ref`, `validate_history_search_query`, `score_historical_candidate` |
-| `src/ai_news_agent/history_search.py` | create | Orchestrate store load + topic/lexical filter + cap caveat + persist-only show | `search_digest_history`, `show_historical_item` |
-| `src/ai_news_agent/history_interface.py` | create | Gradio command grammar and user-facing search/show chrome (not scoring) | `parse_history_chat_message`, `format_history_search_text`, history validation/not-found strings |
-| `src/ai_news_agent/storage.py` | modify | SQL source + date filter, newest-first bounded candidate rows, load `FollowupContext` for a digest id; **no** scoring | `list_historical_digest_entries`, `get_followup_context_for_digest`; `get_latest_followup_context` unchanged |
-| `src/ai_news_agent/followup_structured.py` | unmodified expected | Persist-only `format_rank_item` reused by show | existing exports |
-| `src/ai_news_agent/cli.py` | modify | `history-search` / `history-show` subcommands, thin dispatch | new parsers + handlers; `digest` / OpenClaw commands unchanged |
-| `src/ai_news_agent/chat.py` | modify | Intercept history commands before digest routing and before `interface_router` (sync + streaming) | `ChatService` message handlers |
-| `src/ai_news_agent/app/gradio_app.py` | modify | Example prompt rows for search/open history | `_EXAMPLE_ROWS` |
-| `tests/test_history.py` | create | Tokens, query validation, NFC/case-fold, scoring order, Chinese substring, excerpts | pytest |
-| `tests/test_history_store.py` | create | Historical SQL reads, display rank, entries-only, latest context unchanged, cap/truncation flag | pytest |
-| `tests/test_history_search.py` | create | Service AND filters, duplicates, empty archive, no-match, malformed skip, injectable cap | pytest |
-| `tests/test_history_show.py` | create | Show by ref for Juya/HF/Zhihu/GitHub/Bilibili; no connector calls; latest unchanged; not-found | pytest |
-| `tests/test_history_interface.py` | create | Gradio grammar, chrome, validation errors do not look like latest-digest follow-up | pytest |
-| `tests/test_cli.py` | modify | `history-search` / `history-show` argv, stdout, exit codes `0`/`2`/`1` | pytest |
-| `tests/test_chat.py` | modify | Intercept before fake router (sync + streaming); non-history messages still route | pytest |
-| `tests/test_gradio_app.py` | modify | Example-row count and history prompts | pytest |
-| `tests/test_openclaw_followup.py` | unmodified expected | Path taxonomy unchanged | existing |
-| `README.md` | modify | CLI + Gradio history usage; OpenClaw still has no history | user-facing docs |
+
+| Path                                       | Create/Modify       | Single responsibility                                                                                                 | Public surface                                                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ai_news_agent/history.py`             | create              | History types, `dN:rN` token parse/format, query validation, lexical score / excerpt / total order (no SQLite)        | `HistorySearchQuery`, `HistoricalItemRef`, `HistorySearchMatch`, `HistorySearchResult`, `HISTORY_CANDIDATE_CAP`, `parse_historical_item_ref`, `format_historical_item_ref`, `validate_history_search_query`, `score_historical_candidate` |
+| `src/ai_news_agent/history_search.py`      | create              | Orchestrate store load + topic/lexical filter + cap caveat + persist-only show                                        | `search_digest_history`, `show_historical_item`                                                                                                                                                                                           |
+| `src/ai_news_agent/history_interface.py`   | create              | Gradio command grammar and user-facing search/show chrome (not scoring)                                               | `parse_history_chat_message`, `format_history_search_text`, history validation/not-found strings                                                                                                                                          |
+| `src/ai_news_agent/storage.py`             | modify              | SQL source + date filter, newest-first bounded candidate rows, load `FollowupContext` for a digest id; **no** scoring | `list_historical_digest_entries`, `get_followup_context_for_digest`; `get_latest_followup_context` unchanged                                                                                                                              |
+| `src/ai_news_agent/followup_structured.py` | unmodified expected | Persist-only `format_rank_item` reused by show                                                                        | existing exports                                                                                                                                                                                                                          |
+| `src/ai_news_agent/cli.py`                 | modify              | `history-search` / `history-show` subcommands, thin dispatch                                                          | new parsers + handlers; `digest` / OpenClaw commands unchanged                                                                                                                                                                            |
+| `src/ai_news_agent/chat.py`                | modify              | Intercept history commands before digest routing and before `interface_router` (sync + streaming)                     | `ChatService` message handlers                                                                                                                                                                                                            |
+| `src/ai_news_agent/app/gradio_app.py`      | modify              | Example prompt rows for search/open history                                                                           | `_EXAMPLE_ROWS`                                                                                                                                                                                                                           |
+| `tests/test_history.py`                    | create              | Tokens, query validation, NFC/case-fold, scoring order, Chinese substring, excerpts                                   | pytest                                                                                                                                                                                                                                    |
+| `tests/test_history_store.py`              | create              | Historical SQL reads, display rank, entries-only, latest context unchanged, cap/truncation flag                       | pytest                                                                                                                                                                                                                                    |
+| `tests/test_history_search.py`             | create              | Service AND filters, duplicates, empty archive, no-match, malformed skip, injectable cap                              | pytest                                                                                                                                                                                                                                    |
+| `tests/test_history_show.py`               | create              | Show by ref for Juya/HF/Zhihu/GitHub/Bilibili; no connector calls; latest unchanged; not-found                        | pytest                                                                                                                                                                                                                                    |
+| `tests/test_history_interface.py`          | create              | Gradio grammar, chrome, validation errors do not look like latest-digest follow-up                                    | pytest                                                                                                                                                                                                                                    |
+| `tests/test_cli.py`                        | modify              | `history-search` / `history-show` argv, stdout, exit codes `0`/`2`/`1`                                                | pytest                                                                                                                                                                                                                                    |
+| `tests/test_chat.py`                       | modify              | Intercept before fake router (sync + streaming); non-history messages still route                                     | pytest                                                                                                                                                                                                                                    |
+| `tests/test_gradio_app.py`                 | modify              | Example-row count and history prompts                                                                                 | pytest                                                                                                                                                                                                                                    |
+| `tests/test_openclaw_followup.py`          | unmodified expected | Path taxonomy unchanged                                                                                               | existing                                                                                                                                                                                                                                  |
+| `README.md`                                | modify              | CLI + Gradio history usage; OpenClaw still has no history                                                             | user-facing docs                                                                                                                                                                                                                          |
+
+
+
 
 ### Blast radius
 
-| Path / boundary | Why sensitive | Existing behavior to preserve | Plan mode |
-|-----------------|---------------|-------------------------------|-----------|
-| `storage.py` | Latest digest + persist path for every interface | `SCHEMA_VERSION` `"1"`; `get_latest_followup_context()` still latest-only; no new tables; no ranking in this module | high |
-| `chat.py` | Live Gradio sends **all** messages through `interface_router` today | Digest, structured latest follow-up, open-ended tool agent, and no-saved-digest paths unchanged when the message is not a history command | high |
-| `cli.py` | Global entrypoint | `digest` / `service` / `openclaw-*` parse and exit codes unchanged | medium |
-| `followup_structured.py` / enrich | Easy to “reuse” live rank follow-up for show | History show never calls `enrich_huggingface_for_rank` or upserts | skip unless a test proves drift |
-| `tools/registry.py`, OpenClaw adapters | Easy to add a history tool or `/followup` path | No new tools; `no_digest` / `structured` / `guidance` only | skip |
-| README / Gradio examples | Operators copy prompts | Do not document OpenClaw history or live enrich on open | skip |
+
+| Path / boundary                        | Why sensitive                                                       | Existing behavior to preserve                                                                                                             | Plan mode                       |
+| -------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `storage.py`                           | Latest digest + persist path for every interface                    | `SCHEMA_VERSION` `"1"`; `get_latest_followup_context()` still latest-only; no new tables; no ranking in this module                       | high                            |
+| `chat.py`                              | Live Gradio sends **all** messages through `interface_router` today | Digest, structured latest follow-up, open-ended tool agent, and no-saved-digest paths unchanged when the message is not a history command | high                            |
+| `cli.py`                               | Global entrypoint                                                   | `digest` / `service` / `openclaw-*` parse and exit codes unchanged                                                                        | medium                          |
+| `followup_structured.py` / enrich      | Easy to “reuse” live rank follow-up for show                        | History show never calls `enrich_huggingface_for_rank` or upserts                                                                         | skip unless a test proves drift |
+| `tools/registry.py`, OpenClaw adapters | Easy to add a history tool or `/followup` path                      | No new tools; `no_digest` / `structured` / `guidance` only                                                                                | skip                            |
+| README / Gradio examples               | Operators copy prompts                                              | Do not document OpenClaw history or live enrich on open                                                                                   | skip                            |
+
+
+
 
 ## Workflow (for implementers)
 
@@ -73,27 +85,33 @@ One history-search subsystem. Candidate load, scoring, show, CLI, and Gradio int
 3. **Agent mode**: **test-driven-development** when `TDD suitable: yes`. New modules: first GREEN is types + stubs only (`NotImplementedError` / empty defaults), no ChatService/CLI wiring in that GREEN.
 4. Update this document if reality diverges; add a **Plan changelog** row.
 
+
+
 ## Subtasks
 
 Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T1 — History types, tokens, and query validation
 
-- [ ] **Do:** Add `history.py` with `HistorySearchQuery`, `HistoricalItemRef`, match/result types, `d<digest_id>:r<rank>` parse/format, and validation (at least one criterion; blank text absent; sources in `ALLOWED_SOURCES`; `since` ≤ `until`; limit 1–50 default 10). First GREEN is types + stubs only.
+- [x] **Do:** Add `history.py` with `HistorySearchQuery`, `HistoricalItemRef`, match/result types, `d<digest_id>:r<rank>` parse/format, and validation (at least one criterion; blank text absent; sources in `ALLOWED_SOURCES`; `since` ≤ `until`; limit 1–50 default 10). First GREEN is types + stubs only.
 
 - **Blocked by:** —
 - **Plan mode:** high
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history.py -q -k "ref or validat or query"`
 
+
+
 ### T2 — Lexical scoring and excerpts
 
-- [ ] **Do:** Implement NFC/case-fold scoring and excerpt extraction on in-memory candidates: space-delimited all-terms (term may hit searchable text **or** digest topics), unsegmented/Chinese substring, filter-only skip lexical match, total order (phrase-in-title, phrase-in-text, title terms, topic equality, term coverage, recency, `digest_id` desc, rank asc). No SQLite in this module.
+- [x] **Do:** Implement NFC/case-fold scoring and excerpt extraction on in-memory candidates: space-delimited all-terms (term may hit searchable text **or** digest topics), unsegmented/Chinese substring, filter-only skip lexical match, total order (phrase-in-title, phrase-in-text, title terms, topic equality, term coverage, recency, `digest_id` desc, rank asc). No SQLite in this module.
 
 - **Blocked by:** T1
 - **Plan mode:** high
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history.py -q`
+
+
 
 ### T3 — DigestStore historical reads
 
@@ -104,6 +122,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history_store.py tests/test_storage.py -q`
 
+
+
 ### T4 — History search service
 
 - [ ] **Do:** Add `search_digest_history` that loads bounded rows, applies topic AND-match and lexical scoring, returns matches with tokens, scanned count, archive-truncated flag, and caveats (empty archive, no matches with filters named, malformed rows skipped, cap hit). Same URL in two digests → two rows. Default cap `HISTORY_CANDIDATE_CAP = 10_000`; tests inject a small cap.
@@ -112,6 +132,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **Plan mode:** high
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history_search.py tests/test_history.py tests/test_history_store.py -q`
+
+
 
 ### T5 — Persist-only history show
 
@@ -122,6 +144,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history_show.py tests/test_huggingface_followup.py tests/test_zhihu_followup.py tests/test_juya_followup.py tests/test_rank_deep_dive.py -q`
 
+
+
 ### T6 — Gradio/CLI history chrome and grammar
 
 - [ ] **Do:** Add `history_interface.py` to parse `search history[ for …][ from …][ on …][ since …][ until …]` and `open history dN:rN` (case-insensitive keywords), and to render search result chrome (token, date, source, title, URL, excerpt, caveats). Bare `search history` is a validation error. Do not fall through to latest-digest phrasing.
@@ -130,6 +154,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **Plan mode:** medium
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_history_interface.py -q`
+
+
 
 ### T7 — CLI `history-search` and `history-show`
 
@@ -140,6 +166,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_cli.py -q`
 
+
+
 ### T8 — ChatService history intercept
 
 - [ ] **Do:** Handle parsed history commands in `ChatService` **before** digest detection and **before** `interface_router` (sync + streaming). Live and fake: never call the tool runner / fake tool agent. Non-history messages keep current routing. Prove a fake router is not invoked for `search history` / `open history`.
@@ -148,6 +176,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **Plan mode:** high
 - **TDD suitable:** yes
 - **Verification:** `uv run pytest tests/test_chat.py tests/test_history_interface.py tests/test_history_search.py tests/test_history_show.py -q`
+
+
 
 ### T9 — README and Gradio example prompts
 
@@ -159,6 +189,8 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **TDD suitable reason:** Gradio `_EXAMPLE_ROWS` contracts are assertable; README prose is static docs with no runtime behavior.
 - **Verification:** `uv run pytest tests/test_gradio_app.py -q`; review README for `history-search` / `open history` and no OpenClaw history or live-enrich-on-open instructions
 
+
+
 ### T10 — Milestone-level regression
 
 - [ ] **Do:** Run the full automated suite. Confirm OpenClaw `path` remains `no_digest` / `structured` / `guidance`, latest-digest structured wording tests still pass, no schema migration, no new registry tools. Update this plan’s changelog if verification exposes a missing file or extra subtask.
@@ -169,12 +201,17 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 - **TDD suitable reason:** verification-only integration pass; production behavior was already driven test-first in T1–T8.
 - **Verification:** `uv run pytest -q`; confirm `test_public_format_helpers_preserve_wording` still exact-matches; OpenClaw follow-up paths unchanged; `SCHEMA_VERSION == "1"`
 
+
+
 ## TDD note (Agent mode)
 
 Per subtask, obey `TDD suitable`: `yes` means strict **test-driven-development** (red/green/refactor); `partial` applies it only to the testable slice; `no` means do not force test-first—still satisfy **Verification**. New modules start GREEN with types and stubs only. Type-2 planning → **planning-subtasks** skill.
 
 ## Plan changelog
 
-| Date | Change |
-|------|--------|
+
+| Date       | Change                                                      |
+| ---------- | ----------------------------------------------------------- |
 | 2026-08-29 | Created from the accepted Milestone 7D.1 spec and ADR-0007. |
+
+
