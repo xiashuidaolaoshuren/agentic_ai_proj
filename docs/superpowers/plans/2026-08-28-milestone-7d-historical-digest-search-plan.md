@@ -115,7 +115,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 — DigestStore historical reads
 
-- [ ] **Do:** Add `list_historical_digest_entries` (source + `generated_at` UTC date range, newest-first, cap+1 to detect truncation, digest topics and entry fields, original display rank from per-digest `id` order) and `get_followup_context_for_digest`. Prove unselected `news_items` are not listed, `get_latest_followup_context()` is unchanged, schema version stays `"1"`. No scoring in `storage.py`.
+- [x] **Do:** Add `list_historical_digest_entries` (source + `generated_at` UTC date range, newest-first, cap+1 to detect truncation, digest topics and entry fields, original display rank from per-digest `id` order) and `get_followup_context_for_digest`. Prove unselected `news_items` are not listed, `get_latest_followup_context()` is unchanged, schema version stays `"1"`. No scoring in `storage.py`.
 
 - **Blocked by:** T1
 - **Plan mode:** high
