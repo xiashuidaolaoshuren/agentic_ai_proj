@@ -137,7 +137,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 — Persist-only history show
 
-- [ ] **Do:** Add `show_historical_item` that parses/resolves `dN:rN`, loads that digest’s `FollowupContext` (entries + that run’s `NewsItem`s), and returns `format_rank_item` text. Missing/malformed ref → not-found, no nearest guess. Prove Juya / Hugging Face / Zhihu / GitHub / Bilibili cards, degraded missing `NewsItem`, **no** connector/HTTP, **no** store writes, latest context still the newest digest.
+- [x] **Do:** Add `show_historical_item` that parses/resolves `dN:rN`, loads that digest’s `FollowupContext` (entries + that run’s `NewsItem`s), and returns `format_rank_item` text. Missing/malformed ref → not-found, no nearest guess. Prove Juya / Hugging Face / Zhihu / GitHub / Bilibili cards, degraded missing `NewsItem`, **no** connector/HTTP, **no** store writes, latest context still the newest digest.
 
 - **Blocked by:** T3
 - **Plan mode:** high
