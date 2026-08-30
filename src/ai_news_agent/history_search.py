@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ai_news_agent.followup_structured import format_rank_item
 from ai_news_agent.history import (
     HISTORY_CANDIDATE_CAP,
     HistoricalItemRef,
@@ -13,6 +14,7 @@ from ai_news_agent.history import (
     digest_topics_match_query,
     extract_historical_excerpt,
     historical_sort_key,
+    parse_historical_item_ref,
     score_historical_candidate,
 )
 
@@ -149,3 +151,21 @@ def search_digest_history(
         archive_truncated=archive_truncated,
         caveats=caveats,
     )
+
+
+def show_historical_item(store: Any, token: str) -> str | None:
+    """Load and format one historical digest entry by dN:rN token."""
+    try:
+        ref = parse_historical_item_ref(token)
+    except ValueError:
+        return None
+
+    ctx = store.get_followup_context_for_digest(ref.digest_id)
+    if ctx is None or ctx.digest is None or not ctx.digest.entries:
+        return None
+
+    rank = ref.rank
+    if rank < 1 or rank > len(ctx.digest.entries):
+        return None
+
+    return format_rank_item(ctx, rank)
