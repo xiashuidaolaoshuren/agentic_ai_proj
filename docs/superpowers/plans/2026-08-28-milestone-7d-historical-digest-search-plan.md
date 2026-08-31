@@ -148,7 +148,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 — Gradio/CLI history chrome and grammar
 
-- [ ] **Do:** Add `history_interface.py` to parse `search history[ for …][ from …][ on …][ since …][ until …]` and `open history dN:rN` (case-insensitive keywords), and to render search result chrome (token, date, source, title, URL, excerpt, caveats). Bare `search history` is a validation error. Do not fall through to latest-digest phrasing.
+- [x] **Do:** Add `history_interface.py` to parse `search history[ for …][ from …][ on …][ since …][ until …]` and `open history dN:rN` (case-insensitive keywords), and to render search result chrome (token, date, source, title, URL, excerpt, caveats). Bare `search history` is a validation error. Do not fall through to latest-digest phrasing.
 
 - **Blocked by:** T1
 - **Plan mode:** medium
