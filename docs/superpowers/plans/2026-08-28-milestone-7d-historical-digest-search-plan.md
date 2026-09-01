@@ -159,7 +159,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 — CLI `history-search` and `history-show`
 
-- [ ] **Do:** Wire thin subcommands to the search/show service: flags per spec, `--db-path` like digest, exit `0` on success including zero matches, `2` on validation or not-found ref, `1` on unexpected store failure. Do not add OpenClaw commands.
+- [X] **Do:** Wire thin subcommands to the search/show service: flags per spec, `--db-path` like digest, exit `0` on success including zero matches, `2` on validation or not-found ref, `1` on unexpected store failure. Do not add OpenClaw commands.
 
 - **Blocked by:** T4, T5, T6
 - **Plan mode:** medium
