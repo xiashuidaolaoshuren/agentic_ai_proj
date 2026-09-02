@@ -119,6 +119,26 @@ Useful flags:
 - `--top-n`, `--max-items` — ranking/collection limits
 - `--db-path` — SQLite path for [`DigestStore`](src/ai_news_agent/storage.py)
 
+### Historical digest search (CLI)
+
+Search and reopen **persisted** digest items from SQLite (no live connector calls, no Hub enrich-on-open):
+
+```bash
+uv run ai-news-agent history-search \
+  --query "RAG agents" \
+  --sources huggingface,zhihu \
+  --since 2026-08-01 \
+  --db-path ./digest.sqlite
+
+uv run ai-news-agent history-show d12:r3 --db-path ./digest.sqlite
+```
+
+`history-search` flags: `--query`, `--sources`, `--topics`, `--since`, `--until` (YYYY-MM-DD, UTC), `--limit` (default 10), `--db-path` (same default as `digest`). Exit **0** on success, including **zero matches**; **2** for validation errors (bad source, date range, or token); **1** for runtime failures.
+
+`history-show` prints one saved item by `d<digest_id>:r<rank>` token. Exit **0** when found; **2** when not found or token invalid.
+
+OpenClaw has **no** history subcommands — use CLI or Gradio chat for historical search.
+
 Console entrypoint: [`ai-news-agent`](pyproject.toml) → [`cli.main`](src/ai_news_agent/cli.py).
 
 ## Gradio chatbot
@@ -137,6 +157,7 @@ uv run python -m ai_news_agent.app.gradio_app --fake --port 7860 --db-path ./dig
 
 The UI delegates to [`ChatService`](src/ai_news_agent/chat.py):
 
+- **Historical digest search** (`search history …`, `open history dN:rN`) — SQLite-only lookup; intercepts **before** the digest workflow and **before** latest-digest follow-up routing. Works in **`--fake`** mode (offline, no tool agent). Opening a hit is **persist-only** and does **not** change latest-digest follow-up context (structured prompts still refer to the most recent digest run).
 - **Digest requests** (phrases like “digest”, URLs, source toggles) run the **deterministic LangGraph workflow** — collect, rank, summarize, persist — with streaming progress, then stream the final digest text.
 - **Follow-ups** use the latest saved digest from SQLite. Routing order:
   1. **Structured** prompts → instant answers from persisted traces (no LLM tools): sources, ranking / study-first, caveats.
@@ -144,7 +165,7 @@ The UI delegates to [`ChatService`](src/ai_news_agent/chat.py):
   3. **Legacy fallback** → `chat_model.generate_followup_reply` only if no tool agent is configured (not used by default live Gradio).
   4. **Guidance** message if neither tool agent nor chat model is available.
 
-Example prompts live in a collapsible **Example prompts** panel below the chat. Clicking an example sets **Sources** to match that prompt (Items per source is unchanged). Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
+Example prompts live in a collapsible **Example prompts** panel below the chat. Clicking an example sets **Sources** to match that prompt (Items per source is unchanged); history prompts still only set Sources — the history intercept ignores those toggles. Digest responses show live workflow progress (collecting, ranking, summarizing, etc.), then stream the final digest text incrementally in the chat bubble.
 
 ### Milestone 2 — Follow-up tools (Gradio / ChatService)
 
@@ -174,6 +195,8 @@ Registry tools (live mode): `load_latest_digest`, `get_digest_item`, `get_source
 | Category | Example |
 |----------|---------|
 | Digest | `Give me today's AI digest` |
+| History search | `search history for RAG agents from huggingface,zhihu since 2026-08-01` |
+| History open | `open history d12:r3` |
 | Structured | `show sources`, `Which item should I study first?`, `Any confidence caveats?` |
 | Open-ended | `Why does the top item matter for RAG agents?` |
 | Source exploration | `Search Juya for agent news`, `Search Hugging Face for trending RAG models`, `Search GitHub for langgraph agents`, `Search Zhihu for practitioner insights on RAG`, `Search Bilibili for RAG tutorials` |

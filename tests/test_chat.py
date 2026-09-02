@@ -11,7 +11,9 @@ import pytest
 from ai_news_agent.chat import ChatService
 from ai_news_agent.connectors.base import ConnectorRequest, ConnectorResult
 from ai_news_agent.graph.state import DigestResult
+from ai_news_agent.followup_structured import NO_SAVED_DIGEST
 from ai_news_agent.models import (
+    ConfidenceLevel,
     ConnectorWarning,
     Digest,
     DigestEntry,
@@ -1425,3 +1427,246 @@ def test_resolve_digest_request_no_timeframe_default_for_github_channel() -> Non
 
     assert req.github_target_channels == ["acme"]
     assert req.timeframe is None
+
+
+def test_history_intercept_stub_raises_even_with_fake_router(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called for history intercept stub")
+
+    store = DigestStore(tmp_path / "history-stub.db")
+    store.init_schema()
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="router should not run",
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("search history for rag"))
+    assert "No saved digests to search." in reply
+    assert router.calls == []
+
+
+_HISTORY_FIXTURE_DT = datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC)
+
+
+def _seed_history_github_digest(store: DigestStore) -> int:
+    item = NewsItem(
+        source=SourceKind.GITHUB,
+        source_id="repo-1",
+        url="https://github.com/a/b",
+        title="a/b",
+        collected_at=_HISTORY_FIXTURE_DT,
+        content_confidence=ConfidenceLevel.HIGH,
+    )
+    entry = DigestEntry(
+        source_kind=SourceKind.GITHUB,
+        source_id="repo-1",
+        title="a/b",
+        source_name="GitHub",
+        source_url=item.url,
+        summary="Summary about transformers",
+        why_it_matters="Why",
+        background_knowledge="Background",
+        follow_up_action=FollowUpAction.READ,
+    )
+    run_id = store.save_run(
+        requested_at=_HISTORY_FIXTURE_DT,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+    store.save_connector_result(
+        run_id,
+        ConnectorResult(items=[item], warnings=[], raw_count=1),
+    )
+    store.save_ranked_items(
+        run_id,
+        [RankedItem(item=item, score_total=1.0, selected=True, selection_reason="best")],
+    )
+    return store.save_digest(
+        run_id,
+        Digest(
+            generated_at=_HISTORY_FIXTURE_DT,
+            entries=[entry],
+            topics=["RAG"],
+            timeframe="today",
+        ),
+    )
+
+
+def test_history_search_intercept_before_router(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called")
+
+    store = DigestStore(tmp_path / "history-search.db")
+    store.init_schema()
+    digest_id = _seed_history_github_digest(store)
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="router should not run",
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("search history for transformer"))
+    assert f"d{digest_id}:r1" in reply
+    assert "a/b" in reply
+    assert router.calls == []
+
+    routed = asyncio.run(svc.handle_message_async("show sources"))
+    assert routed == "router should not run"
+    assert len(router.calls) == 1
+
+
+def test_history_open_intercept_before_router(tmp_path) -> None:
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called")
+
+    store = DigestStore(tmp_path / "history-open.db")
+    store.init_schema()
+    digest_id = _seed_history_github_digest(store)
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="router should not run",
+        )
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=fake_runner,
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async(f"open history d{digest_id}:r1"))
+    assert reply.startswith("Digest item 1: a/b")
+    assert router.calls == []
+
+
+def test_history_open_not_found_not_no_saved_digest(tmp_path) -> None:
+    store = DigestStore(tmp_path / "history-open-miss.db")
+    store.init_schema()
+    _seed_history_github_digest(store)
+    router = _FakeInterfaceRouter()
+    svc = ChatService(
+        store=store,
+        workflow_runner=_unused_runner(),
+        interface_router=router,
+    )
+
+    reply = asyncio.run(svc.handle_message_async("open history d9999:r1"))
+    assert reply == "not found"
+    assert NO_SAVED_DIGEST not in reply
+    assert router.calls == []
+
+
+def test_history_validation_errors_before_router(tmp_path) -> None:
+    store = DigestStore(tmp_path / "history-validation.db")
+    store.init_schema()
+    router = _FakeInterfaceRouter()
+    svc = ChatService(
+        store=store,
+        workflow_runner=_unused_runner(),
+        interface_router=router,
+    )
+
+    bare = asyncio.run(svc.handle_message_async("search history"))
+    assert "at least one search criterion" in bare
+    assert NO_SAVED_DIGEST not in bare
+    assert router.calls == []
+
+    bad_source = asyncio.run(
+        svc.handle_message_async("search history from arxiv")
+    )
+    assert "Unknown source" in bad_source
+    assert NO_SAVED_DIGEST not in bad_source
+    assert router.calls == []
+
+
+def _unused_runner():
+    async def fake_runner(_: DigestRequest) -> DigestResult:
+        raise AssertionError("workflow_runner should not be called")
+
+    return fake_runner
+
+
+def test_history_streaming_search_before_router(tmp_path) -> None:
+    store = DigestStore(tmp_path / "history-stream-search.db")
+    store.init_schema()
+    digest_id = _seed_history_github_digest(store)
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="router should not run",
+        ),
+        stream_events=[("", True, InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="router should not run",
+        ))],
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=_unused_runner(),
+        interface_router=router,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(svc, "search history for transformer")
+    )
+    joined = "".join(chunks)
+    assert f"d{digest_id}:r1" in joined
+    assert router.calls == []
+
+
+def test_history_streaming_open_before_router(tmp_path) -> None:
+    store = DigestStore(tmp_path / "history-stream-open.db")
+    store.init_schema()
+    digest_id = _seed_history_github_digest(store)
+    router = _FakeInterfaceRouter()
+    svc = ChatService(
+        store=store,
+        workflow_runner=_unused_runner(),
+        interface_router=router,
+    )
+
+    chunks = asyncio.run(
+        _collect_streaming(svc, f"open history d{digest_id}:r1")
+    )
+    joined = "".join(chunks)
+    assert "Digest item 1: a/b" in joined
+    assert router.calls == []
+
+
+def test_non_history_streaming_still_routes_through_router(tmp_path) -> None:
+    store = DigestStore(tmp_path / "history-stream-route.db")
+    store.init_schema()
+    router = _FakeInterfaceRouter(
+        result=InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="stream routed",
+        ),
+        stream_events=[("", True, InterfaceAgentResult(
+            kind=InterfaceAgentResultKind.CONVERSATIONAL,
+            text="stream routed",
+        ))],
+    )
+    svc = ChatService(
+        store=store,
+        workflow_runner=_unused_runner(),
+        interface_router=router,
+    )
+
+    chunks = asyncio.run(_collect_streaming(svc, "what trends do you see?"))
+    assert "".join(chunks) == "stream routed"
+    assert len(router.calls) == 1
+

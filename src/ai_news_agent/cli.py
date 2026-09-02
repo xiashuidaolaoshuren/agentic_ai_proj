@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -22,6 +23,9 @@ from ai_news_agent.adapters.openclaw import (
 )
 from ai_news_agent.env import configure_bilibili_network_from_env, load_local_env
 from ai_news_agent.graph.workflow import run_digest
+from ai_news_agent.history import validate_history_search_query
+from ai_news_agent.history_interface import HISTORY_NOT_FOUND, format_history_search_text
+from ai_news_agent.history_search import search_digest_history, show_historical_item
 from ai_news_agent.llm import build_chat_model
 from ai_news_agent.logging_setup import configure_logging, get_logger
 from ai_news_agent.request import DigestRequest, huggingface_fields_from_structured_sources, primary_source_from_names
@@ -48,6 +52,31 @@ def _split_csv(value: str | None) -> list[str]:
     if value is None or value.strip() == "":
         return []
     return [p.strip() for p in value.split(",") if p.strip()]
+
+
+def _parse_cli_date(value: str | None) -> date | None:
+    if value is None or value.strip() == "":
+        return None
+    return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+
+
+def build_history_search_query(ns: argparse.Namespace) -> Any:
+    """Build a :class:`~ai_news_agent.history.HistorySearchQuery` from CLI flags."""
+    sources = parse_sources_csv(getattr(ns, "sources", None))
+    topics = _split_csv(getattr(ns, "topics", None))
+    text = getattr(ns, "query", None)
+    if isinstance(text, str):
+        stripped = text.strip()
+        text = stripped if stripped else None
+    kwargs: dict[str, Any] = {
+        "text": text,
+        "sources": sources or None,
+        "topics": topics or None,
+        "since": _parse_cli_date(getattr(ns, "since", None)),
+        "until": _parse_cli_date(getattr(ns, "until", None)),
+        "limit": getattr(ns, "limit", 10),
+    }
+    return validate_history_search_query(**kwargs)
 
 
 def build_digest_request(ns: argparse.Namespace) -> DigestRequest:
@@ -183,6 +212,39 @@ def _add_digest_parser(sub: Any) -> argparse.ArgumentParser:
     return p
 
 
+def _add_history_search_parser(sub: Any) -> argparse.ArgumentParser:
+    p = sub.add_parser("history-search", help="Search saved digest entries")
+    p.add_argument("--query", default=None, help="Text query")
+    p.add_argument(
+        "--sources",
+        default=None,
+        help="Comma-separated source names (juya, huggingface, github, zhihu, bilibili)",
+    )
+    p.add_argument("--topics", default=None, help="Comma-separated digest topics")
+    p.add_argument("--since", default=None, help="Inclusive start date (YYYY-MM-DD, UTC)")
+    p.add_argument("--until", default=None, help="Inclusive end date (YYYY-MM-DD, UTC)")
+    p.add_argument("--limit", type=int, default=10, help="Maximum matches (default: 10)")
+    p.add_argument(
+        "--db-path",
+        type=Path,
+        default=None,
+        help="SQLite path for DigestStore (default: ./digest.sqlite in cwd)",
+    )
+    return p
+
+
+def _add_history_show_parser(sub: Any) -> argparse.ArgumentParser:
+    p = sub.add_parser("history-show", help="Show one saved digest entry by dN:rN token")
+    p.add_argument("token", help="Historical item reference (d<digest_id>:r<rank>)")
+    p.add_argument(
+        "--db-path",
+        type=Path,
+        default=None,
+        help="SQLite path for DigestStore (default: ./digest.sqlite in cwd)",
+    )
+    return p
+
+
 def _add_service_parser(sub: Any) -> argparse.ArgumentParser:
     from ai_news_agent.app.digest_service import main as service_main
 
@@ -269,6 +331,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-news-agent")
     sub = parser.add_subparsers(dest="command", required=True)
     _add_digest_parser(sub)
+    _add_history_search_parser(sub)
+    _add_history_show_parser(sub)
     _add_service_parser(sub)
     _add_openclaw_digest_parser(sub)
     _add_openclaw_followup_parser(sub)
@@ -333,6 +397,51 @@ def _run_digest_command(ns: argparse.Namespace, *, stdout: TextIO) -> int:
     return 0
 
 
+def _run_history_search_command(ns: argparse.Namespace, *, stdout: TextIO) -> int:
+    try:
+        query = build_history_search_query(ns)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    db_path = _resolve_db_path(ns)
+    store = DigestStore(db_path)
+    try:
+        store.init_schema()
+        result = search_digest_history(store, query)
+    except Exception as exc:  # noqa: BLE001 - CLI top-level error surface
+        logger.exception("cli history-search failed")
+        print(f"history-search failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    text = format_history_search_text(result)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    stdout.write(text)
+    return 0
+
+
+def _run_history_show_command(ns: argparse.Namespace, *, stdout: TextIO) -> int:
+    db_path = _resolve_db_path(ns)
+    store = DigestStore(db_path)
+    try:
+        store.init_schema()
+        text = show_historical_item(store, ns.token)
+    except Exception as exc:  # noqa: BLE001 - CLI top-level error surface
+        logger.exception("cli history-show failed")
+        print(f"history-show failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    if text is None:
+        print(HISTORY_NOT_FOUND, file=sys.stderr)
+        return 2
+
+    if not text.endswith("\n"):
+        text += "\n"
+    stdout.write(text)
+    return 0
+
+
 def _namespace_to_argv(ns: argparse.Namespace) -> list[str]:
     argv: list[str] = []
     for key, value in sorted(vars(ns).items()):
@@ -371,6 +480,12 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
 
     if ns.command == "digest":
         return _run_digest_command(ns, stdout=out)
+
+    if ns.command == "history-search":
+        return _run_history_search_command(ns, stdout=out)
+
+    if ns.command == "history-show":
+        return _run_history_show_command(ns, stdout=out)
 
     handler = getattr(ns, "_handler", None)
     if handler is None:

@@ -6,11 +6,12 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from ai_news_agent.connectors.base import ConnectorResult
+from ai_news_agent.history import HISTORY_CANDIDATE_CAP
 from ai_news_agent.models import (
     ConnectorWarning,
     Digest,
@@ -442,3 +443,99 @@ class DigestStore:
             )
             out.append(ri)
         return out
+
+    def _parse_stored_datetime(self, value: str) -> datetime:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    def _historical_row_to_candidate(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "title": row["title"],
+            "summary": row["summary"],
+            "why_it_matters": row["why_it_matters"],
+            "background_knowledge": row["background_knowledge"],
+            "digest_topics": json.loads(row["topics_json"]),
+            "generated_at": self._parse_stored_datetime(row["generated_at"]),
+            "digest_id": int(row["digest_id"]),
+            "rank": int(row["display_rank"]),
+            "run_id": int(row["run_id"]),
+            "entry_id": int(row["id"]),
+            "source_kind": SourceKind(row["source_kind"]),
+            "source_id": row["source_id"],
+            "source_name": row["source_name"],
+            "source_url": row["source_url"],
+        }
+
+    def _utc_day_start(self, day: date) -> datetime:
+        return datetime(day.year, day.month, day.day, tzinfo=UTC)
+
+    def _utc_day_end_exclusive(self, day: date) -> datetime:
+        return self._utc_day_start(day + timedelta(days=1))
+
+    def list_historical_digest_entries(
+        self,
+        *,
+        sources: list[str] | None = None,
+        since: date | None = None,
+        until: date | None = None,
+        cap: int = HISTORY_CANDIDATE_CAP,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        with self._conn() as conn:
+            count = conn.execute("SELECT COUNT(*) AS c FROM digest_entries").fetchone()["c"]
+            if count == 0:
+                return [], False
+
+            where_clauses: list[str] = []
+            params: list[Any] = []
+            if sources:
+                placeholders = ",".join("?" for _ in sources)
+                where_clauses.append(f"re.source_kind IN ({placeholders})")
+                params.extend(sources)
+            if since is not None:
+                where_clauses.append("re.generated_at >= ?")
+                params.append(self._utc_day_start(since).isoformat())
+            if until is not None:
+                where_clauses.append("re.generated_at < ?")
+                params.append(self._utc_day_end_exclusive(until).isoformat())
+            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+            query = f"""
+                WITH ranked_entries AS (
+                  SELECT
+                    de.*,
+                    d.run_id,
+                    d.generated_at,
+                    d.topics_json,
+                    d.id AS digest_id,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY de.digest_id ORDER BY de.id ASC
+                    ) AS display_rank
+                  FROM digest_entries de
+                  JOIN digests d ON d.id = de.digest_id
+                )
+                SELECT * FROM ranked_entries re
+                {where_sql}
+                ORDER BY re.generated_at DESC, re.digest_id DESC, re.display_rank ASC
+                LIMIT ?
+            """
+            params.append(cap + 1)
+            rows = conn.execute(query, params).fetchall()
+
+        truncated = len(rows) > cap
+        if truncated:
+            rows = rows[:cap]
+        return [self._historical_row_to_candidate(row) for row in rows], truncated
+
+    def get_followup_context_for_digest(self, digest_id: int) -> FollowupContext | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM digests WHERE id = ?", (digest_id,)).fetchone()
+        if row is None:
+            return None
+        run_id = int(row["run_id"])
+        digest = self._digest_from_row(row)
+        return FollowupContext(
+            run_id=run_id,
+            digest=digest,
+            news_items=self._load_news_items(run_id),
+            ranked_items=self._load_ranked_items(run_id),
+            warnings=self._load_warnings(run_id),
+        )

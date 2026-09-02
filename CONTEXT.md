@@ -73,8 +73,8 @@ Deterministic inspection of the latest saved digest via fixed phrases: show sour
 _Avoid_: New OpenClaw path strings, treating open-ended chat as structured follow-up, inventing Hub quality or Zhihu freshness beyond saved evidence
 
 **Rank deep-dive**:
-The structured reply for one 1-based **display rank**. Kind-specific cards from saved digest evidence: Juya **issue deep-dive**, Hugging Face **family card**, Zhihu **practitioner-insight card**; other kinds stay a generic entry reprint. Hugging Face may live-fetch the representative model-card README once on rank follow-up (ADR-0006); Zhihu stays persist-only.
-_Avoid_: A digest-renderer “follow-up section”, giving Also variants their own ranks, synthesizing multiple Zhihu results, changing show-sources / study-first / caveats in the same change, git clone, Also-variant READMEs, Zhihu page fetch
+The structured reply for one 1-based **display rank**. Kind-specific cards from saved digest evidence: Juya **issue deep-dive**, Hugging Face **family card**, Zhihu **practitioner-insight card**; other kinds stay a generic entry reprint. On the **latest** digest, Hugging Face may live-fetch the representative model-card README once (ADR-0006); Zhihu stays persist-only. **History show** never live-fetches.
+_Avoid_: A digest-renderer “follow-up section”, giving Also variants their own ranks, synthesizing multiple Zhihu results, changing show-sources / study-first / caveats in the same change, git clone, Also-variant READMEs, Zhihu page fetch, treating history show as latest-digest enrich
 
 **Issue deep-dive**:
 The Juya rank deep-dive — one daily issue expanded into sub-news from persisted website markdown. Chinese chrome.
@@ -87,6 +87,18 @@ _Avoid_: Repeating only the table with no snippet, dumping every Hub key, git cl
 **Zhihu practitioner-insight card**:
 The Zhihu rank deep-dive — that rank’s single **practitioner insight**: Chinese chrome, evidence-first snippet/lens/author, 搜索相关性 labeled as search relevance not 热度, optional labeled LLM 摘要 / 为什么值得看, thin-evidence and no-freshness caveats.
 _Avoid_: Related-insight synthesis, parsing a snippet as Juya sub-news, fetching the linked page, treating relevance as 热度 or trending
+
+**Historical digest search**:
+Finding past saved digest entries by text, source, topic, and/or date. It is not latest-digest follow-up and not a search of unselected collected candidates.
+_Avoid_: Vector memory, conversation memory, trend synthesis, searching NewsItems that never made a digest
+
+**Historical item reference**:
+A stable pointer to one saved digest entry by digest identity and original **display rank**, shown as `dN:rN`.
+_Avoid_: Rank without digest identity, nearest-match guessing, treating the token as a latest-digest rank
+
+**History show**:
+Opening one historical item by **historical item reference** as a read-only **rank deep-dive** of that saved digest, without changing latest-digest follow-up context.
+_Avoid_: Making the old digest the active follow-up context, live connector enrichment on historical open
 
 ### Shared
 

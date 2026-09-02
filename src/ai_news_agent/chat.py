@@ -12,6 +12,13 @@ from ai_news_agent.digest_request_builder import resolve_digest_request
 from ai_news_agent.graph.state import DigestResult
 from ai_news_agent.logging_setup import get_logger
 from ai_news_agent.followup_structured import NO_SAVED_DIGEST, answer_structured_followup
+from ai_news_agent.history_interface import (
+    HISTORY_NOT_FOUND,
+    HistoryChatCommand,
+    format_history_search_text,
+    parse_history_chat_message,
+)
+from ai_news_agent.history_search import search_digest_history, show_historical_item
 from ai_news_agent.rendering import format_connector_warnings_notice
 from ai_news_agent.request import DigestRequest
 from ai_news_agent.storage import DigestStore, FollowupContext
@@ -87,6 +94,11 @@ class ChatService:
         preview = _message_preview(message)
         logger.info("chat message received preview=%r", preview)
 
+        history_cmd = parse_history_chat_message(message)
+        if history_cmd is not None:
+            logger.info("chat path=history action=%s", history_cmd.action)
+            return self._handle_history_command(history_cmd)
+
         if self._interface_router is not None:
             result = await self._interface_router.route(
                 message=message,
@@ -150,6 +162,18 @@ class ChatService:
     ) -> AsyncIterator[str]:
         preview = _message_preview(message)
         logger.info("chat streaming message received preview=%r", preview)
+
+        history_cmd = parse_history_chat_message(message)
+        if history_cmd is not None:
+            logger.info("chat streaming path=history action=%s", history_cmd.action)
+            text = self._handle_history_command(history_cmd)
+            async for chunk in iter_text_chunks(
+                text,
+                chunk_size=chunk_size,
+                delay_s=chunk_delay_s,
+            ):
+                yield chunk
+            return
 
         if self._interface_router is not None:
             async def _router_events() -> AsyncIterator[
@@ -288,6 +312,22 @@ class ChatService:
             delay_s=chunk_delay_s,
         ):
             yield chunk
+
+
+    def _handle_history_command(self, cmd: HistoryChatCommand) -> str:
+        if cmd.error is not None:
+            return cmd.error
+        if cmd.action == "search":
+            if cmd.query is None:
+                raise NotImplementedError
+            result = search_digest_history(self._store, cmd.query)
+            return format_history_search_text(result)
+        if cmd.action == "open":
+            if cmd.token is None:
+                return HISTORY_NOT_FOUND
+            text = show_historical_item(self._store, cmd.token)
+            return text if text is not None else HISTORY_NOT_FOUND
+        raise NotImplementedError
 
 
 async def _stream_ephemeral_progress_then_chunks(

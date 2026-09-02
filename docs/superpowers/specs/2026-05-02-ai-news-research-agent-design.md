@@ -557,10 +557,13 @@ Out of scope for Milestone 5: arXiv, Hugging Face, generic RSS, true star-veloci
 
 ### Milestone 7: Memory, Scheduling, And Deployment
 
-- Add scheduled daily or weekly digest generation
-- Add richer local memory or vector search if stored digests become large
-- Deploy the agent or a lightweight API
-- Add automated quality evaluation
+Milestone 7 is four independent jobs. Ship them as separate slices, not one spec.
+
+- **7A** — Automated quality evaluation (deferred)
+- **7B** — Scheduled daily or weekly digest generation (deferred)
+- **7C** — Deploy the agent or a lightweight API (deferred)
+- **7D.1** — Historical digest search and read-only reopen of saved entries; filtered SQLite scan, no vectors; opening a hit does not change latest-digest context. See ADR-0007 / `docs/superpowers/specs/2026-08-28-milestone-7d-historical-digest-search-design.md`
+- **7D.2+** — Trend synthesis, personalization, conversation memory, FTS, or vector search if a real archive outgrows the scan (deferred)
 
 ## Implementation Planning Defaults
 
