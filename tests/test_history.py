@@ -292,6 +292,11 @@ def test_query_rejects_unknown_source() -> None:
         HistorySearchQuery(sources=["bad"])
 
 
+def test_query_normalizes_source_names_to_lowercase() -> None:
+    query = HistorySearchQuery(sources=["JUYA", "HuggingFace"])
+    assert query.sources == ["juya", "huggingface"]
+
+
 def test_query_limit_bounds() -> None:
     with pytest.raises(ValueError):
         HistorySearchQuery(sources=["juya"], limit=0)

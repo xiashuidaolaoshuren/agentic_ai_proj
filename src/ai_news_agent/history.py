@@ -56,12 +56,20 @@ class HistorySearchQuery(BaseModel):
     def _validate_sources(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
+        normalized: list[str] = []
+        seen: set[str] = set()
         for name in value:
-            normalized = str(name).strip().lower()
-            if normalized not in ALLOWED_SOURCES:
+            key = str(name).strip().lower()
+            if not key:
+                continue
+            if key not in ALLOWED_SOURCES:
                 allowed = ", ".join(sorted(ALLOWED_SOURCES))
-                raise ValueError(f"Unknown source {normalized!r}; allowed: {allowed}")
-        return value
+                raise ValueError(f"Unknown source {key!r}; allowed: {allowed}")
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(key)
+        return normalized
 
     @field_validator("limit")
     @classmethod
