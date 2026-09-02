@@ -63,6 +63,11 @@ _EXAMPLE_ROWS: list[list] = [
     ["Show Hugging Face trending models", ["huggingface"]],
     ["Find Zhihu practitioner insights on RAG", ["zhihu"]],
     ["follow up on item 1", ["juya"]],
+    [
+        "search history for RAG agents from huggingface,zhihu since 2026-08-01",
+        ["huggingface", "zhihu"],
+    ],
+    ["open history d12:r3", ["juya"]],
 ]
 
 logger = get_logger("gradio")

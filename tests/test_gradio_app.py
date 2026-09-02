@@ -156,6 +156,19 @@ def test_gradio_examples_include_zhihu_practitioner_prompt() -> None:
     )
 
 
+_HISTORY_SEARCH_PROMPT = (
+    "search history for RAG agents from huggingface,zhihu since 2026-08-01"
+)
+_HISTORY_OPEN_PROMPT = "open history d12:r3"
+
+
+def test_gradio_examples_include_history_prompts() -> None:
+    prompts = [row[0] for row in _EXAMPLE_ROWS]
+    assert len(_EXAMPLE_ROWS) == 10
+    assert _HISTORY_SEARCH_PROMPT in prompts
+    assert _HISTORY_OPEN_PROMPT in prompts
+
+
 def test_gradio_examples_map_prompts_to_matching_source_toggles() -> None:
     by_prompt = {row[0]: list(row[1]) for row in _EXAMPLE_ROWS}
 
@@ -167,6 +180,8 @@ def test_gradio_examples_map_prompts_to_matching_source_toggles() -> None:
     assert by_prompt["Show Hugging Face trending models"] == ["huggingface"]
     assert by_prompt["Find Zhihu practitioner insights on RAG"] == ["zhihu"]
     assert by_prompt["follow up on item 1"] == ["juya"]
+    assert by_prompt[_HISTORY_SEARCH_PROMPT] == ["huggingface", "zhihu"]
+    assert by_prompt[_HISTORY_OPEN_PROMPT] == ["juya"]
 
     assert not any("/issues/" in row[0] for row in _EXAMPLE_ROWS)
 
@@ -216,7 +231,7 @@ def test_create_app_builds_with_foldable_examples_and_streaming_handler(tmp_path
     demo = create_app(svc)
 
     assert demo is not None
-    assert len(_EXAMPLE_ROWS) == 8
+    assert len(_EXAMPLE_ROWS) == 10
 
     reply = asyncio.run(
         svc.handle_message_async(
