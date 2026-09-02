@@ -170,7 +170,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 — ChatService history intercept
 
-- [ ] **Do:** Handle parsed history commands in `ChatService` **before** digest detection and **before** `interface_router` (sync + streaming). Live and fake: never call the tool runner / fake tool agent. Non-history messages keep current routing. Prove a fake router is not invoked for `search history` / `open history`.
+- [x] **Do:** Handle parsed history commands in `ChatService` **before** digest detection and **before** `interface_router` (sync + streaming). Live and fake: never call the tool runner / fake tool agent. Non-history messages keep current routing. Prove a fake router is not invoked for `search history` / `open history`.
 
 - **Blocked by:** T4, T5, T6
 - **Plan mode:** high
@@ -181,7 +181,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T9 — README and Gradio example prompts
 
-- [ ] **Do:** Document CLI and Gradio history usage in `README.md` (offline, persist-only open, latest-digest unchanged, OpenClaw out of scope). Add Gradio example rows for search/open; update `tests/test_gradio_app.py` example count/mappings.
+- [x] **Do:** Document CLI and Gradio history usage in `README.md` (offline, persist-only open, latest-digest unchanged, OpenClaw out of scope). Add Gradio example rows for search/open; update `tests/test_gradio_app.py` example count/mappings.
 
 - **Blocked by:** T7, T8
 - **Plan mode:** skip
@@ -193,7 +193,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T10 — Milestone-level regression
 
-- [ ] **Do:** Run the full automated suite. Confirm OpenClaw `path` remains `no_digest` / `structured` / `guidance`, latest-digest structured wording tests still pass, no schema migration, no new registry tools. Update this plan’s changelog if verification exposes a missing file or extra subtask.
+- [x] **Do:** Run the full automated suite. Confirm OpenClaw `path` remains `no_digest` / `structured` / `guidance`, latest-digest structured wording tests still pass, no schema migration, no new registry tools. Update this plan’s changelog if verification exposes a missing file or extra subtask.
 
 - **Blocked by:** T1, T2, T3, T4, T5, T6, T7, T8, T9
 - **Plan mode:** medium
@@ -213,5 +213,6 @@ Per subtask, obey `TDD suitable`: `yes` means strict **test-driven-development**
 | Date       | Change                                                      |
 | ---------- | ----------------------------------------------------------- |
 | 2026-08-29 | Created from the accepted Milestone 7D.1 spec and ADR-0007. |
+| 2026-09-02 | T10: `uv run pytest -q` — 792 passed, 2 skipped. `test_public_format_helpers_preserve_wording` exact-matches. OpenClaw `path` remains `no_digest` / `structured` / `guidance`. `SCHEMA_VERSION == "1"`. No history tools in `tools/registry.py`. No missing files, contract change, or extra subtask. |
 
 
