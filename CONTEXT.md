@@ -100,6 +100,10 @@ _Avoid_: Rank without digest identity, nearest-match guessing, treating the toke
 Opening one historical item by **historical item reference** as a read-only **rank deep-dive** of that saved digest, without changing latest-digest follow-up context.
 _Avoid_: Making the old digest the active follow-up context, live connector enrichment on historical open
 
+**Session**:
+A durable browser conversation thread that owns ordered chat messages, session-sticky source preferences, and its own latest digest context. A session's structured follow-ups inspect the latest digest run associated with that session; historical digest search still spans the shared digest archive. CLI and OpenClaw retain their separate global-latest follow-up behavior.
+_Avoid_: An HTTP cookie/session token, an ephemeral browser tab, a user account or authorization boundary, treating all sessions as one global latest-digest context, using a session to limit historical digest search
+
 ### Shared
 
 **NewsItem**:
