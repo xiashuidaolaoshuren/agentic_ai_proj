@@ -69,7 +69,7 @@ The suggested next learning move stored on a digest row (read, watch, try, or bu
 _Avoid_: Structured follow-up, rank deep-dive, “follow-up section”
 
 **Structured follow-up**:
-Deterministic inspection of the latest saved digest via fixed phrases: show sources, study first, caveats, and rank. OpenClaw supports only this; Gradio also allows open-ended Q&A.
+Deterministic inspection of the current follow-up context via fixed phrases: show sources, study first, caveats, and rank. A browser Session uses its latest successful digest; CLI, Gradio, and OpenClaw use Shared-interface context. OpenClaw supports only this; Gradio also allows open-ended Q&A.
 _Avoid_: New OpenClaw path strings, treating open-ended chat as structured follow-up, inventing Hub quality or Zhihu freshness beyond saved evidence
 
 **Rank deep-dive**:
@@ -101,8 +101,16 @@ Opening one historical item by **historical item reference** as a read-only **ra
 _Avoid_: Making the old digest the active follow-up context, live connector enrichment on historical open
 
 **Session**:
-A durable browser conversation thread that owns ordered chat messages, session-sticky source preferences, and its own latest digest context. A session's structured follow-ups inspect the latest digest run associated with that session; historical digest search still spans the shared digest archive. CLI and OpenClaw retain their separate global-latest follow-up behavior.
-_Avoid_: An HTTP cookie/session token, an ephemeral browser tab, a user account or authorization boundary, treating all sessions as one global latest-digest context, using a session to limit historical digest search
+A durable browser conversation thread that owns ordered chat messages, session-sticky source preferences, and its own latest digest context. It permits one active **Session Request** at a time. A session's structured follow-ups inspect its latest successful digest; older digests must be opened by historical item reference. Historical digest search still spans the shared digest archive.
+_Avoid_: An HTTP cookie/session token, an ephemeral browser tab, a user account or authorization boundary, multiple simultaneous requests in one session, treating all sessions as one global latest-digest context, using a session to limit historical digest search
+
+**Shared-interface context**:
+The latest saved digest that does not belong to a browser session. CLI, Gradio, and OpenClaw structured follow-ups inspect this context, independently of every browser Session.
+_Avoid_: Global latest across every interface, a Session's context, a browser-created digest changing CLI/Gradio/OpenClaw follow-up behavior
+
+**Session Request**:
+One durable user-initiated chat execution within a Session, from accepted user message to one terminal outcome: succeeded, failed, cancelled, or interrupted. It gives that message a stable lifecycle independently of transient response delivery.
+_Avoid_: The user message itself, a Digest run, a transient delivery channel, automatically retrying an interrupted request
 
 ### Shared
 
