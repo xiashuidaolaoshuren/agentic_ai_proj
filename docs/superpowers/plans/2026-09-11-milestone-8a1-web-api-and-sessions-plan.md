@@ -131,7 +131,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T2 — Schema v2 migration and backup
 
-- [ ] **Do:** Upgrade v1 databases in place to sessions, messages, session requests, and nullable `runs.session_id`. Take one sibling SQLite backup before migrating, commit `schema_version` `"2"` last, and leave the original at v1 if migration fails. Do not back up a database that is already v2.
+- [x] **Do:** Upgrade v1 databases in place to sessions, messages, session requests, and nullable `runs.session_id`. Take one sibling SQLite backup before migrating, commit `schema_version` `"2"` last, and leave the original at v1 if migration fails. Do not back up a database that is already v2.
 
 - **Blocked by:** T1
 - **Plan mode:** high

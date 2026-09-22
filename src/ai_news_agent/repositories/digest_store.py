@@ -24,7 +24,7 @@ from ai_news_agent.models import (
 )
 
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 @dataclass
@@ -44,6 +44,97 @@ class DigestStore:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
 
+    def _v1_backup_path(self) -> Path:
+        return self.db_path.with_name(f"{self.db_path.name}.v1.bak")
+
+    def _ensure_v1_backup(self) -> None:
+        backup_path = self._v1_backup_path()
+        if backup_path.exists():
+            return
+        source = sqlite3.connect(self.db_path)
+        try:
+            destination = sqlite3.connect(backup_path)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+        finally:
+            source.close()
+
+    def _restore_v1_backup(self) -> None:
+        backup_path = self._v1_backup_path()
+        if not backup_path.exists():
+            return
+        source = sqlite3.connect(backup_path)
+        try:
+            destination = sqlite3.connect(self.db_path)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+        finally:
+            source.close()
+
+    def _apply_v2_ddl(self, conn: sqlite3.Connection) -> None:
+        statements = (
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+              id TEXT PRIMARY KEY NOT NULL,
+              title TEXT,
+              connector_names TEXT,
+              items_per_source INTEGER,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS session_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              sequence INTEGER NOT NULL,
+              role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+              content TEXT NOT NULL,
+              run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+              created_at TEXT NOT NULL,
+              UNIQUE (session_id, sequence)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS session_requests (
+              id TEXT NOT NULL,
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              status TEXT NOT NULL CHECK (
+                status IN ('active', 'succeeded', 'failed', 'cancelled', 'interrupted')
+              ),
+              user_message_id INTEGER NOT NULL REFERENCES session_messages(id) ON DELETE RESTRICT,
+              assistant_message_id INTEGER REFERENCES session_messages(id) ON DELETE RESTRICT,
+              run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+              correlation_id TEXT NOT NULL,
+              error_code TEXT,
+              error_message TEXT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              PRIMARY KEY (session_id, id)
+            )
+            """,
+            """
+            ALTER TABLE runs ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_runs_session_id_id ON runs(session_id, id DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_messages_session_sequence
+              ON session_messages(session_id, sequence)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_requests_session_started
+              ON session_requests(session_id, started_at DESC)
+            """,
+        )
+        for statement in statements:
+            conn.execute(statement)
+
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
@@ -52,6 +143,9 @@ class DigestStore:
         try:
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -67,19 +161,49 @@ class DigestStore:
             )
             cur = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'")
             row = cur.fetchone()
-            if row is not None and row["value"] != SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"Unsupported DB schema version {row['value']!r}; expected {SCHEMA_VERSION!r}"
-                )
+            stored_version = row["value"] if row is not None else None
 
+        if stored_version == SCHEMA_VERSION:
+            return
+
+        if stored_version is not None and stored_version != "1":
+            raise RuntimeError(
+                f"Unsupported DB schema version {stored_version!r}; expected {SCHEMA_VERSION!r}"
+            )
+
+        if stored_version == "1":
+            self._ensure_v1_backup()
+            try:
+                with self._conn() as conn:
+                    self._apply_v2_ddl(conn)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
+                        (SCHEMA_VERSION,),
+                    )
+            except Exception:
+                self._restore_v1_backup()
+                raise
+            return
+
+        with self._conn() as conn:
             conn.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS sessions (
+                  id TEXT PRIMARY KEY NOT NULL,
+                  title TEXT,
+                  connector_names TEXT,
+                  items_per_source INTEGER,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS runs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   requested_at TEXT NOT NULL,
                   timeframe TEXT,
                   request_topics_json TEXT NOT NULL,
-                  connector_names_json TEXT NOT NULL
+                  connector_names_json TEXT NOT NULL,
+                  session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS news_items (
@@ -145,10 +269,43 @@ class DigestStore:
                   detail TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS session_messages (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                  sequence INTEGER NOT NULL,
+                  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                  content TEXT NOT NULL,
+                  run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+                  created_at TEXT NOT NULL,
+                  UNIQUE (session_id, sequence)
+                );
+
+                CREATE TABLE IF NOT EXISTS session_requests (
+                  id TEXT NOT NULL,
+                  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                  status TEXT NOT NULL CHECK (
+                    status IN ('active', 'succeeded', 'failed', 'cancelled', 'interrupted')
+                  ),
+                  user_message_id INTEGER NOT NULL REFERENCES session_messages(id) ON DELETE RESTRICT,
+                  assistant_message_id INTEGER REFERENCES session_messages(id) ON DELETE RESTRICT,
+                  run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+                  correlation_id TEXT NOT NULL,
+                  error_code TEXT,
+                  error_message TEXT,
+                  started_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  PRIMARY KEY (session_id, id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_news_items_run ON news_items(run_id);
                 CREATE INDEX IF NOT EXISTS idx_ranked_run ON ranked_items(run_id);
                 CREATE INDEX IF NOT EXISTS idx_digest_run ON digests(run_id);
                 CREATE INDEX IF NOT EXISTS idx_warnings_run ON connector_warnings(run_id);
+                CREATE INDEX IF NOT EXISTS idx_runs_session_id_id ON runs(session_id, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_session_messages_session_sequence
+                  ON session_messages(session_id, sequence);
+                CREATE INDEX IF NOT EXISTS idx_session_requests_session_started
+                  ON session_requests(session_id, started_at DESC);
                 """
             )
             conn.execute(

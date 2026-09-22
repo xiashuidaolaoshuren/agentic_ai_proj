@@ -403,4 +403,4 @@ def test_latest_followup_context_and_schema_unchanged(tmp_path: Path) -> None:
     latest = store.get_latest_followup_context()
     assert latest.digest is not None
     assert latest.digest.entries[0].title == "Newest digest"
-    assert SCHEMA_VERSION == "1"
+    assert SCHEMA_VERSION == "2"
