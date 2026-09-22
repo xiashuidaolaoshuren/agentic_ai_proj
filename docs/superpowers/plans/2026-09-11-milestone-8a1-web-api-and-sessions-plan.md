@@ -9,7 +9,9 @@
 
 Ship a local `/api/v1` FastAPI surface for durable browser conversations, while CLI, Gradio, and OpenClaw keep working. A browser session owns its transcript, source preferences, and latest successful digest. CLI, Gradio, and OpenClaw follow **shared-interface context**: the latest saved run with `session_id IS NULL`. Historical digest search stays archive-wide and lexical.
 
-Deliver the spec in order: **8A.1a** persistence, **8A.1b** session behavior and `DigestView`, **8A.1c** HTTP, SSE, and OpenClaw route parity. Each slice is independently testable. OpenDesign starts only after 8A.1c freezes the OpenAPI contract.
+Deliver the spec in order: **8A.1a** persistence, **8A.1b** session behavior and `DigestView`, **8A.1c** HTTP, SSE, and OpenClaw route parity. Each slice is independently testable.
+
+**Note — OpenDesign:** Do not build the UI ground truth during 8A.1a or 8A.1b. Start OpenDesign only after **T14, T15, T16, and T17** are green, so the design follows the proven `/api/v1` OpenAPI contract (`DigestView`, SSE, cursor pages, request status, history, and OpenClaw routes). **T17** alone is not that gate: it can finish before the browser routes. **T18** does not change the API and does not block OpenDesign. Milestone **8B** (Vue) starts only after that OpenDesign ground truth, and it consumes the contract rather than changing it.
 
 Out of scope: 8A.2 embeddings and memory RAG, 8B Vue/Vite/Tailwind/shadcn-vue, Gradio removal, accounts, PostgreSQL, public fake backends, new connectors, ranking or rendering-rule changes, and OpenClaw history endpoints.
 
@@ -256,3 +258,4 @@ Per subtask, obey **`TDD suitable`**. **`yes`** means strict **test-driven-devel
 | Date | Change |
 |------|--------|
 | 2026-09-22 | Initial plan from the reviewed 8A.1 spec and ADR-0008. |
+| 2026-09-22 | Note: OpenDesign starts after T14–T17, not during 8A.1a/8A.1b; T18 does not block it; 8B follows the OpenDesign ground truth. |
