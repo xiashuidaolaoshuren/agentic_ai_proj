@@ -1,4 +1,4 @@
-"""SQLite repository for sessions and ordered messages (Milestone 8A.1 T3)."""
+"""SQLite repository for sessions, messages, and session requests (Milestone 8A.1 T3/T4)."""
 
 from __future__ import annotations
 
@@ -10,9 +10,13 @@ from typing import Iterator
 
 from ai_news_agent.models import utcnow
 
+_TERMINAL_REQUEST_STATUSES = frozenset(
+    {"succeeded", "failed", "cancelled", "interrupted"}
+)
+
 
 class SessionStore:
-    """Session and message SQL only."""
+    """Session, message, and session-request SQL only."""
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
@@ -152,3 +156,109 @@ class SessionStore:
     def delete_session(self, session_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+    def create_request(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        user_message_id: int,
+        correlation_id: str,
+        started_at: str | None = None,
+    ) -> None:
+        started = started_at if started_at is not None else utcnow().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_requests (
+                  id, session_id, status, user_message_id, correlation_id, started_at
+                ) VALUES (?, ?, 'active', ?, ?, ?)
+                """,
+                (request_id, session_id, user_message_id, correlation_id, started),
+            )
+
+    def get_request(self, session_id: str, request_id: str) -> sqlite3.Row | None:
+        with self._conn() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM session_requests
+                WHERE session_id = ? AND id = ?
+                """,
+                (session_id, request_id),
+            ).fetchone()
+
+    def list_requests(self, session_id: str) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM session_requests
+                WHERE session_id = ?
+                ORDER BY started_at DESC, id DESC
+                """,
+                (session_id,),
+            ).fetchall()
+        return list(rows)
+
+    def update_request_run_id(
+        self,
+        session_id: str,
+        request_id: str,
+        run_id: int,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE session_requests
+                SET run_id = ?
+                WHERE session_id = ? AND id = ?
+                """,
+                (run_id, session_id, request_id),
+            )
+
+    def mark_terminal(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        status: str,
+        assistant_message_id: int | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        if status not in _TERMINAL_REQUEST_STATUSES:
+            raise ValueError(f"status must be a terminal request status, got {status!r}")
+        completed_at = utcnow().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE session_requests
+                SET status = ?,
+                    assistant_message_id = ?,
+                    error_code = ?,
+                    error_message = ?,
+                    completed_at = ?
+                WHERE session_id = ? AND id = ?
+                """,
+                (
+                    status,
+                    assistant_message_id,
+                    error_code,
+                    error_message,
+                    completed_at,
+                    session_id,
+                    request_id,
+                ),
+            )
+
+    def interrupt_active_requests(self) -> int:
+        completed_at = utcnow().isoformat()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE session_requests
+                SET status = 'interrupted', completed_at = ?
+                WHERE status = 'active'
+                """,
+                (completed_at,),
+            )
+            return int(cur.rowcount)

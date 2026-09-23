@@ -153,7 +153,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T4 — Session Request repository
 
-- [ ] **Do:** Persist Session Requests keyed by `(session_id, request_id)` with statuses `active`, `succeeded`, `failed`, `cancelled`, and `interrupted`. Store message and run links, correlation ID, and safe terminal error fields. Startup can mark leftover `active` rows `interrupted`.
+- [x] **Do:** Persist Session Requests keyed by `(session_id, request_id)` with statuses `active`, `succeeded`, `failed`, `cancelled`, and `interrupted`. Store message and run links, correlation ID, and safe terminal error fields. Startup can mark leftover `active` rows `interrupted`.
 
 - **Blocked by:** T3
 - **Plan mode:** high

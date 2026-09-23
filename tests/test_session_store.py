@@ -169,3 +169,190 @@ def test_delete_session_nulls_run_session_id_and_keeps_digests(tmp_path: Path) -
     assert run_row is not None
     assert run_row["session_id"] is None
     assert digest_row is not None
+
+
+def test_create_and_get_request_round_trip(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    store.create_session("sess-1")
+    user_message_id = store.insert_message("sess-1", role="user", content="Hello")
+
+    store.create_request(
+        "sess-1",
+        "req-1",
+        user_message_id=user_message_id,
+        correlation_id="corr-abc",
+        started_at="2026-03-01T12:00:00+00:00",
+    )
+
+    row = store.get_request("sess-1", "req-1")
+    assert row is not None
+    assert row["id"] == "req-1"
+    assert row["session_id"] == "sess-1"
+    assert row["status"] == "active"
+    assert row["user_message_id"] == user_message_id
+    assert row["assistant_message_id"] is None
+    assert row["run_id"] is None
+    assert row["correlation_id"] == "corr-abc"
+    assert row["error_code"] is None
+    assert row["error_message"] is None
+    assert row["started_at"] == "2026-03-01T12:00:00+00:00"
+    assert row["completed_at"] is None
+
+    assert store.get_request("sess-1", "missing") is None
+
+
+def test_list_requests_ordered_by_started_at(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    store.create_session("sess-1")
+    user_message_id = store.insert_message("sess-1", role="user", content="Hello")
+
+    store.create_request(
+        "sess-1",
+        "req-old",
+        user_message_id=user_message_id,
+        correlation_id="corr-old",
+        started_at="2026-01-01T00:00:00+00:00",
+    )
+    store.create_request(
+        "sess-1",
+        "req-new",
+        user_message_id=user_message_id,
+        correlation_id="corr-new",
+        started_at="2026-02-01T00:00:00+00:00",
+    )
+
+    listed = store.list_requests("sess-1")
+    assert [row["id"] for row in listed] == ["req-new", "req-old"]
+
+
+def test_update_request_run_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    digest_store = DigestStore(db_path)
+    store.create_session("sess-1")
+    user_message_id = store.insert_message("sess-1", role="user", content="Hello")
+    store.create_request(
+        "sess-1",
+        "req-1",
+        user_message_id=user_message_id,
+        correlation_id="corr-1",
+    )
+
+    collected = datetime(2026, 5, 7, 10, 0, 0, tzinfo=UTC)
+    run_id = digest_store.save_run(
+        requested_at=collected,
+        timeframe="today",
+        topics=["RAG"],
+        connector_names=["github"],
+    )
+
+    store.update_request_run_id("sess-1", "req-1", run_id)
+
+    row = store.get_request("sess-1", "req-1")
+    assert row is not None
+    assert row["run_id"] == run_id
+    assert row["status"] == "active"
+
+
+def test_mark_terminal_request_sets_status_links_and_safe_error_fields(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    store.create_session("sess-1")
+    user_message_id = store.insert_message("sess-1", role="user", content="Hello")
+    store.create_request(
+        "sess-1",
+        "req-1",
+        user_message_id=user_message_id,
+        correlation_id="corr-1",
+    )
+    assistant_message_id = store.insert_message("sess-1", role="assistant", content="Done")
+
+    store.mark_terminal(
+        "sess-1",
+        "req-1",
+        status="succeeded",
+        assistant_message_id=assistant_message_id,
+    )
+
+    succeeded = store.get_request("sess-1", "req-1")
+    assert succeeded is not None
+    assert succeeded["status"] == "succeeded"
+    assert succeeded["assistant_message_id"] == assistant_message_id
+    assert succeeded["completed_at"] is not None
+    assert succeeded["error_code"] is None
+    assert succeeded["error_message"] is None
+
+    store.create_request(
+        "sess-1",
+        "req-2",
+        user_message_id=user_message_id,
+        correlation_id="corr-2",
+    )
+    store.mark_terminal(
+        "sess-1",
+        "req-2",
+        status="failed",
+        error_code="provider_error",
+        error_message="Digest generation failed",
+    )
+
+    failed = store.get_request("sess-1", "req-2")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert failed["error_code"] == "provider_error"
+    assert failed["error_message"] == "Digest generation failed"
+    assert failed["completed_at"] is not None
+
+    with pytest.raises(ValueError, match="status"):
+        store.mark_terminal("sess-1", "req-2", status="active")
+
+
+def test_interrupt_active_requests_marks_leftover_interrupted(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    store.create_session("sess-1")
+    store.create_session("sess-2")
+    user_message_id_1 = store.insert_message("sess-1", role="user", content="Hello")
+    user_message_id_2 = store.insert_message("sess-2", role="user", content="Hi")
+
+    store.create_request(
+        "sess-1",
+        "req-active-1",
+        user_message_id=user_message_id_1,
+        correlation_id="corr-1",
+    )
+    store.create_request(
+        "sess-1",
+        "req-active-2",
+        user_message_id=user_message_id_1,
+        correlation_id="corr-2",
+    )
+    store.create_request(
+        "sess-2",
+        "req-terminal",
+        user_message_id=user_message_id_2,
+        correlation_id="corr-3",
+    )
+    store.mark_terminal("sess-2", "req-terminal", status="succeeded")
+
+    count = store.interrupt_active_requests()
+    assert count == 2
+
+    active_1 = store.get_request("sess-1", "req-active-1")
+    active_2 = store.get_request("sess-1", "req-active-2")
+    terminal = store.get_request("sess-2", "req-terminal")
+    assert active_1 is not None
+    assert active_2 is not None
+    assert terminal is not None
+    assert active_1["status"] == "interrupted"
+    assert active_2["status"] == "interrupted"
+    assert active_1["completed_at"] is not None
+    assert active_2["completed_at"] is not None
+    assert terminal["status"] == "succeeded"
