@@ -142,7 +142,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T3 — Session and message repository
 
-- [ ] **Do:** Persist sessions and ordered messages: deterministic 60-character initial titles, user rename, nullable connector defaults, rejection of an empty connector list, and `items_per_source`. Deleting an inactive session removes its messages and nulls `runs.session_id` without deleting digest rows.
+- [x] **Do:** Persist sessions and ordered messages: deterministic 60-character initial titles, user rename, nullable connector defaults, rejection of an empty connector list, and `items_per_source`. Deleting an inactive session removes its messages and nulls `runs.session_id` without deleting digest rows.
 
 - **Blocked by:** T2
 - **Plan mode:** high
