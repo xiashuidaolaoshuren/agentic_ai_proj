@@ -164,7 +164,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T5 — Shared-interface and session follow-up reads
 
-- [ ] **Do:** Make `get_latest_followup_context()` return the latest run with `session_id IS NULL`. Add `get_followup_context_for_session()` for the latest digest linked to that session’s `succeeded` request. An `interrupted` request’s digest stays in history and does not become session follow-up context.
+- [x] **Do:** Make `get_latest_followup_context()` return the latest run with `session_id IS NULL`. Add `get_followup_context_for_session()` for the latest digest linked to that session’s `succeeded` request. An `interrupted` request’s digest stays in history and does not become session follow-up context.
 
 - **Blocked by:** T4
 - **Plan mode:** high

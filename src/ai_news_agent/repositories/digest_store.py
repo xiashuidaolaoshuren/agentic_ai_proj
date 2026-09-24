@@ -483,7 +483,16 @@ class DigestStore:
 
     def _latest_digest_row(self) -> sqlite3.Row | None:
         with self._conn() as conn:
-            return conn.execute("SELECT * FROM digests ORDER BY id DESC LIMIT 1").fetchone()
+            return conn.execute(
+                """
+                SELECT d.*
+                FROM digests d
+                JOIN runs r ON r.id = d.run_id
+                WHERE r.session_id IS NULL
+                ORDER BY d.id DESC
+                LIMIT 1
+                """
+            ).fetchone()
 
     def _digest_from_row(self, row: sqlite3.Row) -> Digest:
         digest_id = int(row["id"])
@@ -546,7 +555,14 @@ class DigestStore:
 
     def _latest_run_id(self) -> int | None:
         with self._conn() as conn:
-            row = conn.execute("SELECT id FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+            row = conn.execute(
+                """
+                SELECT id FROM runs
+                WHERE session_id IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
             return int(row["id"]) if row else None
 
     def _load_news_items(self, run_id: int) -> list[NewsItem]:
@@ -687,6 +703,41 @@ class DigestStore:
             row = conn.execute("SELECT * FROM digests WHERE id = ?", (digest_id,)).fetchone()
         if row is None:
             return None
+        run_id = int(row["run_id"])
+        digest = self._digest_from_row(row)
+        return FollowupContext(
+            run_id=run_id,
+            digest=digest,
+            news_items=self._load_news_items(run_id),
+            ranked_items=self._load_ranked_items(run_id),
+            warnings=self._load_warnings(run_id),
+        )
+
+    def get_followup_context_for_session(self, session_id: str) -> FollowupContext:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT d.*
+                FROM session_requests sr
+                JOIN digests d ON d.run_id = sr.run_id
+                WHERE sr.session_id = ?
+                  AND sr.status = 'succeeded'
+                  AND sr.run_id IS NOT NULL
+                ORDER BY sr.started_at DESC, sr.id DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+
+        if row is None:
+            return FollowupContext(
+                run_id=None,
+                digest=None,
+                news_items=[],
+                ranked_items=[],
+                warnings=[],
+            )
+
         run_id = int(row["run_id"])
         digest = self._digest_from_row(row)
         return FollowupContext(
