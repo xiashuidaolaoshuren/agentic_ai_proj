@@ -186,7 +186,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T7 — Session service preferences and deletion
 
-- [ ] **Do:** Add session records and `SessionService` for create, list, get, rename, preference update, and inactive delete. Generate the initial title once. Apply saved sources only as defaults; an explicit message selector overrides one request and does not change the saved preference.
+- [x] **Do:** Add session records and `SessionService` for create, list, get, rename, preference update, and inactive delete. Generate the initial title once. Apply saved sources only as defaults; an explicit message selector overrides one request and does not change the saved preference.
 
 - **Blocked by:** T6
 - **Plan mode:** medium

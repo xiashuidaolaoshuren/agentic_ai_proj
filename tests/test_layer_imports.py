@@ -34,7 +34,16 @@ def _module_imports(path: Path) -> set[str]:
     return imports
 
 
-def _assert_package_rejects_forbidden_imports(package_name: str) -> None:
+_REPO_FORBIDDEN_PREFIXES = ("ai_news_agent.services", "ai_news_agent.api")
+# services may import other services modules (e.g. session_service -> session_records);
+# only the api layer is forbidden.
+_SERVICES_FORBIDDEN_PREFIXES = ("ai_news_agent.api",)
+
+
+def _assert_package_rejects_forbidden_imports(
+    package_name: str,
+    forbidden_prefixes: tuple[str, ...],
+) -> None:
     package_dir = _SRC_ROOT / package_name
     assert package_dir.is_dir(), f"{package_name} package missing under src/ai_news_agent"
 
@@ -44,7 +53,7 @@ def _assert_package_rejects_forbidden_imports(package_name: str) -> None:
         for imported in sorted(_module_imports(module_path)):
             if any(
                 imported == prefix or imported.startswith(f"{prefix}.")
-                for prefix in _FORBIDDEN_PREFIXES
+                for prefix in forbidden_prefixes
             ):
                 violations.append(f"{rel} imports {imported}")
 
@@ -52,14 +61,14 @@ def _assert_package_rejects_forbidden_imports(package_name: str) -> None:
 
 
 def test_repositories_do_not_import_services_or_api() -> None:
-    _assert_package_rejects_forbidden_imports("repositories")
+    _assert_package_rejects_forbidden_imports("repositories", _REPO_FORBIDDEN_PREFIXES)
 
 
 def test_services_do_not_import_api_when_present() -> None:
     services_dir = _SRC_ROOT / "services"
     if not services_dir.is_dir():
         return
-    _assert_package_rejects_forbidden_imports("services")
+    _assert_package_rejects_forbidden_imports("services", _SERVICES_FORBIDDEN_PREFIXES)
 
 
 def test_storage_reexports_digest_store_without_local_definitions() -> None:
