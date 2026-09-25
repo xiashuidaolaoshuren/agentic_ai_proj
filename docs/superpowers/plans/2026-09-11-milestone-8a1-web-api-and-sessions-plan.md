@@ -197,7 +197,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T8 — One active request, idempotency, and interrupt
 
-- [ ] **Do:** Accept one active request per session. Reject a different in-flight request and active-session deletion with `session_busy`. Reuse of a terminal or interrupted request ID returns the stored outcome and does not create another run. Application startup interrupts leftover active requests without rerunning them.
+- [x] **Do:** Accept one active request per session. Reject a different in-flight request and active-session deletion with `session_busy`. Reuse of a terminal or interrupted request ID returns the stored outcome and does not create another run. Application startup interrupts leftover active requests without rerunning them.
 
 - **Blocked by:** T7
 - **Plan mode:** high

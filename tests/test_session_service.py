@@ -345,3 +345,208 @@ def test_delete_active_session_raises_session_busy(tmp_path: Path) -> None:
         service.delete_session(created.id)
 
     assert service.get_session(created.id) is not None
+
+
+def test_request_lifecycle_surface_importable(tmp_path: Path) -> None:
+    from ai_news_agent.services.session_service import (
+        RequestInProgressError,
+        SessionService,
+    )
+
+    service = SessionService(SessionStore(tmp_path / "svc-lifecycle.db"))
+    assert issubclass(RequestInProgressError, Exception)
+    assert callable(service.begin_request)
+    assert callable(service.interrupt_active_requests)
+
+
+def test_begin_request_creates_user_message_and_active_request(tmp_path: Path) -> None:
+    import uuid
+
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-begin.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    created = service.create_session()
+
+    record = service.begin_request(created.id, content="Give me today's digest")
+
+    assert uuid.UUID(record.id)
+    assert record.session_id == created.id
+    assert record.status == "active"
+    assert record.user_message_id == 1
+    assert record.assistant_message_id is None
+    assert record.run_id is None
+    assert record.correlation_id
+    assert record.error_code is None
+    assert record.error_message is None
+    assert record.completed_at is None
+
+    messages = store.list_messages(created.id)
+    assert len(messages) == 1
+    assert messages[0]["content"] == "Give me today's digest"
+    assert messages[0]["id"] == record.user_message_id
+
+    session = service.get_session(created.id)
+    assert session is not None
+    assert session.title == "Give me today's digest"
+
+
+def test_begin_request_uses_provided_request_id(tmp_path: Path) -> None:
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-begin-id.db"
+    _init_db(db_path)
+    service = SessionService(SessionStore(db_path))
+    created = service.create_session()
+
+    record = service.begin_request(
+        created.id,
+        content="Hello",
+        request_id="client-req-1",
+    )
+
+    assert record.id == "client-req-1"
+    assert record.status == "active"
+
+
+def test_idempotent_replay_returns_terminal_request_without_new_message(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-idempotent-terminal.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    created = service.create_session()
+    store.create_request(
+        created.id,
+        "req-1",
+        user_message_id=store.insert_message(created.id, role="user", content="First"),
+        correlation_id="corr-1",
+    )
+    store.mark_terminal(created.id, "req-1", status="succeeded")
+
+    replay = service.begin_request(created.id, content="Retry", request_id="req-1")
+
+    assert replay.id == "req-1"
+    assert replay.status == "succeeded"
+    assert replay.user_message_id == 1
+    assert replay.assistant_message_id is None
+    assert len(store.list_messages(created.id)) == 1
+
+
+def test_idempotent_replay_returns_interrupted_request_without_new_message(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-idempotent-interrupted.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    created = service.create_session()
+    store.create_request(
+        created.id,
+        "req-1",
+        user_message_id=store.insert_message(created.id, role="user", content="First"),
+        correlation_id="corr-1",
+    )
+    store.mark_terminal(created.id, "req-1", status="interrupted")
+
+    replay = service.begin_request(created.id, content="Retry", request_id="req-1")
+
+    assert replay.id == "req-1"
+    assert replay.status == "interrupted"
+    assert replay.user_message_id == 1
+    assert len(store.list_messages(created.id)) == 1
+
+
+def test_idempotent_duplicate_active_request_raises_request_in_progress(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    from ai_news_agent.services.session_service import (
+        RequestInProgressError,
+        SessionService,
+    )
+
+    db_path = tmp_path / "svc-duplicate-active.db"
+    _init_db(db_path)
+    service = SessionService(SessionStore(db_path))
+    created = service.create_session()
+    service.begin_request(created.id, content="First", request_id="req-1")
+
+    with pytest.raises(RequestInProgressError):
+        service.begin_request(created.id, content="Retry", request_id="req-1")
+
+    assert len(SessionStore(db_path).list_messages(created.id)) == 1
+
+
+def test_begin_request_raises_session_busy_for_different_active_id(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    from ai_news_agent.services.session_service import (
+        SessionBusyError,
+        SessionService,
+    )
+
+    db_path = tmp_path / "svc-session-busy.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    created = service.create_session()
+    service.begin_request(created.id, content="First", request_id="req-1")
+
+    with pytest.raises(SessionBusyError):
+        service.begin_request(created.id, content="Second", request_id="req-2")
+
+    assert len(store.list_messages(created.id)) == 1
+
+
+def test_interrupt_active_requests_marks_leftover_active_as_interrupted(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-interrupt.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    first = service.create_session()
+    second = service.create_session()
+    service.begin_request(first.id, content="First", request_id="req-1")
+    service.begin_request(second.id, content="Second", request_id="req-2")
+    store.mark_terminal(first.id, "req-1", status="succeeded")
+
+    interrupted_count = service.interrupt_active_requests()
+
+    assert interrupted_count == 1
+    row = store.get_request(second.id, "req-2")
+    assert row is not None
+    assert row["status"] == "interrupted"
+    assert row["completed_at"] is not None
+
+
+def test_interrupt_replay_returns_interrupted_outcome_without_rerun(
+    tmp_path: Path,
+) -> None:
+    from ai_news_agent.services.session_service import SessionService
+
+    db_path = tmp_path / "svc-interrupt-replay.db"
+    _init_db(db_path)
+    store = SessionStore(db_path)
+    service = SessionService(store)
+    created = service.create_session()
+    service.begin_request(created.id, content="First", request_id="req-1")
+
+    service.interrupt_active_requests()
+
+    replay = service.begin_request(created.id, content="Retry", request_id="req-1")
+    assert replay.status == "interrupted"
+    assert len(store.list_messages(created.id)) == 1
