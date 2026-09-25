@@ -175,7 +175,7 @@ Dependency notation: `Blocked by: T1` means start after T1 is done.
 
 ### T6 — Unit of Work and atomic digest bundle
 
-- [ ] **Do:** Add `SqliteUnitOfWork` and `save_digest_bundle`. One transaction writes the run, items, warnings, rankings, digest, entries, optional `session_id`, and request `run_id`. Point the workflow persist node at that operation. A failure leaves no partial run.
+- [x] **Do:** Add `SqliteUnitOfWork` and `save_digest_bundle`. One transaction writes the run, items, warnings, rankings, digest, entries, optional `session_id`, and request `run_id`. Point the workflow persist node at that operation. A failure leaves no partial run.
 
 - **Blocked by:** T5
 - **Plan mode:** high

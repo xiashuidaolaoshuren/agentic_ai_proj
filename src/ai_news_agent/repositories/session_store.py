@@ -18,11 +18,16 @@ _TERMINAL_REQUEST_STATUSES = frozenset(
 class SessionStore:
     """Session, message, and session-request SQL only."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, conn: sqlite3.Connection | None = None) -> None:
         self.db_path = Path(db_path)
+        self._bound_conn = conn
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
+        if self._bound_conn is not None:
+            yield self._bound_conn
+            return
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -213,6 +218,18 @@ class SessionStore:
                 WHERE session_id = ? AND id = ?
                 """,
                 (run_id, session_id, request_id),
+            )
+
+    def link_active_request_run(self, session_id: str, run_id: int) -> None:
+        """Associate a persisted run with the session's active request."""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE session_requests
+                SET run_id = ?
+                WHERE session_id = ? AND status = 'active'
+                """,
+                (run_id, session_id),
             )
 
     def mark_terminal(

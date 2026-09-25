@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
-from ai_news_agent.connectors.base import ConnectorResult
 from ai_news_agent.graph.state import DigestGraphState, WorkflowError
 from ai_news_agent.models import ConnectorWarning, Digest, NewsItem
 from ai_news_agent.rendering import (
@@ -54,22 +53,17 @@ def make_persist_results_node(store: DigestStore):
         ranked = list(state.get("ranked_items") or [])
 
         try:
-            run_id = store.save_run(
+            run_id = store.save_digest_bundle(
                 requested_at=state.get("started_at"),
                 timeframe=req.timeframe,
                 topics=list(req.topics),
                 connector_names=_connector_names_for_run(req, items=items, warnings=warnings),
+                items=items,
+                warnings=warnings,
+                ranked=ranked,
+                digest=digest,
+                session_id=state.get("session_id"),
             )
-            store.save_connector_result(
-                run_id,
-                ConnectorResult(
-                    items=items,
-                    warnings=warnings,
-                    raw_count=len(items),
-                ),
-            )
-            store.save_ranked_items(run_id, ranked)
-            store.save_digest(run_id, digest)
         except Exception as exc:  # noqa: BLE001 - surface as workflow error
             return {
                 "errors": [

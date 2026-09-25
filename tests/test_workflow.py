@@ -793,7 +793,7 @@ def test_summarize_items_node_catches_summarizer_failure() -> None:
 class _BrokenDigestStore(DigestStore):
     """Used to verify persist node catches unexpected storage failures."""
 
-    def save_run(self, **kwargs):  # type: ignore[no-untyped-def]
+    def save_digest_bundle(self, **kwargs):  # type: ignore[no-untyped-def]
         raise RuntimeError("boom")
 
 
@@ -889,6 +889,125 @@ def test_persist_results_node_missing_digest_emits_error(tmp_path: Path) -> None
     assert len(out["errors"]) == 1
     assert out["errors"][0].stage == "store"
     assert "missing Digest" in out["errors"][0].message
+
+
+def test_persist_results_node_passes_session_id_to_bundle(tmp_path: Path) -> None:
+    import sqlite3
+
+    from ai_news_agent.repositories.session_store import SessionStore
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"], connector_names=["github"])
+    item = _news_item("r1")
+    digest = Digest(
+        generated_at=now,
+        entries=[
+            DigestEntry(
+                source_kind=SourceKind.GITHUB,
+                source_id="r1",
+                title="item-r1",
+                source_name="GitHub",
+                source_url=item.url,
+                summary="S",
+                why_it_matters="W",
+                background_knowledge="B",
+                follow_up_action=FollowUpAction.READ,
+            )
+        ],
+        topics=["RAG"],
+        timeframe=None,
+    )
+    ranked = [
+        RankedItem(
+            item=item,
+            score_total=1.0,
+            score_breakdown={"k": 1.0},
+            selected=True,
+            selection_reason="top",
+        )
+    ]
+
+    db = tmp_path / "persist-session.db"
+    store = DigestStore(db)
+    store.init_schema()
+    session_store = SessionStore(db)
+    session_store.create_session("sess-1")
+    user_message_id = session_store.insert_message("sess-1", role="user", content="Hi")
+    session_store.create_request(
+        "sess-1",
+        "req-1",
+        user_message_id=user_message_id,
+        correlation_id="corr-1",
+    )
+
+    node = make_persist_results_node(store)
+    state: DigestGraphState = {
+        "request": req,
+        "started_at": now,
+        "collected_items": [item],
+        "warnings": [],
+        "ranked_items": ranked,
+        "digest": digest,
+        "session_id": "sess-1",
+    }
+    out = node(state)
+    assert out["run_id"] == 1
+
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        run_row = conn.execute("SELECT session_id FROM runs WHERE id = 1").fetchone()
+        request_row = conn.execute(
+            "SELECT run_id FROM session_requests WHERE session_id = ? AND id = ?",
+            ("sess-1", "req-1"),
+        ).fetchone()
+
+    assert run_row is not None
+    assert run_row["session_id"] == "sess-1"
+    assert request_row is not None
+    assert request_row["run_id"] == 1
+
+
+def test_persist_results_node_leaves_no_partial_run_on_bundle_failure(tmp_path: Path) -> None:
+    import sqlite3
+
+    now = datetime(2026, 5, 16, 12, 0, tzinfo=UTC)
+    req = DigestRequest(topics=["RAG"])
+    item = _news_item("r1")
+    ghost = _news_item("ghost")
+    digest = Digest(generated_at=now, entries=[], topics=["RAG"], timeframe=None)
+    ranked = [
+        RankedItem(
+            item=ghost,
+            score_total=1.0,
+            score_breakdown={"k": 1.0},
+            selected=True,
+            selection_reason="ghost",
+        )
+    ]
+
+    store = DigestStore(tmp_path / "persist-atomic.db")
+    store.init_schema()
+    node = make_persist_results_node(store)
+    out = node(
+        {
+            "request": req,
+            "started_at": now,
+            "collected_items": [item],
+            "warnings": [],
+            "ranked_items": ranked,
+            "digest": digest,
+        }
+    )
+
+    assert "run_id" not in out
+    assert len(out["errors"]) == 1
+    assert out["errors"][0].stage == "store"
+
+    with sqlite3.connect(store.db_path) as conn:
+        run_count = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        item_count = conn.execute("SELECT COUNT(*) FROM news_items").fetchone()[0]
+    assert run_count == 0
+    assert item_count == 0
 
 
 def test_persist_results_node_catches_storage_errors(tmp_path) -> None:

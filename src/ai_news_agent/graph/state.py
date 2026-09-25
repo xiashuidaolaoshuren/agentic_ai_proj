@@ -65,6 +65,7 @@ class DigestGraphState(TypedDict, total=False):
     ranked_items: list[RankedItem]
     digest: Digest | None
     run_id: int | None
+    session_id: str | None
     markdown: str | None
     text: str | None
 

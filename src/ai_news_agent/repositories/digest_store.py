@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from ai_news_agent.connectors.base import ConnectorResult
+from ai_news_agent.repositories.session_store import SessionStore
 from ai_news_agent.history import HISTORY_CANDIDATE_CAP
 from ai_news_agent.models import (
     ConnectorWarning,
@@ -41,8 +42,9 @@ class FollowupContext:
 class DigestStore:
     """Hybrid SQLite store: normalized columns plus JSON snapshots."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, conn: sqlite3.Connection | None = None) -> None:
         self.db_path = Path(db_path)
+        self._bound_conn = conn
 
     def _v1_backup_path(self) -> Path:
         return self.db_path.with_name(f"{self.db_path.name}.v1.bak")
@@ -137,6 +139,10 @@ class DigestStore:
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
+        if self._bound_conn is not None:
+            yield self._bound_conn
+            return
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -320,6 +326,7 @@ class DigestStore:
         timeframe: str | None,
         topics: list[str],
         connector_names: list[str],
+        session_id: str | None = None,
     ) -> int:
         ts = requested_at if requested_at is not None else utcnow()
         payload = (
@@ -327,12 +334,15 @@ class DigestStore:
             timeframe,
             json.dumps(topics),
             json.dumps(connector_names),
+            session_id,
         )
         with self._conn() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO runs (requested_at, timeframe, request_topics_json, connector_names_json)
-                VALUES (?,?,?,?)
+                INSERT INTO runs (
+                  requested_at, timeframe, request_topics_json, connector_names_json, session_id
+                )
+                VALUES (?,?,?,?,?)
                 """,
                 payload,
             )
@@ -474,6 +484,46 @@ class DigestStore:
                     ),
                 )
             return digest_id
+
+    def save_digest_bundle(
+        self,
+        *,
+        requested_at: datetime | None,
+        timeframe: str | None,
+        topics: list[str],
+        connector_names: list[str],
+        items: list[NewsItem],
+        warnings: list[ConnectorWarning],
+        ranked: list[RankedItem],
+        digest: Digest,
+        session_id: str | None = None,
+    ) -> int:
+        """Persist a complete digest bundle in one SQLite transaction."""
+        with self._conn() as conn:
+            bound = DigestStore(self.db_path, conn=conn)
+            run_id = bound.save_run(
+                requested_at=requested_at,
+                timeframe=timeframe,
+                topics=topics,
+                connector_names=connector_names,
+                session_id=session_id,
+            )
+            bound.save_connector_result(
+                run_id,
+                ConnectorResult(
+                    items=items,
+                    warnings=warnings,
+                    raw_count=len(items),
+                ),
+            )
+            bound.save_ranked_items(run_id, ranked)
+            bound.save_digest(run_id, digest)
+            if session_id is not None:
+                SessionStore(self.db_path, conn=conn).link_active_request_run(
+                    session_id,
+                    run_id,
+                )
+            return run_id
 
     def get_latest_digest(self) -> Digest | None:
         row = self._latest_digest_row()
